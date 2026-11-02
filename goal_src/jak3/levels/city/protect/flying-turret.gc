@@ -5,6 +5,12 @@
 ;; name in dgo: flying-turret
 ;; dgos: CTYPESC
 
+;; MOD battlefront -- jetpack guards on this code (pc/features/battlefront/battlefront-h.gc, GAME)
+(define-extern bf-turret-skel-name (function string))
+(define-extern bf-unit-scale (function process float float))
+(define-extern bf-attacker-type (function process int int))
+(define-extern bf-hover-animate (function process-drawable float none))
+
 ;; DECOMP BEGINS
 
 (defskelgroup skel-flying-turret kg-flying-turret kg-flying-turret-lod0-jg kg-flying-turret-idle-ja
@@ -526,6 +532,8 @@
         (flying-turret-method-226 this)
         )
     (flying-turret-method-227 this)
+    ;; MOD battlefront -- a jetpack guard loops its idle or flying clip
+    (bf-hover-animate this (vector-length (-> this root transv)))
     (let* ((f0-0 (vector-length (-> this root transv)))
            (f0-1 (/ f0-0 (meters 15)))
            )
@@ -672,7 +680,8 @@
   "Typical place for shared init code. Runs from entity or process style init."
   (initialize-skeleton
     this
-    (the-as skeleton-group (art-group-get-by-name *level* "skel-flying-turret" (the-as (pointer level) #f)))
+    ;; MOD battlefront -- "skel-flying-turret", or a jetpack guard during a battle
+    (the-as skeleton-group (art-group-get-by-name *level* (bf-turret-skel-name) (the-as (pointer level) #f)))
     (the-as pair 0)
     )
   (setup-enemy! this *flying-turret-nav-enemy-info*)
@@ -685,7 +694,10 @@
   (set! (-> this dist-run-anim) 16384.0)
   (set! (-> this anim-run) 2)
   (set! (-> this speed-run) 102400.0)
-  (set-vector! (-> this root scale) 2.0 2.0 2.0 1.0)
+  ;; MOD battlefront -- the turret is drawn twice its size, a jetpack guard at its own (1.0)
+  (let ((scale (bf-unit-scale this 2.0)))
+    (set-vector! (-> this root scale) scale scale scale 1.0)
+    )
   (set! (-> this draw lod-set lod 0 dist) 409600.0)
   (set! (-> this engine-sound) (new-sound-id))
   (set! (-> this tilt-sound) (new-sound-id))
@@ -1265,7 +1277,8 @@
     (set! (-> this mission-squad) *cty-attack-controller*)
     (when (not (-> this attacker-info))
       (set! (-> this attacker-info) (allocate-attacker (-> this mission-squad)))
-      (init! (-> this attacker-info) this 10)
+      ;; MOD battlefront -- turret (10), or a rifle guard (4) for a blue jetpack guard
+      (init! (-> this attacker-info) this (bf-attacker-type this 10))
       )
     )
   (none)

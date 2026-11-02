@@ -5,6 +5,14 @@
 ;; name in dgo: traffic-engine
 ;; dgos: DESRESC, WWD, CWI
 
+;; MOD battlefront -- counts each unit death of a battle (pc/features/battlefront/battlefront-h.gc, GAME)
+(define-extern bf-unit-killed (function process none))
+;; MOD battlefront -- how many units of a type a battle wakes (same file)
+(define-extern bf-want-count (function int int int))
+;; MOD battlefront -- a unit of a battle stays awake anywhere on its battlefield
+;; (levels/city/battlefront/battlefront-city.gc, CWI)
+(define-extern bf-keep-unit? (function process symbol))
+
 (deftype traffic-engine-stack-var0 (structure)
   ((params traffic-object-spawn-params :inline :offset 0)
    (vec0   vector                      :inline :offset 128)
@@ -225,6 +233,9 @@
           (+! (-> v1-5 killed-count) 1)
           (+! (-> v1-5 reserve-count) -1)
           )
+        ;; MOD battlefront -- a tracked unit really died: take it from its side's reserve (no-op
+        ;; outside a battle)
+        (bf-unit-killed arg0)
         )
       #t
       )
@@ -727,11 +738,15 @@
           (when (and (> (-> v1-15 inactive-count) 0) (> (-> v1-15 reserve-count) 0))
             (let ((s1-0 (-> this object-type-info-array s2-0)))
               (when (-> s1-0 level)
+                ;; MOD battlefront -- the squads' count for the territory, or the army cap of a battle
                 (let ((s0-0
-                        (-> s1-0
-                            target-counts
-                            (cty-faction-manager-method-10 *cty-faction-manager* (the-as int (-> arg0 branch clock-type)) (-> s1-0 level))
-                            )
+                        (bf-want-count
+                          s2-0
+                          (-> s1-0
+                              target-counts
+                              (cty-faction-manager-method-10 *cty-faction-manager* (the-as int (-> arg0 branch clock-type)) (-> s1-0 level))
+                              )
+                          )
                         )
                       )
                   (when (< (-> s1-0 active-count) s0-0)
@@ -1243,7 +1258,8 @@
                   )
                 (when (logtest? (-> (the-as citizen s3-1) flags) (citizen-flag in-formation))
                   )
-                (if (sphere-in-loaded-city-infos? this s5-0 1)
+                ;; MOD battlefront -- or anywhere on the battlefield during a fight (no-op outside one)
+                (if (or (sphere-in-loaded-city-infos? this s5-0 1) (bf-keep-unit? s3-1))
                     (fill-actor-list-for-vec+r (-> this object-hash) s5-0 (the-as (pointer collide-shape) s3-1))
                     (deactivate-object (-> this tracker1) (the-as int s4-1) #f)
                     )

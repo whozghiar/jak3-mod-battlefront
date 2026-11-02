@@ -5,6 +5,9 @@
 ;; name in dgo: hud-classes
 ;; dgos: GAME
 
+;; MOD battlefront -- the class gauges in the eco gauges (pc/features/battlefront/battlefront.gc)
+(define-extern bf-hud-health-gauges (function hud none))
+
 ;; DECOMP BEGINS
 
 (defmethod draw ((this hud-map))
@@ -240,6 +243,8 @@
         )
       )
     )
+  ;; MOD battlefront -- during a battle, a class gauge in the light or dark eco gauge (no-op otherwise)
+  (bf-hud-health-gauges this)
   ((method-of-type hud draw) this)
   0
   (none)
