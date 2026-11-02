@@ -6,7 +6,8 @@
 
 class Shadow2 : public BucketRenderer {
  public:
-  static constexpr int kMaxVerts = 8192 * 3 * 2;
+  // MOD battlefront -- doubled (8192 * 3 * 2): a battle draws dozens of shadow casters at once
+  static constexpr int kMaxVerts = 8192 * 3 * 4;
   static constexpr int kMaxInds = kMaxVerts;
   Shadow2(const std::string& name, int my_id);
   ~Shadow2();

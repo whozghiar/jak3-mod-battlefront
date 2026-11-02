@@ -157,7 +157,9 @@ void Shadow2::render(DmaFollower& dma, SharedRenderState* render_state, ScopedPr
       u32 offset = 4 * vif1.num;
       if (transfer.size_bytes > 16 + 255 * 4) {
         printf("shadow overflow detected, skipping all shadows for this frame!");
-        while (dma.current_tag_offset() == render_state->next_bucket) {
+        // MOD battlefront -- skip to the next bucket (the stock loop tested ==, so it skipped
+        // nothing and the bucket dispatch asserted on the shadow data left in the chain)
+        while (dma.current_tag_offset() != render_state->next_bucket) {
           dma.read_and_advance();
         }
         return;
@@ -183,6 +185,16 @@ void Shadow2::render(DmaFollower& dma, SharedRenderState* render_state, ScopedPr
           break;
         default:
           ASSERT_NOT_REACHED_MSG(fmt::format("Unknown address for transfer: {}\n", addr));
+      }
+
+      // MOD battlefront -- a crowd of shadow casters (a battle) filled the fixed buffers and
+      // stopped the game on the alloc_verts assertion. One upload makes at most 255 triangles of
+      // 4 vertices / 5 indices each, top and bottom: past that headroom, drop the shadow.
+      constexpr size_t kUploadHeadroom = 2 * 255 * 5;
+      if (m_vertex_buffer_used + kUploadHeadroom > m_vertex_buffer.size() ||
+          m_front_index_buffer_used + kUploadHeadroom > m_front_index_buffer.size() ||
+          m_back_index_buffer_used + kUploadHeadroom > m_back_index_buffer.size()) {
+        continue;
       }
 
       switch (mscal.immediate) {
