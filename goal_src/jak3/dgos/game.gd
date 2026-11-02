@@ -490,4 +490,9 @@
   "debris.o"
   "shield-sphere.o"
   "entity-debug.o" ;; added
+  ;; MOD battlefront -- after the engine code they use (enemy, guard-projectile) and mods-menu.o
+  "battlefront-h.o"
+  "battlefront-player.o"
+  "battlefront-minimaps.o"
+  "battlefront.o"
  ))

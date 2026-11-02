@@ -1,0 +1,2000 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: battlefront.gc
+;; name in dgo: battlefront
+;; dgos: GAME
+
+#|
+  Battlefront mod -- the director of a battle, its menus, its HUD and its Mods menu entry.
+
+  Flow:
+    Mods menu (L1 + SELECT) > battlefront > Battlefront mode: the mode's switch. On, it adds
+    START > Options > Gamemode > Battlefront, where the battle is chosen and run:
+      New battle -> page 1: war zone  -> page 2: side  -> deployment  -> page 3: class (turning preview)
+      Change class (the fight goes on), Restart the battle, Quit the battle.
+    Switched off during a battle, it loads the last save.
+    Deployment: the director (a process of *pc-pool*, which outlives level changes and deaths)
+    owns the settings of the battle (borrowed unit levels, faction strengths) and sends Jak to his
+    side's spawn the way a death does (`initialize!` 'life), which spawns every unit pool of
+    Haven City again, now with the battle's skins (battlefront-h.gc). It holds Jak at the spawn
+    until he stands on the ground, then opens the class page: the class models, and the page's
+    preview of them, live in the unit levels the deployment loads.
+    Fight: each side has BF_RESERVE units in stock; every death of a unit or of the player takes
+    one (battlefront-h.gc `bf-count-loss`). The first side down to 0 loses. A dead player watches
+    the battle for four seconds, the camera on a unit of his side, then comes back at his side's
+    spawn with his class and fresh ammo (`bf-target-death`). A force field holds the player inside
+    the battlefield, and the jetpacks under its ceiling.
+    End: result page, then everything the battle changed is undone (settings die with their
+    owner's entries removed, hatred written back, Jak's ammo and light eco given back, the player
+    respawned at his spawn so every unit is spawned again with its stock skin).
+
+  HUD of the fight: both reserves, the crosshair, the class's weapon and ammo, the jetpack's fuel
+  or the spider's blue eco, and Jak's health HUD kept shown, with the class model in its center
+  in place of the light and dark eco gauges.
+
+  Everything here is idle while the Mods menu flag is off: the director is not even spawned.
+|#
+
+;; DECOMP BEGINS
+
+(define-extern mods-menu-close! (function none))
+
+;; Pages of the battle menu.
+(defconstant BF_PAGE_NONE 0)
+(defconstant BF_PAGE_ZONE 1)
+(defconstant BF_PAGE_TEAM 2)
+(defconstant BF_PAGE_CLASS 3)
+(defconstant BF_PAGE_RESULT 4)
+
+;; Requests of the START menu's battle page to the director (it runs them in its own process, so
+;; the settings it creates and removes are its own).
+(defconstant BF_REQ_NONE 0)
+(defconstant BF_REQ_LOBBY 1)
+(defconstant BF_REQ_CLASS 2)
+(defconstant BF_REQ_END 3)
+(defconstant BF_REQ_RESTART 4)
+
+(defconstant BF_DEPLOY_TIMEOUT (seconds 60))  ;; give up when the zone is not loaded by then
+(defconstant BF_FALL_DEPTH (meters 20))       ;; that far below his last safe place, Jak fell out of
+                                              ;; the zone (the game's fall death comes some 25 m down;
+                                              ;; the city's walkways stand well under 20 m)
+
+(deftype bf-director (process)
+  "Runs the battle. One instance, `(-> *bf* director)`."
+  ((page          int32)
+   (cursor        int32)
+   (pick-zone     int32)
+   (pick-team     int32)
+   (menu-mode?    symbol)     ;; the director holds the 'menu master mode
+   (want-avatar?  symbol)     ;; the class model must be (re)drawn as soon as it is loaded
+   (want-class-page? symbol)  ;; open the class page once the player stands at his spawn
+   (refill?       symbol)     ;; the open class page deploys the player: fresh ammo
+   (prepared?     symbol)     ;; the city side of the battle is set up (BF_CITY_PREPARE)
+   (end-pending?  symbol)     ;; end asked while Jak drives: done once he is on foot
+   (leaving?      symbol)     ;; the mode was switched off in a battle: the last save is loading
+   (preview       handle)     ;; turning class model of the class page
+   (hud-time      time-frame) ;; last time the health HUD was asked to show
+   (field-time    time-frame) ;; last force-field spark
+   (field-sound   time-frame) ;; last force-field sound
+   )
+  (:state-methods
+    idle
+    )
+  )
+
+(define *bf-request* BF_REQ_NONE)
+(define *bf-text* (new 'global 'string 256 (the-as string #f)))
+
+;; Haven City alias levels as a battle needs them: Freedom League guards (ctypesa) and Krimzon
+;; Guard robots (ctypesc) in every faction mix the sections ask for.
+(define *bf-borrow*
+  '((ctywide-ff alias ctywide copy ctypesa special ctypesc special dummy auto)
+    (ctywide-kg alias ctywide copy ctypesa special ctypesc special dummy auto)
+    (ctywide-ff-kg alias ctywide copy ctypesa special ctypesc special dummy auto)
+    )
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Drawing
+;; ---------------------------------------------------------------------------------------------
+
+(defun bf-draw-text ((buf dma-buffer) (str string) (x float) (y float) (scale float) (color font-color) (center? symbol))
+  "Draw STR into BUF at (X, Y) in screen font units (512 wide). CENTER? centers it on X, or on the
+   screen when X is 0 (the middle flag centers the text on origin x). A page draws its panel and all
+   its text into one buffer, panel first, or the panel ends up over the text."
+  (let ((font (new 'stack 'font-context *font-default-matrix* 0 0 0.0 color (font-flags shadow kerning large))))
+    (set! (-> font scale) scale)
+    (set! (-> font origin x) (if (and center? (= x 0.0)) 256.0 x))
+    (set! (-> font origin y) y)
+    (if center?
+        (logior! (-> font flags) (font-flags middle))
+        )
+    (pc-encode-utf8-string str *pc-encoded-temp-string*)
+    (draw-string-adv *pc-encoded-temp-string* buf font)
+    )
+  (none)
+  )
+
+;; One line of a wrapped text.
+(define *bf-line* (new 'global 'string 128 (the-as string #f)))
+
+(defun bf-draw-text-wrapped ((buf dma-buffer) (str string) (x float) (y float) (scale float) (color font-color) (max-chars int))
+  "Draw STR from Y down, broken at spaces into lines of at most MAX-CHARS bytes (16 units apart),
+   centered on the screen when X is 0, else from X. draw-string-adv does not wrap, and a
+   description is wider than the menu panel."
+  (let ((len (length str))
+        (start 0)
+        (line-y y)
+        )
+    (while (< start len)
+      (let ((end (min len (+ start max-chars))))
+        ;; cut inside a word: back up to the last space of the line
+        (when (< end len)
+          (let ((cut end))
+            (while (and (> cut start) (!= (-> str data cut) 32))
+              (+! cut -1)
+              )
+            (if (> cut start)
+                (set! end cut)
+                )
+            )
+          )
+        (dotimes (i (- end start))
+          (set! (-> *bf-line* data i) (-> str data (+ start i)))
+          )
+        (set! (-> *bf-line* data (- end start)) (the-as uint 0))
+        (bf-draw-text buf *bf-line* x line-y scale color (= x 0.0))
+        (set! start end)
+        (while (and (< start len) (= (-> str data start) 32))
+          (+! start 1)
+          )
+        (+! line-y 16.0)
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-draw-box ((buf dma-buffer) (x int) (y int) (w int) (h int))
+  "A dark panel with a light border into BUF, like the popup menus."
+  (draw-sprite2d-xy buf x y w h (static-rgba 255 255 255 75) #x3fffff)
+  (draw-sprite2d-xy buf (+ x 1) (+ y 1) (+ w -2) (+ h -2) (static-rgba 0 0 0 200) #x3fffff)
+  (none)
+  )
+
+(defun bf-draw-frame ((buf dma-buffer) (x int) (y int) (w int) (h int))
+  "The light border of a panel without its fill: the class preview, drawn with the world, shows
+   through it."
+  (draw-sprite2d-xy buf x y w 1 (static-rgba 255 255 255 75) #x3fffff)
+  (draw-sprite2d-xy buf x (+ y h -1) w 1 (static-rgba 255 255 255 75) #x3fffff)
+  (draw-sprite2d-xy buf x y 1 h (static-rgba 255 255 255 75) #x3fffff)
+  (draw-sprite2d-xy buf (+ x w -1) y 1 h (static-rgba 255 255 255 75) #x3fffff)
+  (none)
+  )
+
+(defun bf-page-count ((page int))
+  "Number of choices of PAGE."
+  (cond
+    ((= page BF_PAGE_ZONE) BF_ZONE_COUNT)
+    ((= page BF_PAGE_TEAM) BF_TEAM_COUNT)
+    ;; the Freedom League's fourth class, Jak, is no longer playable
+    ((= page BF_PAGE_CLASS) (if (= (-> *bf* team) BF_TEAM_FF) 3 4))
+    (else 1)
+    )
+  )
+
+(defun bf-page-label ((page int) (team int) (i int))
+  "Label of choice I of PAGE (TEAM picks the classes)."
+  (cond
+    ((= page BF_PAGE_ZONE) (bf-zone-name i))
+    ((= page BF_PAGE_TEAM) (bf-team-name i))
+    ((= page BF_PAGE_CLASS) (bf-class-name (+ (* team 4) i)))
+    (else "")
+    )
+  )
+
+(defun bf-page-desc ((page int) (team int) (i int))
+  "Description of choice I of PAGE."
+  (cond
+    ((= page BF_PAGE_ZONE) (bf-tr (-> *bf-zones* i desc) (-> *bf-zones* i desc-fr)))
+    ((= page BF_PAGE_TEAM) (if (= i BF_TEAM_FF)
+                               (bf-tr "Blue guards, jetpack guards and Spargus citizens."
+                                      "Gardes bleus, gardes à jetpack et citoyens de Spargus."
+                                      )
+                               (bf-tr "Red Krimzon Guards, jetpack guards, robotguards and spider robots."
+                                      "Gardes rouges, gardes à jetpack, robotgardes et araignées robots."
+                                      )
+                               )
+     )
+    ((= page BF_PAGE_CLASS) (let ((class (+ (* team 4) i)))
+                              (bf-tr (-> *bf-classes* class desc) (-> *bf-classes* class desc-fr))
+                              )
+     )
+    (else "")
+    )
+  )
+
+;; The zone pages' map: the war zone's own minimap, the texture the game's minimap shows on its
+;; battlefield (battlefront-minimaps.gc), framed on the battlefield in the right frame.
+(defconstant BF_ZMAP_X 373.0)       ;; center of the map, on the 512 x 416 screen
+(defconstant BF_ZMAP_Y 206.0)
+(defconstant BF_ZMAP_HALF 120.0)    ;; at most half its height
+(defconstant BF_ZMAP_HALF_W 96.0)   ;; at most half its width, to stay in the frame
+
+(deftype bf-zone-view (structure)
+  "Where `bf-zone-view!` puts a zone's map this frame: its box on the screen, and screen units per
+   texel across and down."
+  ((x0   float)
+   (y0   float)
+   (x1   float)
+   (y1   float)
+   (kx   float)
+   (ky   float)
+   )
+  )
+
+(define *bf-zone-view* (new 'static 'bf-zone-view))
+
+(defun bf-zone-view! ((zone int))
+  "Fit ZONE's whole map (battlefront-minimaps.gc: the minimap of its district) in the right frame,
+   centered, its shape kept, into `*bf-zone-view*`. A texel is square in the world: on the 512 x 416
+   screen stretched to the display, it is `0.923 relative-x-scale` times wider than tall in units."
+  (let* ((view *bf-zone-view*)
+         (w (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 2))))
+         (h (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 1))))
+         (aspect (* 0.923 (-> *video-params* relative-x-scale)))
+         (ky (fmin (/ (* 2.0 BF_ZMAP_HALF) h) (/ (* 2.0 BF_ZMAP_HALF_W) (* w aspect))))
+         (kx (* ky aspect))
+         )
+    (set! (-> view kx) kx)
+    (set! (-> view ky) ky)
+    (set! (-> view x0) (- BF_ZMAP_X (* 0.5 kx w)))
+    (set! (-> view x1) (+ BF_ZMAP_X (* 0.5 kx w)))
+    (set! (-> view y0) (- BF_ZMAP_Y (* 0.5 ky h)))
+    (set! (-> view y1) (+ BF_ZMAP_Y (* 0.5 ky h)))
+    )
+  #t
+  )
+
+(defun bf-map-sprite ((buf dma-buffer) (zone int))
+  "The uploaded map of ZONE into BUF over the view's box (`*bf-zone-view*`), white so the texture
+   shows its own colors: its texels from 0 to the width the map fills, and its height. bigmap.gc
+   sprite-dma with the texels and the box as arguments (screen x from 1792, GS y from 1840)."
+  (let ((p (the-as (inline-array vector4w) (-> buf base)))
+        (view *bf-zone-view*)
+        )
+    (set! (-> p 0 quad) (-> *bigmap* sprite-tmpl dma-vif quad))
+    (set! (-> p 1 quad) (-> *bigmap* sprite-tmpl quad 1))
+    (set-vector! (-> p 2) 128 128 128 128)
+    (set-vector! (-> p 3) 0 0 0 0)
+    (set-vector! (-> p 4) (* (+ (the int (-> view x0)) 1792) 16) (* (+ (the int (-> view y0)) 1840) 16) #xfffff0 0)
+    (set-vector! (-> p 5)
+                 (* 16 (-> *bf-zone-minimap-size* (+ (* 3 zone) 2)))
+                 (* 16 (-> *bf-zone-minimap-size* (+ (* 3 zone) 1)))
+                 0
+                 0
+                 )
+    (set-vector! (-> p 6) (* (+ (the int (-> view x1)) 1792) 16) (* (+ (the int (-> view y1)) 1840) 16) #xfffff0 0)
+    )
+  (&+! (-> buf base) 112)
+  (none)
+  )
+
+(defun bf-draw-zone-minimap ((zone int))
+  "Zone and side pages: ZONE's map (battlefront-minimaps.gc, the minimap of its whole district) in
+   the right frame (`bf-zone-view!`), its marks drawn over it by `bf-draw-zone-marks`. Its texels
+   are uploaded the way the START menu's map uploads its own (bigmap.gc bigmap-method-20,
+   `pc-upload-map-texture`: 8-bit texels into the texture at tbp 8, with their ct32 palette), then
+   drawn as one sprite in a bucket of their own, under the page's. The upload marks the default
+   level's VRAM dirty, as the START menu's map does."
+  (bf-zone-view! zone)
+  (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id tex-hud-hud-alpha))
+    (dma-buffer-add-gs-set buf
+                           (test-1 (new 'static 'gs-test :ate #x1 :afail #x3 :zte #x1 :ztst (gs-ztest always)))
+                           (alpha-1 (new 'static 'gs-alpha :b #x1 :d #x1))
+                           (clamp-1 (new 'static 'gs-clamp :wms (gs-tex-wrap-mode clamp) :wmt (gs-tex-wrap-mode clamp)))
+                           )
+    (pc-upload-map-texture buf
+                           (the-as pointer (&-> *bf-zone-minimap-texels* (-> *bf-zone-minimap-offset* zone)))
+                           (the-as pointer (&-> *bf-zone-minimap-clut* 0))
+                           (-> *bf-zone-minimap-size* (* 3 zone))
+                           (-> *bf-zone-minimap-size* (+ (* 3 zone) 1))
+                           8
+                           0
+                           )
+    (dma-buffer-add-gs-set buf
+                           (tex0-1 (the-as gs-tex0 (-> *bf-zone-minimap-tex0* zone)))
+                           (tex1-1 (new 'static 'gs-tex1 :mmag #x1 :mmin #x1))
+                           (texflush 0)
+                           )
+    (bf-map-sprite buf zone)
+    )
+  (set-dirty-mask! (-> *level* level-default) 4 #x1a400 0)
+  (none)
+  )
+
+(defun bf-zone-dot ((buf dma-buffer) (zone int) (p vector) (size int) (color rgba))
+  "A SIZE unit dot of COLOR at world point P on ZONE's map (`*bf-zone-view*`), inside its box."
+  (let* ((view *bf-zone-view*)
+         (texel (-> *bf-zone-minimap-corner* (+ (* 3 zone) 2)))
+         (tx (/ (- (-> p x) (-> *bf-zone-minimap-corner* (* 3 zone))) texel))
+         (ty (/ (- (-> p z) (-> *bf-zone-minimap-corner* (+ (* 3 zone) 1))) texel))
+         (x (+ (-> view x0) (* (-> view kx) tx)))
+         (y (+ (-> view y0) (* (-> view ky) ty)))
+         )
+    (when (and (< (-> view x0) x) (< x (-> view x1)) (< (-> view y0) y) (< y (-> view y1)))
+      (draw-sprite2d-xy buf (- (the int x) (/ size 2)) (- (the int y) (/ size 2)) size size color #x3fffff)
+      )
+    )
+  (none)
+  )
+
+(defun bf-draw-zone-marks ((buf dma-buffer) (zone int))
+  "Over the zone's map (`bf-draw-zone-minimap`): its frame, the Freedom League's spawn (blue), the
+   Krimzon Guard's (red) and Jak (white). The whole district is the battlefield."
+  (bf-zone-view! zone)
+  (let ((view *bf-zone-view*)
+        (ff (get-continue-by-name *game-info* (-> *bf-zones* zone ff-continue)))
+        (kg (get-continue-by-name *game-info* (-> *bf-zones* zone kg-continue)))
+        )
+    (bf-draw-frame buf
+                   (the int (-> view x0))
+                   (the int (-> view y0))
+                   (the int (- (-> view x1) (-> view x0)))
+                   (the int (- (-> view y1) (-> view y0)))
+                   )
+    (if ff
+        (bf-zone-dot buf zone (-> ff trans) 9 (static-rgba 40 110 255 128))
+        )
+    (if kg
+        (bf-zone-dot buf zone (-> kg trans) 9 (static-rgba 255 40 40 128))
+        )
+    (if *target*
+        (bf-zone-dot buf zone (-> *target* control trans) 5 (static-rgba 255 255 255 128))
+        )
+    )
+  (none)
+  )
+
+(defbehavior bf-draw-page bf-director ()
+  "Draw the open page of the battle menu. The zone, side and class pages share one layout: the
+   choices on the left, the zone's map or the class's preview on the right. The preview
+   (`bf-preview-update`) is drawn with the world, under any panel: its frame has no fill."
+  (let ((page (-> self page))
+        (team (-> self pick-team))
+        )
+    (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
+      (cond
+        ((= page BF_PAGE_RESULT)
+         (bf-draw-box buf 56 70 400 250)
+         (bf-draw-text buf "BATTLEFRONT" 0.0 84.0 0.7 (font-color menu-parent) #t)
+         (bf-draw-text buf (if (= (-> *bf* winner) (-> *bf* team)) (bf-tr "VICTORY" "VICTOIRE") (bf-tr "DEFEAT" "DÉFAITE"))
+                   0.0 130.0 1.2 (if (= (-> *bf* winner) (-> *bf* team)) (font-color green) (font-color red)) #t)
+         (clear *bf-text*)
+         (format *bf-text* (bf-tr "~S win" "Victoire : ~S") (bf-team-name (max 0 (-> *bf* winner))))
+         (bf-draw-text buf *bf-text* 0.0 190.0 0.6 (font-color default) #t)
+         (clear *bf-text*)
+         (format *bf-text* (bf-tr "Losses: ~S ~D, ~S ~D" "Pertes : ~S ~D, ~S ~D")
+                 (bf-team-name 0) (-> *bf* losses 0) (bf-team-name 1) (-> *bf* losses 1))
+         (bf-draw-text-wrapped buf *bf-text* 0.0 216.0 0.45 (font-color default) 40)
+         (bf-draw-text buf (bf-tr "<PAD_X> Leave the battle" "<PAD_X> Quitter la bataille") 0.0 290.0 0.5 (font-color default) #t)
+         )
+        (else
+          ;; left panel: the title, the choices, the description of the one under the cursor; right:
+          ;; a frame around the turning class (`bf-preview-update`) or the zone's map
+          (bf-draw-box buf 40 60 226 292)
+          (bf-draw-frame buf 274 60 198 292)
+          (bf-draw-text buf (if (= page BF_PAGE_CLASS) (bf-team-name team) "BATTLEFRONT") 54.0 68.0 0.6 (font-color menu-parent) #f)
+          (bf-draw-text buf
+                    (cond
+                      ((= page BF_PAGE_ZONE) (bf-tr "Choose the war zone" "Choisissez la zone de guerre"))
+                      ((= page BF_PAGE_TEAM) (bf-tr "Choose your side" "Choisissez votre camp"))
+                      (else (bf-tr "Choose your class" "Choisissez votre classe"))
+                      )
+                    54.0 92.0 0.45 (font-color default) #f)
+          (dotimes (i (bf-page-count page))
+            (bf-draw-text buf
+                      (bf-page-label page team i)
+                      54.0
+                      (+ 122.0 (* 22.0 (the float i)))
+                      ;; the class names are longer ("Red Krimzon Guard (Jetpack)" ran past the panel)
+                      (if (= page BF_PAGE_CLASS) 0.43 0.5)
+                      (if (= i (-> self cursor)) (font-color cyan) (font-color default))
+                      #f)
+            )
+          (bf-draw-text-wrapped buf (bf-page-desc page team (-> self cursor)) 54.0 216.0 0.38 (font-color menu-parent) 27)
+          (bf-draw-text buf
+                    (cond
+                      ((= page BF_PAGE_ZONE) (bf-tr "<PAD_X> Select  <PAD_CIRCLE> Cancel" "<PAD_X> Choisir  <PAD_CIRCLE> Annuler"))
+                      ((= page BF_PAGE_TEAM) (bf-tr "<PAD_X> Select  <PAD_CIRCLE> Back" "<PAD_X> Choisir  <PAD_CIRCLE> Retour"))
+                      (else (bf-tr "<PAD_X> Deploy" "<PAD_X> Déployer"))
+                      )
+                    54.0 330.0 0.4 (font-color default) #f)
+          (if (!= page BF_PAGE_CLASS)
+              (bf-draw-zone-marks buf (if (= page BF_PAGE_ZONE) (-> self cursor) (-> self pick-zone)))
+              )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-preview-update bf-director ()
+  "Class page: the class under the cursor stands in the right frame and turns a full circle every 4
+   seconds (a `bf-icon` 3 m in front of the camera of the paused game). Any other page: none."
+  (let ((want (if (= (-> self page) BF_PAGE_CLASS) (+ (* (-> self pick-team) 4) (-> self cursor)) -1))
+        (icon (handle->process (-> self preview)))
+        )
+    (when (and icon (!= want (-> (the-as bf-icon icon) class)))
+      (deactivate icon)
+      (set! icon #f)
+      )
+    (when (and (>= want 0) (not icon))
+      (set! icon (bf-icon-spawn want 90.0 0.0 self))
+      (set! (-> self preview) (process->handle icon))
+      )
+    (if icon
+        (bf-icon-place icon 373.0 206.0 230.0 (meters 3))
+        )
+    )
+  (none)
+  )
+
+;; Indexed by BF_AMMO_*: the gun (pickup-type) the stock gun HUD shows for it: yellow 1 (rifles),
+;; red 3 (grenade launcher), blue 2 (tazer).
+(define *bf-hud-guns* (new 'static 'array int32 3 29 28 33))
+
+(define-perm *bf-stock-gun-update* (function hud-gun none)
+             (method-of-type hud-gun update-values!)
+             )
+
+(defmethod update-values! ((this hud-gun))
+  "Jak's gun HUD (hud-classes.gc), top right. During a fight it shows the class's weapon in place of
+   Jak's gun, which the battle puts away: the stock icon of its BF_AMMO_* (`*bf-hud-guns*`), with its
+   shells and its ammo count, all drawn by the stock draw. With no ammo weapon (jetpacks, robotguard,
+   spider), no avatar or no fight, the stock handling, which hides it while Jak has no gun out."
+  (let ((ammo (if (and (bf-fighting?) (bf-avatar-alive?)) (bf-class-ammo (-> *bf* class)) -1)))
+    (cond
+      ((>= ammo 0)
+       (set! (-> this values 0 target) (-> *bf-hud-guns* ammo))
+       (set! (-> this values 1 target) (the int (-> *game-info* gun-ammo ammo)))
+       (logclear! (-> this flags) (hud-flags disable))
+       (logior! (-> this flags) (hud-flags show))
+       ((method-of-type hud update-values!) this)
+       )
+      (else
+        (*bf-stock-gun-update* this)
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-class-gauge ()
+  "Level (0 to 1) of the class's gauge: the jetpack's fuel, the spider's blue eco, or the
+   robotguard's roll (draining while it rolls, then refilling until the next roll is allowed);
+   -1.0 for none."
+  (let ((av (the-as bf-avatar (handle->process (-> *bf* avatar))))
+        (class (-> *bf* class))
+        )
+    (cond
+      ((not av) -1.0)
+      ((or (= class BF_CLASS_BLUE_JETPACK) (= class BF_CLASS_RED_JETPACK)) (-> av fuel))
+      ((= class BF_CLASS_SPYDROID) (-> av boost))
+      ((= class BF_CLASS_ROBOGUARD)
+       (let ((now (current-time))
+             (end (-> av roll-until))
+             )
+         (if (< now end)
+             (/ (the float (- end now)) (the float BF_ROLL_TIME))
+             (fmin 1.0 (/ (the float (- now end)) (the float BF_ROLL_RECHARGE)))
+             )
+         )
+       )
+      (else -1.0)
+      )
+    )
+  )
+
+;; The crosshair sprite: Jak's gun reticle texture (hud-gun).
+(define *bf-reticle* (new 'static 'hud-sprite))
+
+(defun bf-draw-reticle ()
+  "The crosshair, fixed above the screen's center where the free aim's ray goes (`bf-free-aim`),
+   red when the ray meets a foe. While the tazer locks a foe by itself (`bf-avatar-update-aim`), it
+   moves onto that foe. A HUD sprite, so it goes in the HUD's sprite bucket."
+  (bf-free-aim)
+  (let ((av (the-as bf-avatar (handle->process (-> *bf* avatar))))
+        (spr *bf-reticle*)
+        (x BF_CROSS_X)
+        (y BF_CROSS_Y)
+        (foe? (if (handle->process (-> *bf* aim-foe)) #t #f))
+        )
+    (when (and av (-> av locked?))
+      (let ((scr (new 'stack-no-clear 'vector)))
+        ;; screen point in GS units: the screen's origin is at (1792, 1840) (bigmap.gc)
+        (when (transform-point-vector! scr (-> av aim))
+          (set! x (- (-> scr x) 1792.0))
+          (set! y (- (-> scr y) 1840.0))
+          (set! foe? #t)
+          )
+        )
+      )
+    (set! (-> spr tid) (the-as texture-id (get-texture hud-gun-reticle level-default-minimap)))
+    (set! (-> spr flags) (hud-sprite-flags hsf3))
+    (set! (-> spr scale-x) 1.0)
+    (set! (-> spr scale-y) 1.0)
+    (set! (-> spr angle) 0.0)
+    (set-vector! (-> spr pos) (the int x) (the int y) #xffffff 0)
+    (set-vector! (-> spr color) 128 (if foe? 32 128) (if foe? 32 128) 128)
+    (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id hud-draw-hud-alpha))
+      (draw spr buf (-> *level* level-default) #f)
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-hud-health-update bf-director ((on? symbol))
+  "Jak's health HUD (hud-classes.gc hud-health) during the fight (ON?): asked to show every second,
+   so it stays up. Its class gauge is `bf-hud-health-gauges`."
+  (let ((hud (the-as hud (and *target* (process-by-name "hud-health" *target*)))))
+    (when (and hud on? (time-elapsed? (-> self hud-time) (seconds 1)))
+      (set-time! (-> self hud-time))
+      (send-event hud 'show)
+      )
+    )
+  (none)
+  )
+
+(defun bf-hud-health-gauges ((hud hud))
+  "Called by hud-health's draw (hud-classes.gc) once it has set its eco gauges and before its
+   sprites are drawn. During a fight, the class's gauge (`bf-class-gauge`) takes the place of one of
+   them, its stock sprite at the stock scale, with the class's color: the jetpack's fuel in the dark
+   eco gauge (sprite 2, the right half; its color, the bright one it takes when Jak has eco enough
+   for a dark bomb), the spider's blue eco and the robotguard's roll in the light eco gauge (sprite
+   1, the left half) in blue and in red. The battle keeps Jak's own light and dark eco at 0. Drawn
+   before the ring, as the stock gauges, the ring's windows shape them; a sprite drawn after the
+   ring was hidden behind it (seen in game)."
+  (let ((level (if (bf-fighting?) (bf-class-gauge) -1.0)))
+    (when (<= 0.0 level)
+      (let ((dark? (or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK)))
+            ;; the stock gauges' pulse (hud-health draw), here 0.5 to 1: the stock one, 0 to 1, made
+            ;; the fuel vanish on the dark disc half the time
+            (pulse (+ 0.75 (* 0.25 (sin (degrees (the float (mod (-> *display* game-clock frame-counter) 360)))))))
+            )
+        (cond
+          (dark?
+            (set! (-> hud sprites 2 scale-y) (* -9.7 level))
+            (set-vector! (-> hud sprites 2 color)
+                         (the int (* 0.35 255.0 pulse))
+                         (the int (* 25.5 pulse))
+                         (the int (* 0.8 255.0 pulse))
+                         128
+                         )
+            )
+          (else
+            (set! (-> hud sprites 1 scale-y) (* -9.8 level))
+            (if (= (-> *bf* class) BF_CLASS_SPYDROID)
+                (set-vector! (-> hud sprites 1 color) (the int (* 20.0 pulse)) (the int (* 60.0 pulse)) (the int (* 128.0 pulse)) 128)
+                (set-vector! (-> hud sprites 1 color) (the int (* 128.0 pulse)) (the int (* 16.0 pulse)) (the int (* 16.0 pulse)) 128)
+                )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defconstant BF_BAR_HALF 76)  ;; length of a full reserve bar, out from the screen's middle
+
+(defun bf-draw-reserves ((buf dma-buffer))
+  "Top middle, after the reinforcement meter of Star Wars Battlefront (2004): in a dark panel, the
+   player's side's bar runs left from the middle in green and the enemy's runs right in red, each as
+   long as its reserve (BF_RESERVE fills it), with the two counts under them on either side of a
+   divider. Narrow enough to stay clear of the stock gun HUD top right."
+  (let* ((mine (-> *bf* team))
+         (them (- 1 mine))
+         (lm (the int (/ (* (the float BF_BAR_HALF) (the float (-> *bf* reserve mine))) (the float BF_RESERVE))))
+         (lt (the int (/ (* (the float BF_BAR_HALF) (the float (-> *bf* reserve them))) (the float BF_RESERVE))))
+         )
+    (bf-draw-box buf (- 248 BF_BAR_HALF) 4 (+ (* 2 BF_BAR_HALF) 16) 36)
+    (draw-sprite2d-xy buf (- 254 BF_BAR_HALF) 9 BF_BAR_HALF 5 (static-rgba 50 50 50 128) #x3fffff)
+    (draw-sprite2d-xy buf 258 9 BF_BAR_HALF 5 (static-rgba 50 50 50 128) #x3fffff)
+    (draw-sprite2d-xy buf (- 254 lm) 9 lm 5 (static-rgba 60 220 60 128) #x3fffff)
+    (draw-sprite2d-xy buf 258 9 lt 5 (static-rgba 235 50 50 128) #x3fffff)
+    (draw-sprite2d-xy buf 255 16 2 20 (static-rgba 255 255 255 75) #x3fffff)
+    (clear *bf-text*)
+    (format *bf-text* "~D" (-> *bf* reserve mine))
+    (bf-draw-text buf *bf-text* 226.0 18.0 0.55 (font-color green) #t)
+    (clear *bf-text*)
+    (format *bf-text* "~D" (-> *bf* reserve them))
+    (bf-draw-text buf *bf-text* 286.0 18.0 0.55 (font-color red) #t)
+    )
+  (none)
+  )
+
+(defbehavior bf-draw-hud bf-director ()
+  "The reserves (`bf-draw-reserves`), the warnings of the fight, the countdown of a dead player, and
+   the crosshair. The class's gun and ammo are in the stock gun HUD (hud-gun `update-values!`
+   above)."
+  (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
+    (bf-draw-reserves buf)
+    (if (not (time-elapsed? (-> self field-time) (seconds 1)))
+        (bf-draw-text buf (bf-tr "FORCE FIELD" "CHAMP DE FORCE") 0.0 150.0 0.6 (font-color red) #t)
+        )
+    ;; the player waits to respawn (`bf-target-death`)
+    (when (nonzero? (-> *bf* respawn-time))
+      (bf-draw-text buf (bf-tr "YOU WERE KILLED" "VOUS ÊTES MORT") 0.0 250.0 0.8 (font-color red) #t)
+      (clear *bf-text*)
+      (format *bf-text* (bf-tr "Back in ~D" "Retour dans ~D")
+              (+ 1 (max 0 (/ (- (-> *bf* respawn-time) (current-time) 1) (seconds 1))))
+              )
+      (bf-draw-text buf *bf-text* 0.0 282.0 0.6 (font-color default) #t)
+      )
+    )
+  (if (and *target* (not (focus-test? *target* dead)))
+      (bf-draw-reticle)
+      )
+  (none)
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Battle life cycle (run inside the director's process)
+;; ---------------------------------------------------------------------------------------------
+
+(defun bf-city-call ((cmd int))
+  "Run CMD on the Haven City side when ctywide is active (its hook then points into the current
+   link of battlefront-city.gc)."
+  (when (and *bf-city-hook* (= (level-status? *level* 'ctywide #f) 'active))
+    (*bf-city-hook* cmd)
+    )
+  (none)
+  )
+
+(defun bf-zone-continue ((zone int) (team int))
+  "Spawn continue point of TEAM in ZONE."
+  (get-continue-by-name *game-info*
+                        (if (= team BF_TEAM_FF) (-> *bf-zones* zone ff-continue) (-> *bf-zones* zone kg-continue))
+                        )
+  )
+
+(defun bf-refill-ammo ()
+  "Loadout of a deployment: at least 60 yellow, 10 red and 50 blue ammo, within Jak's maximum, and
+   full magazines in the guard weapons."
+  (let ((loadout (new 'static 'array float 3 60.0 10.0 50.0)))
+    (dotimes (i 3)
+      ;; gun-ammo 0, 1, 2 are pickup types ammo-yellow (15), ammo-red, ammo-blue
+      (set! (-> *game-info* gun-ammo i)
+            (fmax (-> *game-info* gun-ammo i)
+                  (fmin (-> loadout i) (get-max-ammo-for-gun *game-info* (the-as pickup-type (+ i 15))))
+                  )
+            )
+      )
+    )
+  (bf-refill-mags)
+  (none)
+  )
+
+(defun bf-spectate-end! ()
+  "The dead player's wait (`bf-target-death`) is over or cut short: no countdown, the camera on Jak
+   again. The stock death's reset does the same (game-info.gc, `initialize!`)."
+  (when (nonzero? (-> *bf* respawn-time))
+    (set! (-> *bf* respawn-time) 0)
+    (set! (-> *bf* spectate) (the-as handle #f))
+    (when *target*
+      (send-event *camera* 'change-target *target*)
+      (send-event *camera* 'teleport)
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-start-battle! bf-director ((zone int) (team int) (class int))
+  "Set up a battle in ZONE, the player on TEAM as CLASS, and send the player there."
+  (let ((ff (bf-zone-continue zone BF_TEAM_FF))
+        (kg (bf-zone-continue zone BF_TEAM_KG))
+        )
+    (cond
+      ((not (and ff kg))
+       (format 0 "battlefront: a continue point of zone ~D is missing~%" zone)
+       )
+      (else
+        (set! (-> *bf* zone) zone)
+        (set! (-> *bf* team) team)
+        (set! (-> *bf* class) class)
+        (set! (-> *bf* weapon) BF_WEAPON_RIFLE)
+        (set! (-> *bf* redraw?) #f)
+        (set! (-> *bf* drop-count) 0)
+        (set! (-> *bf* winner) BF_TEAM_NONE)
+        (dotimes (i BF_TEAM_COUNT)
+          (set! (-> *bf* reserve i) BF_RESERVE)
+          (set! (-> *bf* losses i) 0)
+          )
+        ;; the class weapons spend Jak's ammo, the shield's hits his light eco: given back at the end
+        (dotimes (i 4)
+          (set! (-> *bf* ammo-saved i) (-> *game-info* gun-ammo i))
+          )
+        (set! (-> *bf* light-saved) (-> *game-info* eco-pill-light))
+        ;; dark eco picked up in the battle refills the jetpacks (battlefront-player.gc): none to start;
+        ;; no light eco either, so the stock eco gauges of the health HUD stay empty
+        (set! (-> *bf* dark-saved) (-> *game-info* eco-pill-dark))
+        (set! (-> *game-info* eco-pill-dark) 0.0)
+        (set! (-> *game-info* eco-pill-light) 0.0)
+        ;; the endless dark eco secret refills Jak's every frame (powerups.gc target-eco-process):
+        ;; it would keep the jetpacks full, so it is off during the battle
+        (set! (-> *bf* endless-dark?) (logtest? (-> *game-info* secrets) (game-secrets endless-dark)))
+        (logclear! (-> *game-info* secrets) (game-secrets endless-dark))
+        ;; the endless light eco secret would keep the health HUD's light eco gauge full: off too
+        (set! (-> *bf* endless-light?) (logtest? (-> *game-info* secrets) (game-secrets endless-light)))
+        (logclear! (-> *game-info* secrets) (game-secrets endless-light))
+        ;; every unit is spawned again by the respawn below: no look is taken yet
+        (dotimes (i 5)
+          (set! (-> *bf-looks* i) 0)
+          )
+        (vector-copy! (-> *bf* spawn BF_TEAM_FF) (-> ff trans))
+        (vector-copy! (-> *bf* spawn BF_TEAM_KG) (-> kg trans))
+        ;; the district's middle, and the radius around it that covers its map (battlefront-minimaps.gc):
+        ;; the reinforcements search their lanes there
+        (let ((texel (-> *bf-zone-minimap-corner* (+ (* 3 zone) 2)))
+              (w (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 2))))
+              (h (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 1))))
+              )
+          (set-vector! (-> *bf* center)
+                       (+ (-> *bf-zone-minimap-corner* (* 3 zone)) (* 0.5 w texel))
+                       (* 0.5 (+ (-> ff trans y) (-> kg trans y)))
+                       (+ (-> *bf-zone-minimap-corner* (+ (* 3 zone) 1)) (* 0.5 h texel))
+                       (* 0.5 texel (sqrtf (+ (* w w) (* h h))))
+                       )
+          )
+        ;; the force field's first safe place: the player's spawn (`bf-keep-in-zone`)
+        (let ((own (if (= team BF_TEAM_FF) ff kg)))
+          (vector-copy! (-> *bf* safe) (-> own trans))
+          (set! (-> *bf* safe-level) (-> own level))
+          (set! (-> *bf* safe-time) 0)
+          )
+        (set! (-> *bf* ceiling) (+ (fmax (-> ff trans y) (-> kg trans y)) BF_CEILING))
+        (set! (-> *bf* respawn-time) 0)
+        (set! (-> self prepared?) #f)
+        (set! (-> self leaving?) #f)
+        (set! (-> self want-avatar?) #t)
+        (set! (-> self want-class-page?) #f)
+        ;; the battle's settings, owned by the director
+        (remove-setting! 'borrow)
+        (remove-setting! 'faction-command)
+        (remove-setting! 'exclusive-task)
+        (remove-setting! 'pilot)
+        (set-setting! 'borrow *bf-borrow* 0.0 0)
+        (set-setting! 'faction-command *bf-faction-commands* 0.0 0)
+        ;; outside the campaign: only the tasks this setting names stay open (task-control.gc
+        ;; game-task-node-info-method-12), and no node has the task none, so no mission or
+        ;; activity starts (NPC prompts, burning bushes, task managers, their minimap icons)
+        (set-setting! 'exclusive-task #f 0.0 (game-task none))
+        ;; no vehicle either: vehicle `check-player-get-on` (vehicle-util.gc) wants this setting on
+        (set-setting! 'pilot #f 0.0 0)
+        (apply-settings *setting-control*)
+        (bf-avatar-kill)
+        (bf-set-phase! BF_PHASE_DEPLOY)
+        ;; respawn the player at his side's spawn the way a death does (target-death-reset):
+        ;; `initialize!` 'life resets every actor and runs each active level's activate function,
+        ;; so Haven City's traffic is rebuilt and every unit pool spawned again, now with the
+        ;; battle's skins. Rebuilding the traffic on its own in mid-game (ctywide-activate) left
+        ;; process records broken: a later level change crashed the game deactivating an airlock.
+        (set-continue! *game-info* (if (= team BF_TEAM_FF) ff kg) #f)
+        (initialize! *game-info* 'life (the-as game-save #f) (the-as string #f) (the-as resetter-spec #f))
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-restore-player! ()
+  "Give Jak back what the battle set aside: his gun ammo, light and dark eco, and the endless dark
+   and light eco secrets."
+  (dotimes (i 4)
+    (set! (-> *game-info* gun-ammo i) (-> *bf* ammo-saved i))
+    )
+  (set! (-> *game-info* eco-pill-light) (-> *bf* light-saved))
+  (set! (-> *game-info* eco-pill-dark) (-> *bf* dark-saved))
+  (if (-> *bf* endless-dark?)
+      (logior! (-> *game-info* secrets) (game-secrets endless-dark))
+      )
+  (if (-> *bf* endless-light?)
+      (logior! (-> *game-info* secrets) (game-secrets endless-light))
+      )
+  (set! (-> *bf* drop-count) 0)
+  (none)
+  )
+
+(defbehavior bf-end-battle! bf-director ()
+  "Undo everything the battle changed and go back to the stock game. While Jak drives, wait: the
+   respawn that ends it would take the vehicle from under him."
+  (when (and (bf-active?)
+             *target*
+             (focus-test? *target* pilot)
+             (= (level-status? *level* 'ctywide #f) 'active)
+             )
+    (set! (-> self end-pending?) #t)
+    (return #f)
+    )
+  (set! (-> self end-pending?) #f)
+  (bf-spectate-end!)
+  (bf-avatar-kill)
+  (bf-hud-health-update #f)
+  (let ((city? (and (bf-active?) (= (level-status? *level* 'ctywide #f) 'active))))
+    (when (bf-active?)
+      ;; phase off first: the pools spawned again by the respawn below get the stock skins
+      (bf-set-phase! BF_PHASE_OFF)
+      (bf-city-call BF_CITY_RESET)
+      (bf-restore-player!)
+      )
+    (remove-setting! 'borrow)
+    (remove-setting! 'faction-command)
+    (remove-setting! 'exclusive-task)
+    (remove-setting! 'pilot)
+    (apply-settings *setting-control*)
+    ;; respawn at the current continue (the side's spawn) the way a death does: every unit of the
+    ;; battle is replaced by a stock one
+    (if city?
+        (initialize! *game-info* 'life (the-as game-save #f) (the-as string #f) (the-as resetter-spec #f))
+        )
+    )
+  (bf-set-phase! BF_PHASE_OFF)
+  (none)
+  )
+
+(defbehavior bf-zone-ready? bf-director ()
+  "#t once the player stands in the zone with its levels and the unit levels active. The battle's
+   Haven City alias reloads ctywide and its collision: Jak must have stood on real ground (stance,
+   not the stale on-surface flag of his continue state) after the first 2 seconds."
+  (and *target*
+       (= (level-status? *level* (-> *bf-zones* (-> *bf* zone) level0) #f) 'active)
+       (or (not (-> *bf-zones* (-> *bf* zone) level1))
+           (= (level-status? *level* (-> *bf-zones* (-> *bf* zone) level1) #f) 'active)
+           )
+       (not (focus-test? *target* dead))
+       (time-elapsed? (-> *bf* phase-time) (seconds 2))
+       (logtest? (-> *target* control status) (collide-status on-surface))
+       (= (-> *target* state name) 'target-stance)
+       (< (-> *game-info* blackout-time) (current-time))
+       (= (level-status? *level* 'ctywide #f) 'active)
+       (= (level-status? *level* 'ctypesa #f) 'active)
+       (= (level-status? *level* 'ctypesc #f) 'active)
+       )
+  )
+
+(defbehavior bf-force-field-spark bf-director ((pos vector))
+  "Sparks of Light Jak's shield at POS, where Jak meets the force field (every 0.15 s at most), and
+   its sound every 0.6 s."
+  (when (time-elapsed? (-> self field-time) (seconds 0.15))
+    (set-time! (-> self field-time))
+    (vector-copy! (-> *launch-matrix* trans) pos)
+    (if (logtest? (-> group-lightjak-shield-hit flags) (sp-group-flag sp13))
+        (part-tracker-spawn part-tracker-subsampler :to self :group group-lightjak-shield-hit)
+        (part-tracker-spawn part-tracker :to self :group group-lightjak-shield-hit)
+        )
+    (when (time-elapsed? (-> self field-sound) (seconds 0.6))
+      (set-time! (-> self field-sound))
+      (sound-play "shield-hit")
+      )
+    )
+  (none)
+  )
+
+(defun bf-zone-cell? ((zone int) (pos vector))
+  "#t when POS is in a minimap cell of ZONE's levels (battlefront-minimaps.gc `*bf-zone-cells*`,
+   their city-map-bits): Haven City's 5 x 7 cells of 384 m, from -768 m on x and z. A place past
+   the grid's edge counts as the edge cell's (the Slums' alley is east of the last column)."
+  (let ((col (max 0 (min 4 (the int (/ (+ (-> pos x) (meters 768)) (meters 384))))))
+        (row (max 0 (min 6 (the int (/ (+ (-> pos z) (meters 768)) (meters 384))))))
+        )
+    (logtest? (-> *bf-zone-cells* zone) (ash 1 (+ (* row 5) col)))
+    )
+  )
+
+(defbehavior bf-keep-in-zone bf-director ()
+  "The battlefield's force field: the zone's levels, the whole district. Jak goes anywhere in them.
+   As he leaves them, the level the game sees him in (`*load-state*` vis-nick, which the levels'
+   region scripts switch as he crosses into another section) no longer one of the zone's, or his
+   place out of the zone's minimap cells (`bf-zone-cell?`: the game kept vis-nick on the Port with
+   Jak in the Industrial Zone, whose section the Port's war zone loads), or as he falls
+   BF_FALL_DEPTH below the last place he stood (a hole, or a section that is not loaded), he is put
+   back at that place (`*bf*` safe, taken every 0.5 s while he stands in the zone), his speed
+   cancelled and the game's level of him set back, with Light Jak's shield sparks. A jetpack class
+   cannot climb past the ceiling: its thrust fades under it (battlefront-player.gc), and 2 m above
+   it, which only a jump carries it to, its rise is turned into a fall."
+  (when (and *target* (not (focus-test? *target* dead)))
+    (let ((pos (-> *target* control trans))
+          (vis (-> *load-state* vis-nick))
+          )
+      (cond
+        ((and (bf-zone-level? (-> *bf* zone) vis)
+              (bf-zone-cell? (-> *bf* zone) pos)
+              (< (- (-> *bf* safe y) BF_FALL_DEPTH) (-> pos y))
+              )
+         (when (and (logtest? (-> *target* control status) (collide-status on-surface))
+                    (time-elapsed? (-> *bf* safe-time) (seconds 0.5))
+                    )
+           (vector-copy! (-> *bf* safe) pos)
+           (set! (-> *bf* safe-level) vis)
+           (set-time! (-> *bf* safe-time))
+           )
+         )
+        (else
+          (let ((spark (vector-copy! (new 'stack-no-clear 'vector) pos)))
+            (+! (-> spark y) (meters 1.2))
+            (move-to-point! (-> *target* control) (-> *bf* safe))
+            (vector-reset! (-> *target* control transv))
+            (want-vis-level *load-state* (-> *bf* safe-level))
+            (bf-force-field-spark spark)
+            )
+          )
+        )
+      (when (and (or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK))
+                 (< (+ (-> *bf* ceiling) (meters 2)) (-> pos y))
+                 )
+        (set! (-> *target* control transv y) (fmin (-> *target* control transv y) (meters -2)))
+        (let ((top (vector-copy! (new 'stack-no-clear 'vector) pos)))
+          (+! (-> top y) (meters 2.5))
+          (bf-force-field-spark top)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-want-level ((ls load-state) (name symbol))
+  "Want level NAME displayed, in a free slot of LS, unless it is wanted already."
+  (let ((wanted? #f))
+    (dotimes (i 10)
+      (if (= (-> ls want i name) name)
+          (set! wanted? #t)
+          )
+      )
+    (dotimes (i 10)
+      (when (and (not wanted?) (not (-> ls want i name)))
+        (set! wanted? #t)
+        (set! (-> ls want i name) name)
+        (set! (-> ls want i display?) 'display)
+        (set! (-> ls want i force-vis?) #f)
+        (set! (-> ls want i force-inside?) #f)
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-want-zone-levels ((ls load-state))
+  "During a battle in a two-section district, the levels Haven City keeps loaded are its base
+   (ctywide, under the battle's alias) and the district's two sections, displayed. Its continue
+   points and region scripts also ask for the next section, an interior or a mission's level, and
+   it holds two sections at most: the district's second section went as the player crossed it
+   toward a third. Every other wanted level is dropped; the borrowed unit levels (ctypesa, ctypesc)
+   come from the 'borrow setting, after this.
+   A one-section district keeps the stock loading: the force field keeps the player in it, so the
+   game always wants it, and its edges stand on the next section's ground, which the game loads
+   with it there (the Port's war zone, on ctyinda's). Its camps' continue points list that
+   section too, and a respawn waits for every level of its list (target-death.gc target-continue)."
+  (let ((zone (-> *bf* zone)))
+    (when (-> *bf-zones* zone level1)
+      (dotimes (i 10)
+        (let ((name (-> ls want i name)))
+          (when (and name (not (string-prefix= "ctywide" (symbol->string name))) (not (bf-zone-level? zone name)))
+            (set! (-> ls want i name) #f)
+            (set! (-> ls want i display?) #f)
+            (set! (-> ls want i force-vis?) #f)
+            (set! (-> ls want i force-inside?) #f)
+            )
+          )
+        )
+      (bf-want-level ls (-> *bf-zones* zone level0))
+      (bf-want-level ls (-> *bf-zones* zone level1))
+      )
+    )
+  (none)
+  )
+
+;; Stock borrow step, kept across REPL reloads of this file (Lisp wiki jak3 4.10).
+(define-perm *bf-stock-add-borrow-levels* (function load-state none)
+             (method-of-type load-state add-borrow-levels)
+             )
+
+(defmethod add-borrow-levels ((this load-state))
+  "Every change of the levels the game wants ends here (load-state.gc: a continue point's list,
+   want-levels from the region scripts, a level displayed). During a battle in a two-section
+   district its sections are kept first (`bf-want-zone-levels`), then the stock adds the borrowed
+   levels."
+  (if (bf-active?)
+      (bf-want-zone-levels this)
+      )
+  (*bf-stock-add-borrow-levels* this)
+  (none)
+  )
+
+(defbehavior bf-hold-at-spawn bf-director ()
+  "During a deployment, keep Jak at his side's spawn until he stands on real ground: the battle's
+   `start` drops him there before the collision of the ground is loaded (seen in game: he fell
+   through the port and died)."
+  (when (and *target*
+             (not (focus-test? *target* dead))
+             (not (logtest? (-> *target* control status) (collide-status on-surface)))
+             (< (-> *target* control trans y) (+ (-> *bf* spawn (-> *bf* team) y) (meters -1)))
+             )
+    (move-to-point! (-> *target* control) (-> *bf* spawn (-> *bf* team)))
+    (vector-reset! (-> *target* control transv))
+    )
+  (none)
+  )
+
+(defbehavior bf-spawn-drops bf-director ()
+  "Spawn the pickups the dead units left (battlefront-h.gc `bf-queue-drop`): the stock ammo, health
+   and dark eco pickups, which give Jak ammo and health the stock way. Dark eco comes as 3 pills (6
+   units), a full jetpack's worth (battlefront-player.gc BF_DARK_FUEL)."
+  (dotimes (i (-> *bf* drop-count))
+    (let ((pos (vector-copy! (new 'stack-no-clear 'vector) (-> *bf* drop-pos i))))
+      (+! (-> pos y) (meters 1))
+      (let ((kind (the-as pickup-type (-> *bf* drop-kind i))))
+        (birth-pickup-at-point pos kind (if (= kind (pickup-type eco-pill-dark)) 6.0 1.0) #t *entity-pool* (the-as fact-info #f))
+        )
+      )
+    )
+  (set! (-> *bf* drop-count) 0)
+  (none)
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Menu
+;; ---------------------------------------------------------------------------------------------
+
+;; Black pages: under the battle's pages only the class preview is drawn, on black. The world's
+;; renderers are off (the vu1 mask the stock menus set, which drawable.gc copies every frame), and
+;; every drawn model other than a `bf-icon` is hidden, its handle kept to show it again.
+(deftype bf-black-work (structure)
+  ((on?     symbol)
+   (count   int32)
+   (vu1     vu1-renderer-mask)  ;; the renderers on before
+   (hidden  uint64 1024)        ;; handles of the hidden models
+   )
+  )
+
+(define *bf-black* (new 'static 'bf-black-work))
+(set! (-> *bf-black* on?) #f)
+
+(defun bf-black-hide ((proc process))
+  "`bf-black-set!` callback: hide PROC's model when it is drawn and not a `bf-icon`, keeping its
+   handle. #t: go on into its children."
+  (when (and (type? proc process-drawable) (not (type? proc bf-icon)) (< (-> *bf-black* count) 1024))
+    (let ((draw (-> (the-as process-drawable proc) draw)))
+      (when (and draw (nonzero? draw) (not (logtest? (-> draw status) (draw-control-status no-draw))))
+        (logior! (-> draw status) (draw-control-status no-draw))
+        (set! (-> *bf-black* hidden (-> *bf-black* count)) (the-as uint64 (process->handle proc)))
+        (+! (-> *bf-black* count) 1)
+        )
+      )
+    )
+  #t
+  )
+
+(defun bf-black-set! ((on? symbol))
+  "Black pages on (ON?) or off (`*bf-black*`). On: only the foreground renderers, which draw the
+   preview, and the models hidden. Off: the renderers and the models back."
+  (when (!= on? (-> *bf-black* on?))
+    (set! (-> *bf-black* on?) on?)
+    (cond
+      (on?
+        (set! (-> *bf-black* vu1) (-> *display* vu1-enable-user-menu))
+        (set! (-> *display* vu1-enable-user-menu) (vu1-renderer-mask generic merc emerc))
+        (set! (-> *bf-black* count) 0)
+        (iterate-process-tree *active-pool* (the-as (function object object) bf-black-hide) *kernel-context*)
+        )
+      (else
+        (set! (-> *display* vu1-enable-user-menu) (-> *bf-black* vu1))
+        (dotimes (i (-> *bf-black* count))
+          (let ((proc (handle->process (the-as handle (-> *bf-black* hidden i)))))
+            (if proc
+                (logclear! (-> (the-as process-drawable proc) draw status) (draw-control-status no-draw))
+                )
+            )
+          )
+        (set! (-> *bf-black* count) 0)
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-open-page bf-director ((page int))
+  "Show PAGE, black under it (`bf-black-set!`), and pause the game."
+  (set! (-> self page) page)
+  (set! (-> self cursor) 0)
+  (bf-black-set! #t)
+  (when (not (-> self menu-mode?))
+    (set-master-mode 'menu)
+    (set! (-> self menu-mode?) #t)
+    )
+  ;; like popup-menu: with the flag the pause buttons (toggle-pause) leave 'menu alone and the
+  ;; Mods menu does not open over the page
+  (true! *popup-menu-open*)
+  (none)
+  )
+
+(defbehavior bf-close-page bf-director ()
+  "Hide the menu, show the world again and resume the game."
+  (set! (-> self page) BF_PAGE_NONE)
+  (bf-preview-update)
+  (bf-black-set! #f)
+  (when (-> self menu-mode?)
+    (false! *popup-menu-open*)
+    (set-master-mode 'game)
+    (set! (-> self menu-mode?) #f)
+    )
+  (none)
+  )
+
+(defbehavior bf-open-class-page bf-director ((refill? symbol))
+  "The class page of the player's side, the cursor on his class; REFILL? when it deploys him."
+  (set! (-> self refill?) refill?)
+  (set! (-> self pick-team) (-> *bf* team))
+  ;; the preview shows the guards with their rifle, the weapon a class starts with
+  (set! (-> *bf* weapon) BF_WEAPON_RIFLE)
+  (bf-open-page BF_PAGE_CLASS)
+  (set! (-> self cursor) (- (-> *bf* class) (* 4 (-> *bf* team))))
+  (none)
+  )
+
+(defbehavior bf-menu-confirm bf-director ()
+  "X on the open page."
+  (let ((page (-> self page))
+        (i (-> self cursor))
+        )
+    (cond
+      ((= page BF_PAGE_ZONE)
+       (set! (-> self pick-zone) i)
+       (bf-open-page BF_PAGE_TEAM)
+       )
+      ((= page BF_PAGE_TEAM)
+       (set! (-> self pick-team) i)
+       (bf-close-page)
+       ;; deploy first, the class after, at the spawn: the class models (and their preview) are
+       ;; in the unit levels the deployment loads
+       (bf-start-battle! (-> self pick-zone) i (* i 4))
+       (when (bf-active?)
+         (set! (-> self want-class-page?) #t)
+         (set! (-> self refill?) #t)
+         )
+       )
+      ((= page BF_PAGE_CLASS)
+       (bf-close-page)
+       (set! (-> *bf* class) (+ (* (-> self pick-team) 4) i))
+       (set! (-> *bf* weapon) BF_WEAPON_RIFLE)
+       (if (-> self refill?)
+           (bf-refill-ammo)
+           )
+       (set! (-> self refill?) #f)
+       (set! (-> self want-avatar?) #t)
+       (bf-avatar-kill)
+       )
+      ((= page BF_PAGE_RESULT)
+       (bf-close-page)
+       (bf-end-battle!)
+       )
+      )
+    )
+  (sound-play "menu-pick")
+  (none)
+  )
+
+(defbehavior bf-menu-back bf-director ()
+  "Circle on the open page. The class page needs a class: the battle has started."
+  (let ((page (-> self page)))
+    (cond
+      ((= page BF_PAGE_ZONE)
+       (bf-close-page)
+       )
+      ((= page BF_PAGE_TEAM)
+       (bf-open-page BF_PAGE_ZONE)
+       (set! (-> self cursor) (-> self pick-zone))
+       )
+      )
+    )
+  (sound-play "menu-pick")
+  (none)
+  )
+
+(defbehavior bf-menu-update bf-director ()
+  "Input and drawing of the open page."
+  (let ((count (bf-page-count (-> self page))))
+    (cond
+      ((cpad-pressed? 0 up)
+       (set! (-> self cursor) (if (> (-> self cursor) 0) (+ (-> self cursor) -1) (+ count -1)))
+       (sound-play "menu-pick")
+       )
+      ((cpad-pressed? 0 down)
+       (set! (-> self cursor) (if (< (-> self cursor) (+ count -1)) (+ (-> self cursor) 1) 0))
+       (sound-play "menu-pick")
+       )
+      ((cpad-pressed? 0 x)
+       (bf-menu-confirm)
+       )
+      ((cpad-pressed? 0 circle triangle)
+       (bf-menu-back)
+       )
+      )
+    )
+  (when (!= (-> self page) BF_PAGE_NONE)
+    (bf-preview-update)
+    (bf-draw-page)
+    (if (or (= (-> self page) BF_PAGE_ZONE) (= (-> self page) BF_PAGE_TEAM))
+        (bf-draw-zone-minimap (if (= (-> self page) BF_PAGE_ZONE) (-> self cursor) (-> self pick-zone)))
+        )
+    )
+  (none)
+  )
+
+(defbehavior bf-restart-battle! bf-director ()
+  "START > Options > Gamemode > Battlefront > Restart the battle: the same zone, side and class from
+   full reserves, at the side's spawn, with a fresh loadout. What the battle set aside goes back to
+   Jak first, so that `bf-start-battle!` sets Jak's own aside again."
+  (when (bf-active?)
+    (let ((zone (-> *bf* zone))
+          (team (-> *bf* team))
+          (class (-> *bf* class))
+          )
+      (bf-close-page)
+      (bf-spectate-end!)
+      (bf-restore-player!)
+      (bf-start-battle! zone team class)
+      (if (bf-active?)
+          (bf-refill-ammo)
+          )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-leave-to-save! bf-director ()
+  "The mode was switched off in the Mods menu during a battle: load the last save, the slot the game
+   last loaded or saved (`*game-info*` auto-save-which, kept by the auto-save process's `done`,
+   game-save.gc), as the START menu's Load Game does (progress.gc). The load's reset ends the battle
+   (`initialize!` below). With no save loaded or made since the boot, end the battle at the side's
+   spawn."
+  (set! (-> self leaving?) #t)
+  (cond
+    ((-> *setting-control* user-default auto-save)
+     (bf-spectate-end!)
+     (auto-save-command 'restore 0 (-> *game-info* auto-save-which) self #f)
+     )
+    (else
+      (bf-end-battle!)
+      )
+    )
+  (none)
+  )
+
+(defun bf-can-open-menu? ()
+  "No other menu is up and nothing is loading in a blackout."
+  (and (not *popup-menu-open*)
+       (< (-> *game-info* blackout-time) (current-time))
+       (= *master-mode* 'game)
+       )
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Director
+;; ---------------------------------------------------------------------------------------------
+
+(defbehavior bf-director-update bf-director ()
+  "One frame of the battle."
+  ;; requests of the START menu's battle page (`bf-menu-request`), run once that menu is closed
+  (let ((req *bf-request*))
+    (cond
+      ((= req BF_REQ_END)
+       (set! *bf-request* BF_REQ_NONE)
+       (bf-close-page)
+       (bf-end-battle!)
+       )
+      ((and (= req BF_REQ_LOBBY) (bf-can-open-menu?))
+       (set! *bf-request* BF_REQ_NONE)
+       (if (not (bf-active?))
+           (bf-open-page BF_PAGE_ZONE)
+           )
+       )
+      ((and (= req BF_REQ_RESTART) (bf-can-open-menu?))
+       (set! *bf-request* BF_REQ_NONE)
+       (bf-restart-battle!)
+       )
+      ((and (= req BF_REQ_CLASS) (bf-can-open-menu?))
+       (set! *bf-request* BF_REQ_NONE)
+       (if (bf-fighting?)
+           (bf-open-class-page #f)
+           )
+       )
+      )
+    )
+  ;; the mode switched off in the Mods menu during a battle: back to the last save, once that menu
+  ;; is closed
+  (when (and (not *mod-battlefront-enable*) (bf-active?) (not (-> self leaving?)))
+    (if (!= (-> self page) BF_PAGE_NONE)
+        (bf-close-page)
+        )
+    (if (bf-can-open-menu?)
+        (bf-leave-to-save!)
+        )
+    )
+  (when (and (-> self end-pending?) (not (and *target* (focus-test? *target* pilot))))
+    (bf-end-battle!)
+    )
+  ;; the looks the pools give their new units follow the live counts (battlefront-h.gc)
+  (if (bf-active?)
+      (bf-count-looks!)
+      )
+  (cond
+    ((!= (-> self page) BF_PAGE_NONE)
+     ;; the open page owns the frame
+     (bf-menu-update)
+     )
+    ((= (-> *bf* phase) BF_PHASE_DEPLOY)
+     (bf-hold-at-spawn)
+     (cond
+       ((bf-zone-ready?)
+        (when (not (-> self prepared?))
+          (bf-city-call BF_CITY_PREPARE)
+          (set! (-> self prepared?) #t)
+          )
+        (bf-set-phase! BF_PHASE_FIGHT)
+        )
+       ((time-elapsed? (-> *bf* phase-time) BF_DEPLOY_TIMEOUT)
+        (format 0 "battlefront: the war zone did not load, battle cancelled~%")
+        (bf-end-battle!)
+        )
+       )
+     )
+    ((= (-> *bf* phase) BF_PHASE_FIGHT)
+     (cond
+       ((!= (level-status? *level* 'ctywide #f) 'active)
+        ;; Haven City is gone (a warp, a cutscene): the battle cannot go on
+        (when (< (-> *game-info* blackout-time) (current-time))
+          (format 0 "battlefront: Haven City unloaded, battle cancelled~%")
+          (bf-end-battle!)
+          )
+        )
+       (else
+         (bf-city-call BF_CITY_UPDATE)
+         ;; a red guard changed between its two models (battlefront-player.gc bf-avatar-pick-weapon)
+         (when (-> *bf* redraw?)
+           (set! (-> *bf* redraw?) #f)
+           (bf-avatar-kill)
+           (set! (-> self want-avatar?) #t)
+           )
+         (when (and *target* (not (focus-test? *target* dead)) (< (-> *game-info* blackout-time) (current-time)))
+           (cond
+             ((and (-> self want-class-page?) (bf-can-open-menu?))
+              (set! (-> self want-class-page?) #f)
+              (bf-open-class-page #t)
+              )
+             ((and (-> self want-avatar?) (bf-avatar-spawn (-> *bf* class)))
+              (set! (-> self want-avatar?) #f)
+              )
+             ((and (!= (-> *bf* class) BF_CLASS_JAK) (not (-> self want-avatar?)) (not (bf-avatar-alive?)))
+              ;; the avatar went with its level or a reset: draw it again
+              (set! (-> self want-avatar?) #t)
+              )
+             )
+           (bf-keep-in-zone)
+           (bf-spawn-drops)
+           )
+         (bf-hud-health-update #t)
+         (bf-draw-hud)
+         )
+       )
+     )
+    ((= (-> *bf* phase) BF_PHASE_OVER)
+     (when (bf-can-open-menu?)
+       (bf-avatar-kill)
+       (bf-hud-health-update #f)
+       (bf-open-page BF_PAGE_RESULT)
+       )
+     )
+    )
+  (none)
+  )
+
+(defstate idle (bf-director)
+  :virtual #t
+  :trans (behavior ()
+    (bf-director-update)
+    )
+  :code sleep-code
+  )
+
+(defbehavior bf-director-init-by-other bf-director ()
+  "The director runs while the game is paused under its menu (menu and pause masks cleared)."
+  (process-mask-clear! (-> self mask) menu pause)
+  (set! (-> self page) BF_PAGE_NONE)
+  (set! (-> self cursor) 0)
+  (set! (-> self pick-zone) 0)
+  (set! (-> self pick-team) BF_TEAM_FF)
+  (set! (-> self menu-mode?) #f)
+  (set! (-> self want-avatar?) #f)
+  (set! (-> self want-class-page?) #f)
+  (set! (-> self refill?) #f)
+  (set! (-> self prepared?) #f)
+  (set! (-> self end-pending?) #f)
+  (set! (-> self leaving?) #f)
+  (set! (-> self preview) (the-as handle #f))
+  (set! (-> self hud-time) 0)
+  (set! (-> self field-time) 0)
+  (set! (-> self field-sound) 0)
+  (go-virtual idle)
+  )
+
+(defun bf-director-ensure! ()
+  "Spawn the director once."
+  (when (not (handle->process (-> *bf* director)))
+    (set! (-> *bf* director)
+          (ppointer->handle (process-spawn bf-director :name "bf-director" :from *pc-dead-pool* :to *pc-pool*))
+          )
+    )
+  (none)
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Player death and hits
+;; ---------------------------------------------------------------------------------------------
+
+;; Stock attack handler of the player, kept the same way.
+(define-perm *bf-stock-target-attacked*
+             (function symbol attack-info process touching-shapes-entry (state symbol attack-info target) object :behavior target)
+             target-attacked
+             )
+
+(defbehavior target-attacked target ((arg0 symbol)
+                                     (arg1 attack-info)
+                                     (arg2 process)
+                                     (arg3 touching-shapes-entry)
+                                     (arg4 (state symbol attack-info target))
+                                     )
+  "Every attack on the player goes through here. While the robotguard's shield is up or it rolls
+   as a ball, Jak's shield level stops an attack sent by a shot or a blast (a projectile, an
+   explosion) and lets through a blow, sent by the attacker itself: it is set for each attack, then
+   the stock handler runs. The shield sphere stops most shots itself (they hit it); this stops the
+   blasts and the shots fired from inside it."
+  (let ((av (the-as bf-avatar (handle->process (-> *bf* avatar)))))
+    (if (or (-> *bf* shield?) (and av (< (current-time) (-> av roll-until))))
+        (set! (-> self fact shield-level) (if (or (type? arg2 projectile) (type? arg2 explosion)) 1.0 0.0))
+        (set! (-> self fact shield-level) 0.0)
+        )
+    )
+  (*bf-stock-target-attacked* arg0 arg1 arg2 arg3 arg4)
+  )
+
+(defun bf-ally? ((proc process) (team int))
+  "#t when PROC is a living unit of side TEAM other than the player."
+  (and proc
+       (!= proc *target*)
+       (type? proc process-focusable)
+       (not (focus-test? (the-as process-focusable proc) inactive disable dead))
+       (= (bf-unit-team proc) team)
+       )
+  )
+
+(defun bf-spectate-pick ((from vector))
+  "The living unit of the player's side nearest to FROM within 150 m, #f for none."
+  (let ((probe (new 'stack-no-clear 'vector))
+        (shapes (new 'stack-no-clear 'array 'collide-shape 64))
+        (best (the-as process-focusable #f))
+        (best-dist (meters 150))
+        )
+    (vector-copy! probe from)
+    (set! (-> probe w) (meters 150))
+    (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 64))
+      (let ((shape (as-type (-> shapes i) collide-shape)))
+        (when shape
+          (let ((proc (-> shape process)))
+            (when (bf-ally? proc (-> *bf* team))
+              (let ((dist (vector-vector-distance (-> (the-as process-focusable proc) root trans) from)))
+                (when (< dist best-dist)
+                  (set! best-dist dist)
+                  (set! best (the-as process-focusable proc))
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    best
+    )
+  )
+
+(defun bf-spectate-follow ((from vector))
+  "While the player waits to respawn: keep the camera on a living unit of his side, the one it
+   follows or, once that one dies or goes, the nearest to FROM (`bf-spectate-pick`). The camera's
+   'change-target focuses it on any process-focusable (cam-master.gc, as camera-look-at does)."
+  (when (not (bf-ally? (handle->process (-> *bf* spectate)) (-> *bf* team)))
+    (let ((next (bf-spectate-pick from)))
+      (when next
+        (set! (-> *bf* spectate) (process->handle next))
+        (send-event *camera* 'change-target next)
+        (send-event *camera* 'teleport)
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-camp-continue ()
+  "The continue point of the player's camp in the battle's zone (`*bf-zones*`), or #f."
+  (get-continue-by-name *game-info* (if (= (-> *bf* team) BF_TEAM_FF)
+                                        (-> *bf-zones* (-> *bf* zone) ff-continue)
+                                        (-> *bf-zones* (-> *bf* zone) kg-continue)
+                                        )
+                        )
+  )
+
+(defun bf-camp-level? ((cont continue-point) (i int))
+  "#t when entry I of continue point CONT's level list is a city section or an interior it shows
+   (not the Haven City base: the battle loads its own alias of ctywide)."
+  (let ((name (-> cont want i name)))
+    (and name (-> cont want i display?) (not (string-prefix= "ctywide" (symbol->string name))))
+    )
+  )
+
+(defun bf-want-camp-levels ((cont continue-point))
+  "Want the levels continue point CONT lists, as a respawn there does (target-death.gc
+   target-continue): its sections in place of the ones wanted now (Haven City holds two at most),
+   the game's level of the player set to CONT's, then the borrowed levels added again. A camp at a
+   district's edge stands on the next section's ground (the Port's war zone, on ctyinda's), which
+   the game loads only near it."
+  (let ((ls *load-state*))
+    (dotimes (i 10)
+      (let ((name (-> ls want i name)))
+        (when (and name (not (string-prefix= "ctywide" (symbol->string name))))
+          (set! (-> ls want i name) #f)
+          (set! (-> ls want i display?) #f)
+          (set! (-> ls want i force-vis?) #f)
+          (set! (-> ls want i force-inside?) #f)
+          )
+        )
+      )
+    (dotimes (i (-> cont want-count))
+      (if (bf-camp-level? cont i)
+          (bf-want-level ls (-> cont want i name))
+          )
+      )
+    (let ((info (lookup-level-info (-> cont vis-nick))))
+      (if info
+          (set! (-> ls vis-nick) (-> info name))
+          )
+      )
+    (add-borrow-levels ls)
+    )
+  (none)
+  )
+
+(defun bf-camp-loaded? ((cont continue-point))
+  "#t once every level continue point CONT lists (`bf-camp-level?`) is active."
+  (let ((loaded? #t))
+    (dotimes (i (-> cont want-count))
+      (if (and (bf-camp-level? cont i) (!= (level-status? *level* (-> cont want i name) #f) 'active))
+          (set! loaded? #f)
+          )
+      )
+    loaded?
+    )
+  )
+
+(defbehavior bf-target-death target ((mode symbol))
+  "Jak's death during a fight, in place of the stock one (`target-death` below): his side loses a
+   unit and his class model goes; for BF_RESPAWN_TIME the camera follows a living unit of his side
+   (`bf-spectate-follow`) while the HUD counts down (`bf-draw-hud`); then he is back at his side's
+   spawn, facing the battlefield, alive, full health, with a fresh loadout and two seconds of
+   invulnerability, and the director draws his class again. The world runs on meanwhile. The stock death freezes the
+   enemies (a 'process-mask setting), may play a death movie, and its reset ('life, `initialize!`)
+   spawned every unit of Haven City again: the battle's units vanished and came back at each death.
+   First it sets what the stock death sets that the game reads: Jak dead (units leave him alone),
+   his attacks off, his gun away."
+  (set! (-> self neck flex-blend) 0.0)
+  (target-timed-invulnerable-off self 0)
+  (logior! (-> self focus-status) (focus-status dead))
+  (logior! (-> self target-flags) (target-flags disable-attacks))
+  (if (using-gun? self)
+      (target-gun-end-mode #f)
+      )
+  (set! (-> self control mod-surface) *neutral-mods*)
+  (vector-reset! (-> self control transv))
+  (bf-count-loss (-> *bf* team))
+  (bf-avatar-kill)
+  (set! (-> *bf* respawn-time) (+ (current-time) BF_RESPAWN_TIME))
+  (set! (-> *bf* spectate) (the-as handle #f))
+  (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
+    (if dir
+        (set! (-> dir want-avatar?) #t)
+        )
+    )
+  ;; the camera further back and higher than behind Jak: the units stand up to twice his height,
+  ;; and with the stock string a guard filled the screen (seen in game)
+  (set-setting! 'string-min-length 'abs (meters 10) 0)
+  (set-setting! 'string-max-length 'abs (meters 14) 0)
+  (set-setting! 'string-min-height 'abs (meters 4) 0)
+  (set-setting! 'string-max-height 'abs (meters 6) 0)
+  ;; the wait; a death that ends the battle cuts it short, for the result page
+  (while (and (bf-fighting?) (< (current-time) (-> *bf* respawn-time)))
+    (logior! (-> self draw status) (draw-control-status no-draw))
+    (bf-spectate-follow (-> self control trans))
+    (suspend)
+    )
+  ;; back at the spawn
+  (remove-setting! 'string-min-length)
+  (remove-setting! 'string-max-length)
+  (remove-setting! 'string-min-height)
+  (remove-setting! 'string-max-height)
+  (move-to-point! (-> self control) (-> *bf* spawn (-> *bf* team)))
+  (vector-reset! (-> self control transv))
+  ;; the camp's levels loaded before he stands there, 10 s at most, still hidden; the field's safe
+  ;; place is the spawn again (`bf-keep-in-zone`), not where he died
+  (let ((cont (bf-camp-continue))
+        (start (current-time))
+        )
+    (when cont
+      (bf-want-camp-levels cont)
+      (while (and (bf-fighting?) (not (bf-camp-loaded? cont)) (not (time-elapsed? start (seconds 10))))
+        (logior! (-> self draw status) (draw-control-status no-draw))
+        (move-to-point! (-> self control) (-> *bf* spawn (-> *bf* team)))
+        (vector-reset! (-> self control transv))
+        (suspend)
+        )
+      (set! (-> *bf* safe-level) (-> cont level))
+      )
+    )
+  (vector-copy! (-> *bf* safe) (-> *bf* spawn (-> *bf* team)))
+  (set! (-> *bf* safe-time) 0)
+  (set! (-> self fact health) (-> self fact health-max))
+  (bf-refill-ammo)
+  (bf-spectate-end!)
+  ;; facing the battlefield's center, the camera 6 m behind him: it came back on him from wherever
+  ;; it followed the unit, in front of him at times (seen in game)
+  (let ((dir (vector-! (new 'stack-no-clear 'vector) (-> *bf* center) (-> self control trans)))
+        (cam (new 'stack-no-clear 'vector))
+        )
+    (set! (-> dir y) 0.0)
+    (when (< (meters 1) (vector-length dir))
+      (vector-normalize! dir 1.0)
+      (forward-up->quaternion (-> self control quat-for-control) dir *y-vector*)
+      (quaternion-copy! (-> self control quat) (-> self control quat-for-control))
+      (quaternion-copy! (-> self control dir-targ) (-> self control quat))
+      (vector+float*! cam (-> self control trans) dir (meters -6))
+      (+! (-> cam y) (meters 3))
+      (send-event *camera* 'teleport-to-vector-start-string cam)
+      )
+    )
+  (target-timed-invulnerable (seconds 2) self 1)
+  (go target-stance)
+  (none)
+  )
+
+;; The stock death's code, kept across REPL reloads of this file (Lisp wiki jak3 4.10).
+(define-perm *bf-stock-death-code* function (-> target-death code))
+
+(defbehavior bf-target-death-code target ((mode symbol))
+  "Code of Jak's `target-death` state (target-death.gc): `bf-target-death` during a fight, the stock
+   death otherwise."
+  (if (bf-fighting?)
+      (bf-target-death mode)
+      ((the-as (function symbol none :behavior target) *bf-stock-death-code*) mode)
+      )
+  (none)
+  )
+
+(set! (-> target-death code) bf-target-death-code)
+
+;; ---------------------------------------------------------------------------------------------
+;; Outside the campaign: no save during a battle, and a load ends it
+;; ---------------------------------------------------------------------------------------------
+
+(define-perm *bf-stock-main-respond* (function menu-main-menu-option progress symbol int)
+             (method-of-type menu-main-menu-option respond-progress)
+             )
+
+(defmethod respond-progress ((this menu-main-menu-option) (arg0 progress) (arg1 symbol))
+  "START menu ring, an option's input. During a battle, X on Save is refused with the stock refusal
+   beep (progress.gc, a hero mode save on the autosave slot); the rest is the stock handling."
+  (cond
+    ((and (bf-active?) (= (-> this name) (text-id progress-save-game)) (cpad-pressed? 0 confirm))
+     (cpad-clear! 0 confirm)
+     (sound-play "generic-beep" :pitch -0.6)
+     0
+     )
+    (else
+      (*bf-stock-main-respond* this arg0 arg1)
+      )
+    )
+  )
+
+(define-perm *bf-stock-main-draw* (function menu-main-menu-option progress font-context int symbol none)
+             (method-of-type menu-main-menu-option draw-option)
+             )
+
+(defmethod draw-option ((this menu-main-menu-option) (arg0 progress) (fnt font-context) (arg2 int) (arg3 symbol))
+  "START menu ring, the selected option's name. During a battle Save is drawn grey, the color of
+   the PC menus' disabled options (progress-generic-draw-pc.gc); the rest is the stock drawing. The
+   grey label is the stock one (progress-draw-pc.gc), its color aside."
+  (cond
+    ((and (bf-active?)
+          (= (-> this name) (text-id progress-save-game))
+          (= arg2 (-> arg0 option-index))
+          )
+     (set-scale! fnt 0.75)
+     (set-color! fnt (font-color font-color-44))
+     (set-alpha! fnt (- 1.0 (-> arg0 menu-transition)))
+     (set-flags! fnt (font-flags shadow kerning middle large))
+     (set-width! fnt (if (= (get-aspect-ratio) 'aspect4x3) 235 175))
+     (set-height! fnt 80)
+     (set! (-> fnt origin x) (the float (if (= (get-aspect-ratio) 'aspect4x3) 140 170)))
+     (set! (-> fnt origin y) (the float (if (= (get-aspect-ratio) 'aspect4x3) 180 175)))
+     (when (not (-> *pc-settings* use-vis?))
+       (set! (-> fnt origin x) (the float (adjust-game-x (-> fnt origin x))))
+       (*! (-> fnt width) (-> *pc-settings* aspect-ratio-reciprocal))
+       )
+     (print-game-text (lookup-text! *common-text* (-> this name) #f) fnt #f 44 (bucket-id hud-draw-hud-alpha))
+     )
+    (else
+      (*bf-stock-main-draw* this arg0 fnt arg2 arg3)
+      )
+    )
+  (none)
+  )
+
+(defun bf-stop-now! ()
+  "A loaded save, a new game or the title ends the battle at once, from inside the game's reset
+   (`initialize!` below): the avatar and the Haven City side go, Jak gets back what the battle set
+   aside, the mode is switched off, and the director goes with every setting it owns (the battle's
+   alias levels, faction commands and closed tasks). The reset then sets the game from the save."
+  (bf-avatar-kill)
+  (when (bf-active?)
+    (bf-set-phase! BF_PHASE_OFF)
+    (bf-city-call BF_CITY_RESET)
+    (bf-restore-player!)
+    )
+  (set! *mod-battlefront-enable* #f)
+  (set! *bf-request* BF_REQ_NONE)
+  (bf-black-set! #f)
+  (let ((director (handle->process (-> *bf* director))))
+    (if director
+        (deactivate director)
+        )
+    )
+  (set! (-> *bf* director) (the-as handle #f))
+  (set! (-> *bf* respawn-time) 0)
+  (set! (-> *bf* spectate) (the-as handle #f))
+  (none)
+  )
+
+(define-perm *bf-stock-initialize* (function game-info symbol game-save string resetter-spec game-info)
+             (method-of-type game-info initialize!)
+             )
+
+(defmethod initialize! ((this game-info) (arg0 symbol) (arg1 game-save) (arg2 string) (arg3 resetter-spec))
+  "Every reset of the game goes through here. A 'game reset (a save loaded from the START menu, a
+   new game, the title) or a 'boot ends a running battle first (`bf-stop-now!`), before the reset
+   and the save's data: deaths and the battle's own respawns ('life) go on as before."
+  (if (and (or (= arg0 'game) (= arg0 'boot)) (bf-active?))
+      (bf-stop-now!)
+      )
+  (*bf-stock-initialize* this arg0 arg1 arg2 arg3)
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; START > Options > Gamemode > Battlefront
+;; ---------------------------------------------------------------------------------------------
+
+;; Labels of these pages: text ids past the game's own (text-h.gc ends at #x136c), answered by the
+;; `lookup-text!` wrapper below, so the game's text files stay as they are.
+(defconstant BF_TEXT_BASE #x7f00)
+(defconstant BF_TEXT_GAMEMODE #x7f00)
+(defconstant BF_TEXT_BATTLEFRONT #x7f01)
+(defconstant BF_TEXT_NEW #x7f02)
+(defconstant BF_TEXT_CLASS #x7f03)
+(defconstant BF_TEXT_RESTART #x7f04)
+(defconstant BF_TEXT_QUIT #x7f05)
+(defconstant BF_TEXT_COUNT 6)
+
+(define *bf-menu-text*
+  (new 'static 'boxed-array :type string
+    "Gamemode" "Battlefront" "New battle" "Change class" "Restart the battle" "Quit the battle"
+    )
+  )
+
+(define *bf-menu-text-fr*
+  (new 'static 'boxed-array :type string
+    "Mode de jeu" "Battlefront" "Nouvelle bataille" "Changer de classe" "Recommencer la bataille" "Quitter la bataille"
+    )
+  )
+
+;; Each label encoded for the game's font, in its own string (two labels can be drawn at once).
+(define *bf-menu-encoded* (new 'global 'boxed-array string BF_TEXT_COUNT))
+
+(dotimes (i BF_TEXT_COUNT)
+  (set! (-> *bf-menu-encoded* i) (new 'global 'string 64 (the-as string #f)))
+  )
+
+(define-perm *bf-stock-lookup-text* (function game-text-info text-id symbol string)
+             (method-of-type game-text-info lookup-text!)
+             )
+
+(defmethod lookup-text! ((this game-text-info) (arg0 text-id) (arg1 symbol))
+  "Every game text goes through here. The labels of the battle's START pages (BF_TEXT_*) come from
+   `*bf-menu-text*`, in French when the game runs in French, encoded for the game's font; every
+   other id is the stock lookup."
+  (let ((i (- (the-as int arg0) BF_TEXT_BASE)))
+    (cond
+      ((and (>= i 0) (< i BF_TEXT_COUNT))
+       (pc-encode-utf8-string (if (bf-fr?) (-> *bf-menu-text-fr* i) (-> *bf-menu-text* i)) (-> *bf-menu-encoded* i))
+       (-> *bf-menu-encoded* i)
+       )
+      (else
+        (*bf-stock-lookup-text* this arg0 arg1)
+        )
+      )
+    )
+  )
+
+(defun bf-menu-request ((p progress) (req int))
+  "A button of the Battlefront page: hand REQ to the director (spawned on demand), which runs it
+   once the START menu is closed, and close the menu."
+  (bf-director-ensure!)
+  (set! *bf-request* req)
+  (set-next-state p 'go-away 0)
+  (none)
+  )
+
+;; START > Options > Gamemode: the game modes, Battlefront alone.
+(define *bf-gamemode-page*
+  (progress-new-generic-scrolling-page BF_TEXT_GAMEMODE
+    (new 'static 'menu-generic-button-option
+      :name BF_TEXT_BATTLEFRONT
+      :on-confirm (lambda ((p progress)) (push-state p) (set-next-state p 'bf-battlefront 0) (none))
+      )
+    )
+  )
+
+;; START > Options > Gamemode > Battlefront: a new battle (its zone, side and class pages), or,
+;; during one, a class change, a restart or the end. The entries that do not apply are grey.
+(define *bf-battlefront-page*
+  (progress-new-generic-scrolling-page BF_TEXT_BATTLEFRONT
+    (new 'static 'menu-generic-button-option
+      :name BF_TEXT_NEW
+      :should-disable? (lambda () (bf-active?))
+      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_LOBBY) (none))
+      )
+    (new 'static 'menu-generic-button-option
+      :name BF_TEXT_CLASS
+      :should-disable? (lambda () (not (bf-fighting?)))
+      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_CLASS) (none))
+      )
+    (new 'static 'menu-generic-button-option
+      :name BF_TEXT_RESTART
+      :should-disable? (lambda () (not (bf-fighting?)))
+      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_RESTART) (none))
+      )
+    (new 'static 'menu-generic-button-option
+      :name BF_TEXT_QUIT
+      :should-disable? (lambda () (not (bf-active?)))
+      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_END) (none))
+      )
+    )
+  )
+
+(define-perm *bf-stock-set-menu-options* (function progress symbol int)
+             (the-as (function progress symbol int) (method-of-type progress set-menu-options))
+             )
+
+(defmethod set-menu-options ((this progress) (arg0 symbol))
+  "The START menu's pages (pc/progress/progress-pc.gc), plus 'bf-gamemode and 'bf-battlefront, each
+   opened with nothing chosen from a former visit."
+  (case arg0
+    (('bf-gamemode 'bf-battlefront)
+     (let ((page (if (= arg0 'bf-gamemode) *bf-gamemode-page* *bf-battlefront-page*)))
+       (set! (-> (the-as menu-generic-scrolling-page (-> page options 0)) selected-option-index) -1)
+       (set! (-> this current-options) page)
+       )
+     0
+     )
+    (else
+      (*bf-stock-set-menu-options* this arg0)
+      )
+    )
+  )
+
+;; The Gamemode entry of START > Options, shown while the mode is on. The page places its entries at
+;; fractions of its height (offset-y): the entries are spread again to make room for it.
+(define *bf-options-entry*
+  (new 'static 'menu-sub-menu-option :name BF_TEXT_GAMEMODE :offset-y 0.8 :next-state 'bf-gamemode)
+  )
+
+(define-perm *bf-stock-options* (array menu-option) (-> *options-options-pc* options))
+
+;; The stock entries' offsets, kept once (a REPL reload must not keep the spread ones).
+(define-perm *bf-stock-offsets* (array float)
+             (let ((offsets (new 'global 'boxed-array float (-> *bf-stock-options* length))))
+               (dotimes (i (-> *bf-stock-options* length))
+                 (set! (-> offsets i) (-> *bf-stock-options* i offset-y))
+                 )
+               offsets
+               )
+             )
+
+(define *bf-options-with-entry* (new 'global 'boxed-array menu-option (+ (-> *bf-stock-options* length) 1)))
+
+(dotimes (i (-> *bf-stock-options* length))
+  (set! (-> *bf-options-with-entry* i) (-> *bf-stock-options* i))
+  )
+
+(set! (-> *bf-options-with-entry* (-> *bf-stock-options* length)) *bf-options-entry*)
+
+(defun bf-update-options-entry ()
+  "Show the Gamemode entry in START > Options only while the mode is on (`*mod-battlefront-enable*`),
+   the n + 1 entries spread over the stock span; off, the stock list and offsets."
+  (let ((n (-> *bf-stock-options* length)))
+    (cond
+      (*mod-battlefront-enable*
+       (let* ((first (-> *bf-stock-offsets* 0))
+              (step (/ (- (-> *bf-stock-offsets* (+ n -1)) first) (the float n)))
+              )
+         (dotimes (i (+ n 1))
+           (set! (-> *bf-options-with-entry* i offset-y) (+ first (* step (the float i))))
+           )
+         )
+       (set! (-> *options-options-pc* options) *bf-options-with-entry*)
+       )
+      (else
+        (dotimes (i n)
+          (set! (-> *bf-stock-options* i offset-y) (-> *bf-stock-offsets* i))
+          )
+        (set! (-> *options-options-pc* options) *bf-stock-options*)
+        )
+      )
+    )
+  (none)
+  )
+
+(bf-update-options-entry)
+
+;; ---------------------------------------------------------------------------------------------
+;; Mods menu (L1 + SELECT) > battlefront
+;; ---------------------------------------------------------------------------------------------
+
+;; The Mods menu opens with L1 + SELECT in this mod (the author's choice): the registry's bind, which
+;; a mod may set as it loads (mods-menu.gc). Speedrunner mode's L1 + R1 + SELECT holds it too, so
+;; that gesture opens the Mods menu instead of the speedrunner menu.
+(set! *mods-menu-bind* (pad-buttons l1 select))
+
+(define *mod-battlefront-menu*
+  (new 'static 'popup-menu-submenu :label "battlefront"
+    :entries (new 'static 'boxed-array :type popup-menu-entry
+      (new 'static 'popup-menu-flag :label "Battlefront mode"
+           :is-toggled? (lambda () *mod-battlefront-enable*)
+           :on-confirm (lambda ()
+                         (set! *mod-battlefront-enable* (not *mod-battlefront-enable*))
+                         (bf-update-options-entry)
+                         ;; off during a battle: the director loads the last save once this menu
+                         ;; is closed
+                         (if (and (not *mod-battlefront-enable*) (bf-active?))
+                             (mods-menu-close!)
+                             )
+                         (none)
+                         )
+           )
+      )
+    )
+  )
+
+(defun mod-battlefront-build-menu ()
+  "Entry of the mod in the Mods menu: the mode's switch."
+  (the-as popup-menu-entry *mod-battlefront-menu*)
+  )
+
+(mods-menu-register "battlefront" mod-battlefront-build-menu)

@@ -1,0 +1,714 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: battlefront-h.gc
+;; name in dgo: battlefront-h
+;; dgos: GAME
+
+#|
+  Battlefront mod (jak3-mod-battlefront) -- shared state, zone and class tables, skeletons of the
+  Jak 2 models, and the functions the stock Haven City code calls.
+
+  Why GAME: the stock unit code that calls into the mod (guard.gc, flying-turret.gc,
+  traffic-engine.gc, traffic-manager.gc) is level code, linked again every time CWI, CTYPESA,
+  CTYPESC, DESRESC or WWD loads. The functions it calls must exist whichever of those levels is
+  loaded, so they live here, in GAME, and every one of them returns the stock answer while no
+  battle runs.
+
+  How a battle is wired (details in docs/modding/current_mod/battlefront_readme.md):
+    * the Freedom League side is the stock Freedom League guards (`crimson-guard`, traffic type
+      guard-a) and blue jetpack guards (the Spargus Citizen is a player class only: see
+      battlefront-city.gc);
+    * the Krimzon Guard side is red Krimzon Guards (Jak 2 model on the `crimson-guard` code, from
+      the same guard-a pool), red jetpack guards, KG roboguards (`roboguard-city`) and spider
+      robots (`spydroid`);
+    * both jetpack guards are the Jak 2 hover guard drawn on the stock KG `flying-turret` code;
+    * Haven City's attack controller makes them fight: the red guards register as roboguards and
+      the blue jetpacks as rifle guards, so each side hates the other with the stock hatred table.
+|#
+
+;; DECOMP BEGINS
+
+;; ---------------------------------------------------------------------------------------------
+;; Constants
+;; ---------------------------------------------------------------------------------------------
+
+(defconstant BF_RESERVE 500)          ;; units in stock per side at the start of a battle
+(defconstant BF_TEAM_COUNT 2)
+(defconstant BF_CLASS_COUNT 8)
+(defconstant BF_ZONE_COUNT 4)
+
+;; Teams. The values index `reserve` and `losses` in `bf-state`.
+(defconstant BF_TEAM_NONE -1)
+(defconstant BF_TEAM_FF 0)            ;; Freedom League ("Ligue de la liberte")
+(defconstant BF_TEAM_KG 1)            ;; Krimzon Guard ("Grenagarde")
+
+;; Classes. 0-3 Freedom League, 4-7 Krimzon Guard. Jak (3) is no longer playable: the Freedom
+;; League offers 0 to 2, and his entries only keep the indices.
+(defconstant BF_CLASS_BLUE_GUARD 0)
+(defconstant BF_CLASS_BLUE_JETPACK 1)
+(defconstant BF_CLASS_WASTELANDER 2)
+(defconstant BF_CLASS_JAK 3)
+(defconstant BF_CLASS_RED_GUARD 4)
+(defconstant BF_CLASS_RED_JETPACK 5)
+(defconstant BF_CLASS_ROBOGUARD 6)
+(defconstant BF_CLASS_SPYDROID 7)
+
+;; Battle phases.
+(defconstant BF_PHASE_OFF 0)          ;; no battle: every hook answers like the stock game
+(defconstant BF_PHASE_DEPLOY 1)       ;; travelling to the zone, waiting for its levels
+(defconstant BF_PHASE_FIGHT 2)        ;; fighting
+(defconstant BF_PHASE_OVER 3)         ;; one side ran out of units: result screen
+
+;; Weapons of the two guard classes (D-pad: left tazer, down rifle, up grenade launcher).
+(defconstant BF_WEAPON_RIFLE 0)
+(defconstant BF_WEAPON_TAZER 1)
+(defconstant BF_WEAPON_GRENADE 2)
+
+;; Indices of `*game-info*` gun-ammo. The class weapons spend Jak's own ammo, so the stock ammo
+;; pickups refill them: yellow the rifles and guns, red the grenades, blue the tazer. The battle
+;; saves Jak's ammo at its start and gives it back at its end.
+(defconstant BF_AMMO_NONE -1)
+(defconstant BF_AMMO_YELLOW 0)
+(defconstant BF_AMMO_RED 1)
+(defconstant BF_AMMO_BLUE 2)
+
+(defconstant BF_CEILING (meters 30))  ;; force-field ceiling of the jetpacks, above the higher spawn
+(defconstant BF_DROP_MAX 8)           ;; pickups of dead units waiting for the director
+(defconstant BF_RESPAWN_TIME (seconds 4)) ;; a dead player watches the battle this long, then respawns
+
+;; Army caps: at most 20 units per side on the street at once. Freedom League: 14 blue guards and 6
+;; blue jetpack guards. Krimzon Guard: 4 red riflemen, 4 red grenadiers, 4 red jetpack guards, 4
+;; robotguards and 4 spider robots. The traffic pools are capped to these sums (`bf-want-count`), and
+;; each new guard or jetpack guard takes the look furthest below its share (`*bf-look-share*`). The
+;; stock "war" spawn level fields about 50 units (guard-a 13, roboguards 6, spydroids 9, flying
+;; turrets 6, Metal Heads 17, traffic-manager.gc *want-count-levels*): the battle's 40 and no citizen
+;; stay under it.
+(defconstant BF_CAP_GUARDS 22)
+(defconstant BF_CAP_TURRETS 10)
+(defconstant BF_CAP_ROBOGUARDS 4)
+(defconstant BF_CAP_SPYDROIDS 4)
+
+;; ---------------------------------------------------------------------------------------------
+;; Types
+;; ---------------------------------------------------------------------------------------------
+
+(deftype bf-zone (basic)
+  "One war zone: a whole Haven City district, one or two of its levels (sections), with a continue
+   point of each side at its two ends. The battlefield is the district: its levels stay loaded for
+   the whole battle and the force field holds the player inside them (battlefront.gc)."
+  ((name        string)    ;; menu label
+   (desc        string)    ;; menu description
+   (name-fr     string)    ;; the same in French (game language French)
+   (desc-fr     string)
+   (ff-continue string)    ;; Freedom League spawn
+   (kg-continue string)    ;; Krimzon Guard spawn
+   (level0      symbol)    ;; the district's levels: Haven City keeps two sections loaded at most
+   (level1      symbol)    ;; #f for a one-level district
+   )
+  )
+
+(deftype bf-class-info (basic)
+  "One playable class: label, description (English, French) and side."
+  ((name     string)
+   (desc     string)
+   (name-fr  string)
+   (desc-fr  string)
+   (team     int32)
+   )
+  )
+
+(deftype bf-state (structure)
+  "The whole state of the current battle. One static instance, `*bf*`."
+  ((phase         int32)
+   (zone          int32)
+   (team          int32)          ;; player's side
+   (class         int32)          ;; player's class
+   (winner        int32)          ;; side that won, BF_TEAM_NONE while fighting
+   (reserve       int32  2)       ;; units left per side
+   (losses        int32  2)       ;; units lost per side
+   (center        vector :inline) ;; battlefield sphere: xyz center, w radius
+   (spawn         vector 2 :inline) ;; each side's spawn point
+   (phase-time    time-frame)     ;; when `phase` last changed
+   (respawn-time  time-frame)     ;; the dead player respawns then (battlefront.gc `bf-target-death`), 0 alive
+   (safe          vector :inline) ;; the player's last place standing inside the zone's levels
+   (safe-level    symbol)         ;; the level he was in there
+   (safe-time     time-frame)     ;; when that place was taken
+   ;; Handles live here, not in globals: a global symbol holds 32 bits and a handle is 64, its pid
+   ;; in the upper half, so a handle kept in a `define`d global never resolves (Lisp wiki common
+   ;; 1.4.17). Handles, not ppointers: the avatar comes from *default-dead-pool*, a dead-pool-heap
+   ;; whose freed records go to the next process spawned (gkernel.gc dead-pool-heap return-process).
+   (avatar        handle)         ;; the model of the player's class (battlefront-player.gc)
+   (director      handle)         ;; the process running the battle (battlefront.gc)
+   (spectate      handle)         ;; the unit the camera follows while the player waits to respawn
+   (weapon        int32)          ;; BF_WEAPON_* in the hands of a guard class
+   (mag           int32 3)        ;; shots left in each guard weapon's magazine, by BF_WEAPON_*
+   (redraw?       symbol)         ;; the class model must be drawn again (red guard weapon change)
+   (shield?       symbol)         ;; the robotguard's shield is up (battlefront.gc target-attacked)
+   (ceiling       float)          ;; highest y a jetpack may reach (force field)
+   (light-saved   float)          ;; Jak's light eco before the battle (the shield's hits take some)
+   (dark-saved    float)          ;; Jak's dark eco before the battle (a battle turns it into fuel)
+   (endless-dark? symbol)         ;; the endless dark eco secret was on before the battle
+   (endless-light? symbol)        ;; the same for light eco
+   (ammo-saved    float 4)        ;; Jak's gun ammo before the battle
+   (aim-frame     int64)          ;; frame the free aim below was computed for (`bf-free-aim`)
+   (aim-foe       handle)         ;; foe under the crosshair, #f for none
+   (aim           vector :inline) ;; where the crosshair's ray meets the world
+   (drop-count    int32)          ;; pickups of dead units waiting for the director
+   (drop-kind     int32 8)        ;; their pickup-type
+   (drop-pos      vector 8 :inline)
+   )
+  )
+
+(define *bf* (new 'static 'bf-state :phase BF_PHASE_OFF :team BF_TEAM_FF :winner BF_TEAM_NONE))
+;; a zero handle names process 0, which is not #f: start with no process
+(set! (-> *bf* avatar) (the-as handle #f))
+(set! (-> *bf* director) (the-as handle #f))
+(set! (-> *bf* aim-foe) (the-as handle #f))
+(set! (-> *bf* spectate) (the-as handle #f))
+
+;; Set by the Mods menu. While it is on, START > Options shows Gamemode (the battle's pages);
+;; turning it off during a battle loads the last save (battlefront.gc `bf-leave-to-save!`).
+(define *mod-battlefront-enable* #f)
+
+;; Commands of `*bf-city-hook*`, the Haven City side of a battle (levels/city/battlefront/battlefront-city.gc).
+(defconstant BF_CITY_PREPARE 0)   ;; the zone is loaded, the fight starts
+(defconstant BF_CITY_UPDATE 1)    ;; every frame of the fight
+(defconstant BF_CITY_RESET 2)     ;; the battle ends
+
+;; Factions of a battle: Freedom League and Krimzon Guard both strong everywhere, Metal Heads
+;; out; guards at the "combat" spawn level (guard-a 13), KG robots at "war" (roboguard 5,
+;; spydroid 4, flying turret 5), no civilians, no traffic vehicles. Given to the stock
+;; `faction-command` setting, and re-applied by battlefront-city.gc (a death reset or a task
+;; change restores the stock faction state).
+(define *bf-faction-commands*
+  '((faction-strength ff 20)
+    (faction-strength kg 20)
+    (faction-strength mh -20)
+    (faction-spawn ff-guard combat)
+    (faction-spawn kg-guard war)
+    (faction-spawn mh-guard off)
+    (faction-spawn ff-ped war)
+    (faction-spawn ff-vehicle off)
+    (faction-spawn kg-ambient off)
+    (faction-spawn mh-ambient off)
+    )
+  )
+
+;; Set by battlefront-city.gc each time CWI links. Only called while ctywide is active, which
+;; guarantees it points into the current link.
+(define *bf-city-hook* (the-as (function int none) #f))
+
+;; The same for the player's grenades (from, landing point): their projectile type is CWI code.
+(define *bf-city-grenade* (the-as (function vector vector none) #f))
+
+;; ---------------------------------------------------------------------------------------------
+;; Tables
+;; ---------------------------------------------------------------------------------------------
+
+;; War zones: whole districts of Haven City, the levels the game loads together there (its
+;; continue points name them: ctywide plus one or two sections). The slums are two districts the
+;; game never loads together: the old slums by the Industrial Zone (ctysluma), and the slums around
+;; the Freedom League's headquarters (ctyslumb and ctyslumc). Each side spawns at a stock continue
+;; point at one end of the district, so the stock level loading takes the player there.
+(define *bf-zones*
+  (new 'static 'boxed-array :type bf-zone
+    (new 'static 'bf-zone
+      :name "Port"
+      :desc "The whole port, from its west docks to the KG war zone."
+      :name-fr "Port"
+      :desc-fr "Tout le port, des quais ouest à la zone de guerre de la KG."
+      :ff-continue "ctyport-bbush-6"
+      ;; not ctyport-warzone: it stands on ctyinda's ground, which the game loads only near it, and a
+      ;; respawn there after a death far away found none (seen in game)
+      :kg-continue "ctyport-bombbot"
+      :level0 'ctyport
+      :level1 #f
+      )
+    (new 'static 'bf-zone
+      :name "Industrial Zone"
+      :desc "The whole Industrial Zone, its factories and pipes, from the port to the slums."
+      :name-fr "Zone industrielle"
+      :desc-fr "Toute la zone industrielle, usines et canalisations, du port aux bas quartiers."
+      :ff-continue "ctyindb-start"
+      :kg-continue "ctyinda-bbush-5"
+      :level0 'ctyinda
+      :level1 'ctyindb
+      )
+    (new 'static 'bf-zone
+      :name "Slums"
+      :desc "The whole old slums by the Industrial Zone, their alleys and yards."
+      :name-fr "Bas quartiers"
+      :desc-fr "Tous les vieux bas quartiers près de la zone industrielle, ruelles et cours."
+      :ff-continue "ctysluma-alley"
+      :kg-continue "ctysluma-bbush-3"
+      :level0 'ctysluma
+      :level1 #f
+      )
+    (new 'static 'bf-zone
+      :name "Freedom HQ"
+      :desc "The whole slums around the headquarters of the Freedom League."
+      :name-fr "QG de la Ligue"
+      :desc-fr "Tous les bas quartiers autour du quartier général de la Ligue."
+      :ff-continue "ctyslumc-freehq"
+      :kg-continue "ctyslumb-bbush-4"
+      :level0 'ctyslumb
+      :level1 'ctyslumc
+      )
+    )
+  )
+
+(define *bf-team-names* (new 'static 'boxed-array :type string "Freedom League" "Krimzon Guard"))
+(define *bf-team-names-fr* (new 'static 'boxed-array :type string "Ligue de la liberté" "Grenagarde"))
+
+(define *bf-classes*
+  (new 'static 'boxed-array :type bf-class-info
+    (new 'static 'bf-class-info :name "Blue Guard" :team BF_TEAM_FF
+         :desc "Freedom League guard. R1: fire. Square: rifle butt. D-pad: left tazer, down rifle, up grenade launcher."
+         :name-fr "Garde bleu" :desc-fr "Garde de la Ligue. R1 : tir. Carré : crosse. Croix : gauche tazer, bas fusil, haut lance-grenades.")
+    (new 'static 'bf-class-info :name "Blue Guard (Jetpack)" :team BF_TEAM_FF
+         :desc "X: up, Circle: down, else hover while the fuel lasts (dark eco gauge). R1: two quick shots. Square: dive kick."
+         :name-fr "Garde bleu (jetpack)" :desc-fr "X : monter, Rond : descendre, sinon sur place selon le carburant (jauge noire). R1 : deux tirs. Carré : piqué.")
+    (new 'static 'bf-class-info :name "Spargus Citizen" :team BF_TEAM_FF
+         :desc "Wasteland militia. Fast and light. R1: rifle. Square: rifle butt."
+         :name-fr "Citoyen de Spargus" :desc-fr "Milice du désert. Rapide et léger. R1 : fusil. Carré : crosse.")
+    ;; Jak: no longer playable (kept for the indices)
+    (new 'static 'bf-class-info :name "Jak" :team BF_TEAM_FF :desc "" :name-fr "Jak" :desc-fr "")
+    (new 'static 'bf-class-info :name "Red Krimzon Guard" :team BF_TEAM_KG
+         :desc "Krimzon Guard from the past of Haven City. R1: fire. Square: rifle butt. D-pad: left tazer, down rifle, up grenade launcher."
+         :name-fr "Garde rouge de la Grenagarde" :desc-fr "Garde de la Grenagarde du passé. R1 : tir. Carré : crosse. Croix : gauche tazer, bas fusil, haut lance-grenades.")
+    (new 'static 'bf-class-info :name "Red Krimzon Guard (Jetpack)" :team BF_TEAM_KG
+         :desc "X: up, Circle: down, else hover while the fuel lasts (dark eco gauge). R1: two quick shots. Square: dive kick."
+         :name-fr "Garde rouge (jetpack)" :desc-fr "X : monter, Rond : descendre, sinon sur place selon le carburant (jauge noire). R1 : deux tirs. Carré : piqué.")
+    (new 'static 'bf-class-info :name "Robotguard" :team BF_TEAM_KG
+         :desc "Heavy KG robot. Slow. R1: two shots. Square: punch. R2: roll into a ball, fast and tougher (red gauge, 5 s). Circle: red aura shield, breaks when shot."
+         :name-fr "Robotgarde" :desc-fr "Robot lourd de la KG. Lent. R1 : deux tirs. Carré : poing. R2 : boule rapide et plus résistante (jauge rouge, 5 s). Rond : aura rouge, se brise sous les tirs.")
+    (new 'static 'bf-class-info :name "Spider Robot" :team BF_TEAM_KG
+         :desc "KG spider. Fast, jumps high. Circle: bite. R2: blue eco sprint, twice as fast (blue gauge, refills in 10 s)."
+         :name-fr "Araignée robot" :desc-fr "Araignée de la KG. Rapide, saute haut. Rond : morsure. R2 : sprint éco bleue, deux fois plus vite (jauge bleue, recharge en 10 s).")
+    )
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Text (English, or French when the game runs in French)
+;; ---------------------------------------------------------------------------------------------
+
+(defun bf-fr? ()
+  "#t when the game text is French. The PC port draws game text in the language of its settings
+   (pc-settings text-language), not in the one a save game restores."
+  (= (-> *pc-settings* text-language) (pc-language french))
+  )
+
+(defun bf-tr ((en string) (fr string))
+  "EN, or FR when the game runs in French."
+  (if (bf-fr?) fr en)
+  )
+
+(defun bf-team-name ((team int))
+  "Name of side TEAM in the game's language."
+  (if (bf-fr?) (-> *bf-team-names-fr* team) (-> *bf-team-names* team))
+  )
+
+(defun bf-zone-name ((zone int))
+  "Name of war zone ZONE in the game's language."
+  (bf-tr (-> *bf-zones* zone name) (-> *bf-zones* zone name-fr))
+  )
+
+(defun bf-class-name ((class int))
+  "Name of class CLASS in the game's language."
+  (bf-tr (-> *bf-classes* class name) (-> *bf-classes* class name-fr))
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Skeletons of the Jak 2 models (art built by build-actor, shipped in CTYPESA / CTYPESC)
+;; ---------------------------------------------------------------------------------------------
+
+;; Red Krimzon Guard: the Jak 3 guard's skeleton and clips, at the stock crimson-guard indices
+;; (scripts/battlefront/make_models.py pads the clips so idle is 4, as in crimson-guard-ag).
+(def-art-elt bf-red-guard-ag bf-red-guard-lod0-jg 0)
+(def-art-elt bf-red-guard-ag bf-red-guard-lod0-mg 1)
+(def-art-elt bf-red-guard-ag bf-red-guard-idle-ja 4)
+
+(defskelgroup skel-bf-red-guard bf-red-guard bf-red-guard-lod0-jg -1
+              ((bf-red-guard-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 5)
+              :origin-joint-index 3
+              )
+
+;; The same guard with the grenade launcher / tazer instead of the rifle (a build-actor model
+;; draws all its primitives, so each weapon is its own model).
+(def-art-elt bf-red-guard-gl-ag bf-red-guard-gl-lod0-jg 0)
+(def-art-elt bf-red-guard-gl-ag bf-red-guard-gl-lod0-mg 1)
+(def-art-elt bf-red-guard-gl-ag bf-red-guard-gl-idle-ja 4)
+
+(defskelgroup skel-bf-red-guard-gl bf-red-guard-gl bf-red-guard-gl-lod0-jg -1
+              ((bf-red-guard-gl-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 5)
+              :origin-joint-index 3
+              )
+
+;; Jetpack guards. Clip order (make_models.py): the three the flying-turret code plays first
+;; (2 idle, 3 hover, 4 fire), then the others.
+(def-art-elt bf-hover-red-ag bf-hover-red-lod0-jg 0)
+(def-art-elt bf-hover-red-ag bf-hover-red-lod0-mg 1)
+(def-art-elt bf-hover-red-ag bf-hover-red-idle-ja 2)
+(def-art-elt bf-hover-blue-ag bf-hover-blue-lod0-jg 0)
+(def-art-elt bf-hover-blue-ag bf-hover-blue-lod0-mg 1)
+(def-art-elt bf-hover-blue-ag bf-hover-blue-idle-ja 2)
+
+(defskelgroup skel-bf-hover-red bf-hover-red bf-hover-red-lod0-jg bf-hover-red-idle-ja
+              ((bf-hover-red-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 4)
+              :origin-joint-index 3
+              )
+
+(defskelgroup skel-bf-hover-blue bf-hover-blue bf-hover-blue-lod0-jg bf-hover-blue-idle-ja
+              ((bf-hover-blue-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 4)
+              :origin-joint-index 3
+              )
+
+;; Clip indices of the jetpack guard art groups (both share the order).
+(defconstant BF_HOVER_IDLE 2)
+(defconstant BF_HOVER_FLY_FORWARD 3)
+(defconstant BF_HOVER_SHOOT 4)
+(defconstant BF_HOVER_FLY_RIGHT 5)
+(defconstant BF_HOVER_FLY_LEFT 6)
+(defconstant BF_HOVER_FLY_BACK 7)
+(defconstant BF_HOVER_DEATH 12)
+
+;; ---------------------------------------------------------------------------------------------
+;; State helpers
+;; ---------------------------------------------------------------------------------------------
+
+(defun bf-active? ()
+  "#t from the deployment to the end of the result screen. Every hook below answers like the stock
+   game while this is #f."
+  (!= (-> *bf* phase) BF_PHASE_OFF)
+  )
+
+(defun bf-fighting? ()
+  "#t while losses count."
+  (= (-> *bf* phase) BF_PHASE_FIGHT)
+  )
+
+(defun bf-set-phase! ((phase int))
+  "Enter PHASE and stamp its start time."
+  (set! (-> *bf* phase) phase)
+  (set! (-> *bf* phase-time) (current-time))
+  (none)
+  )
+
+(defun bf-other-team ((team int))
+  "The opposite side of TEAM."
+  (if (= team BF_TEAM_FF) BF_TEAM_KG BF_TEAM_FF)
+  )
+
+(defun bf-art-name ((proc process))
+  "Name of the art group PROC draws, or \"\" when it has no draw-control yet."
+  (let ((pd (the-as process-drawable proc)))
+    (if (and (type? proc process-drawable) (nonzero? (-> pd draw)) (-> pd draw) (-> pd draw art-group))
+        (-> pd draw art-group name)
+        ""
+        )
+    )
+  )
+
+(defun bf-red-guard? ((proc process))
+  "#t when PROC is a crimson-guard drawn with one of the red Jak 2 models."
+  (and (= (-> proc type symbol) 'crimson-guard)
+       (let ((name (bf-art-name proc)))
+         (or (string= name "bf-red-guard") (string= name "bf-red-guard-gl"))
+         )
+       )
+  )
+
+(defun bf-hover-art? ((proc process))
+  "#t when PROC draws one of the two jetpack guard models."
+  (let ((name (bf-art-name proc)))
+    (or (string= name "bf-hover-red") (string= name "bf-hover-blue"))
+    )
+  )
+
+(defun bf-unit-team ((proc process))
+  "Side of a unit, BF_TEAM_NONE for anything that does not fight in the battle."
+  (let ((sym (-> proc type symbol)))
+    (cond
+      ((= proc *target*) (-> *bf* team))
+      ((= sym 'crimson-guard) (if (bf-red-guard? proc) BF_TEAM_KG BF_TEAM_FF))
+      ((= sym 'flying-turret) (if (string= (bf-art-name proc) "bf-hover-blue") BF_TEAM_FF BF_TEAM_KG))
+      ((or (= sym 'roboguard-city) (= sym 'spydroid)) BF_TEAM_KG)
+      (else BF_TEAM_NONE)
+      )
+    )
+  )
+
+(defun bf-count-loss ((team int))
+  "One unit of TEAM is lost: take it from the reserve, and end the battle when the reserve is empty.
+   No-op outside the fight phase."
+  (when (and (bf-fighting?) (>= team 0) (< team BF_TEAM_COUNT))
+    (set! (-> *bf* reserve team) (max 0 (+ (-> *bf* reserve team) -1)))
+    (+! (-> *bf* losses team) 1)
+    (when (zero? (-> *bf* reserve team))
+      (set! (-> *bf* winner) (bf-other-team team))
+      (bf-set-phase! BF_PHASE_OVER)
+      )
+    )
+  (none)
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Functions called by stock level code (each a `;; MOD battlefront` line in the stock file)
+;; ---------------------------------------------------------------------------------------------
+
+;; Live units of each look: blue guard, red rifleman, red grenadier, blue jetpack, red jetpack.
+;; Counted by the director every frame of a battle (`bf-count-looks!`, in its own process), and
+;; raised by the two functions below for each unit they hand a look to, so that a pool spawning
+;; several units in one frame stays balanced.
+(defconstant BF_LOOK_BLUE 0)
+(defconstant BF_LOOK_RED 1)
+(defconstant BF_LOOK_RED_GL 2)
+(defconstant BF_LOOK_JET_BLUE 3)
+(defconstant BF_LOOK_JET_RED 4)
+(define *bf-looks* (new 'static 'array int32 5 0 0 0 0 0))
+
+(defun bf-count-looks! ()
+  "Count the live guards and jetpack guards of each look into `*bf-looks*`. Called by the director,
+   never from a unit's init: a unit is set up on the small stack of the traffic manager, and a walk
+   of the whole process tree there crashed the game (illegal instruction while a zone loaded)."
+  (dotimes (i 5)
+    (set! (-> *bf-looks* i) 0)
+    )
+  (iterate-process-tree
+    *active-pool*
+    (lambda ((p process))
+      (let ((sym (-> p type symbol)))
+        (when (or (= sym 'crimson-guard) (= sym 'flying-turret))
+          (let ((name (bf-art-name p)))
+            (cond
+              ((string= name "crimson-guard") (+! (-> *bf-looks* BF_LOOK_BLUE) 1))
+              ((string= name "bf-red-guard") (+! (-> *bf-looks* BF_LOOK_RED) 1))
+              ((string= name "bf-red-guard-gl") (+! (-> *bf-looks* BF_LOOK_RED_GL) 1))
+              ((string= name "bf-hover-blue") (+! (-> *bf-looks* BF_LOOK_JET_BLUE) 1))
+              ((string= name "bf-hover-red") (+! (-> *bf-looks* BF_LOOK_JET_RED) 1))
+              )
+            )
+          )
+        )
+      #t
+      )
+    *null-kernel-context*
+    )
+  (none)
+  )
+
+;; Share of each look in its pool (army caps above): 14 + 4 + 4 = BF_CAP_GUARDS, 6 + 4 = BF_CAP_TURRETS.
+(define *bf-look-share* (new 'static 'array int32 5 14 4 4 6 4))
+
+(defun bf-take-look ((look int))
+  "Count one more unit of LOOK (it is being spawned) and return LOOK."
+  (+! (-> *bf-looks* look) 1)
+  look
+  )
+
+(defun bf-look-gap ((look int))
+  "How many units LOOK lacks to reach its share of its pool (negative when it has too many)."
+  (- (-> *bf-look-share* look) (-> *bf-looks* look))
+  )
+
+(defun bf-guard-skel-name ()
+  "Skeleton for a new crimson-guard process (guard.gc init-enemy!). During a battle the guard-a
+   pool holds 14 blue guards (Freedom League) and 8 red Jak 2 Krimzon Guards, half riflemen, half
+   grenadiers: the new guard takes the look furthest below its share. An alternation was not
+   enough: the traffic kills and spawns guards all the time (trims, section changes), and in game
+   the pool drifted to no blue guard at all."
+  (if (not (bf-active?))
+      "skel-crimson-guard"
+      (let ((look BF_LOOK_BLUE))
+        (if (< (bf-look-gap look) (bf-look-gap BF_LOOK_RED))
+            (set! look BF_LOOK_RED)
+            )
+        (if (< (bf-look-gap look) (bf-look-gap BF_LOOK_RED_GL))
+            (set! look BF_LOOK_RED_GL)
+            )
+        (bf-take-look look)
+        (case look
+          ((BF_LOOK_RED) "skel-bf-red-guard")
+          ((BF_LOOK_RED_GL) "skel-bf-red-guard-gl")
+          (else "skel-crimson-guard")
+          )
+        )
+      )
+  )
+
+(defun bf-turret-skel-name ()
+  "Skeleton for a new flying-turret process (flying-turret.gc init-enemy!). During a battle the
+   flying turrets become jetpack guards, 6 blue (Freedom League) and 4 red: the new one takes the
+   colour furthest below its share (see `bf-guard-skel-name`)."
+  (if (not (bf-active?))
+      "skel-flying-turret"
+      (let ((look (if (< (bf-look-gap BF_LOOK_JET_BLUE) (bf-look-gap BF_LOOK_JET_RED))
+                      BF_LOOK_JET_RED
+                      BF_LOOK_JET_BLUE
+                      )
+                  )
+            )
+        (bf-take-look look)
+        (if (= look BF_LOOK_JET_BLUE)
+            "skel-bf-hover-blue"
+            "skel-bf-hover-red"
+            )
+        )
+      )
+  )
+
+(defun bf-want-count ((kind int) (stock int))
+  "Army cap of traffic type KIND during a battle, STOCK otherwise. Asked twice:
+   * the pool size (traffic-manager.gc traffic-manager-method-22, every frame): a pool spawns its
+     units up to it and deactivates the sleeping ones above it (traffic-manager-method-18);
+   * how many units of the type may be awake (traffic-engine.gc activate-one-vehicle), in place
+     of the squad controls' count for the territory, which they rewrite with their alert level:
+     at the Port it allowed 7 guards, 1 flying turret and no roboguard, and the battle starved."
+  (if (bf-active?)
+      (case (the-as traffic-type kind)
+        (((traffic-type guard-a)) BF_CAP_GUARDS)
+        (((traffic-type flying-turret)) BF_CAP_TURRETS)
+        (((traffic-type roboguard)) BF_CAP_ROBOGUARDS)
+        (((traffic-type spydroid)) BF_CAP_SPYDROIDS)
+        ;; no citizen on a battlefield: walkers, pilots, and their bikes and cars (the faction
+        ;; commands leave some civilians to the faction manager's levels)
+        (((traffic-type civilian-male)
+          (traffic-type civilian-female)
+          (traffic-type civilian-fat)
+          (traffic-type civilian-pilot)
+          (traffic-type civilian-bike-a)
+          (traffic-type civilian-bike-b)
+          (traffic-type civilian-bike-c)
+          (traffic-type civilian-car-a)
+          (traffic-type civilian-car-b)
+          (traffic-type civilian-car-c)
+          )
+         0
+         )
+        (else stock)
+        )
+      stock
+      )
+  )
+
+(defun bf-zone-level? ((zone int) (name symbol))
+  "#t when level NAME is one of war zone ZONE's levels."
+  (and name (or (= name (-> *bf-zones* zone level0)) (= name (-> *bf-zones* zone level1))))
+  )
+
+(defun bf-unit-scale ((proc process) (stock float))
+  "Root scale of a flying-turret: the turret is drawn at 2.0, a jetpack guard at its own size."
+  (if (bf-hover-art? proc) 1.0 stock)
+  )
+
+(defun bf-attacker-type ((proc process) (stock int))
+  "Haven City attack-controller type a unit registers with (city-target-type). The red guard
+   registers as a roboguard (9) and the blue jetpack as a rifle guard (4), so the stock hatred
+   table sends each side against the other."
+  (cond
+    ((not (bf-active?)) stock)
+    ((bf-red-guard? proc) 9)
+    ((string= (bf-art-name proc) "bf-hover-blue") 4)
+    (else stock)
+    )
+  )
+
+(defun bf-guard-activated ((proc process))
+  "Tail of crimson-guard citizen-method-194 (each time a guard is put on the street). A red guard
+   gets `process-mask enemy` back, which stock citizens lose: Jak's aim and the wastelanders'
+   foe search only consider processes that carry it."
+  (when (bf-red-guard? proc)
+    (logior! (-> proc mask) (process-mask enemy))
+    )
+  (none)
+  )
+
+(defun bf-queue-drop ((proc process))
+  "Maybe leave a pickup where PROC died: 25 % yellow ammo (rifles, guns), 12 % red (grenades), 12 %
+   blue (tazer), 12 % health, 6 % dark eco (jetpack fuel), else nothing. Queued for the director,
+   which spawns it in its own process (`bf-spawn-drops`): this runs on the traffic manager's small
+   stack."
+  (when (and (type? proc process-drawable) (< (-> *bf* drop-count) BF_DROP_MAX))
+    (let* ((roll (rand-vu-int-count 100))
+           (kind (cond
+                   ((< roll 25) (pickup-type ammo-yellow))
+                   ((< roll 37) (pickup-type ammo-red))
+                   ((< roll 49) (pickup-type ammo-blue))
+                   ((< roll 61) (pickup-type health))
+                   ((< roll 67) (pickup-type eco-pill-dark))
+                   (else (pickup-type none))
+                   )
+                 )
+           )
+      (when (!= kind (pickup-type none))
+        (let ((i (-> *bf* drop-count)))
+          (set! (-> *bf* drop-kind i) (the-as int kind))
+          (vector-copy! (-> *bf* drop-pos i) (-> (the-as process-drawable proc) root trans))
+          (+! (-> *bf* drop-count) 1)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-unit-killed ((proc process))
+  "Called by the traffic engine when one of its units dies (traffic-tracker set-process-to-killed,
+   reached once per real death; units recycled out of view do not go there): its side loses one
+   unit, and it may leave a pickup."
+  (when (bf-fighting?)
+    (bf-count-loss (bf-unit-team proc))
+    (bf-queue-drop proc)
+    )
+  (none)
+  )
+
+(defun bf-foe? ((proc process) (team int))
+  "#t when PROC is a living unit of the side opposite TEAM, or the player when on that side."
+  (and proc
+       (type? proc process-focusable)
+       (not (focus-test? (the-as process-focusable proc) inactive disable dead))
+       (let ((other (bf-unit-team proc)))
+         (and (>= other 0) (!= other team))
+         )
+       )
+  )
+
+(defun bf-hover-animate ((this process-drawable) (speed float))
+  "Post of a flying-turret drawn as a jetpack guard (flying-turret.gc enemy-common-post). The
+   turret code holds its idle pose; this loops the jetpack guard's idle or forward clip by SPEED
+   (units per second) unless the turret code is playing the firing clip."
+  (when (and (bf-hover-art? this) (nonzero? (-> this skel)) (> (-> this skel active-channels) 0))
+    (let* ((chan (-> this skel root-channel 0))
+           (fire (-> this draw art-group data BF_HOVER_SHOOT))
+           )
+      (when (!= (-> chan frame-group) fire)
+        (let ((want (the-as art-joint-anim (-> this draw art-group data (if (< speed (meters 4))
+                                                                              BF_HOVER_IDLE
+                                                                              BF_HOVER_FLY_FORWARD
+                                                                              )
+                                                    )
+                            )
+                    )
+              )
+          (when (!= (-> chan frame-group) want)
+            (joint-control-channel-group! chan want num-func-identity)
+            (set! (-> chan frame-num) 0.0)
+            )
+          (let ((last (the float (+ (-> want frames num-frames) -1))))
+            (set! (-> chan frame-num) (+ (-> chan frame-num) (* 0.5 (-> this clock time-adjust-ratio))))
+            (if (>= (-> chan frame-num) last)
+                (set! (-> chan frame-num) 0.0)
+                )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )

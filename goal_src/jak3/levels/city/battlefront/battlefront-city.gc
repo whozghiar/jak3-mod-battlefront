@@ -1,0 +1,309 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: battlefront-city.gc
+;; name in dgo: battlefront-city
+;; dgos: CWI
+
+#|
+  Battlefront mod -- the part of a battle that needs Haven City's own types (attack controller,
+  faction manager, the guards' grenade). Linked with CWI, so it only exists while Haven City is
+  loaded; the GAME code (pc/features/battlefront/) reaches it through `*bf-city-hook*` and
+  `*bf-city-grenade*`, which this file sets at link time, and calls them only while ctywide is
+  active (a fresh link of this file).
+
+  Hatred: the stock attack-controller table already makes guards and robots fight. A Krimzon Guard
+  player must not be the robots' target and must be the guards'. The changed entries are saved
+  first and written back when the battle ends.
+
+  No Spargus citizen fights here: wastelanders brought into Haven City by the traffic engine froze
+  or crashed the game within minutes (in the background collision query
+  fill-bg-using-line-sphere-new, seen in two of two ten-minute battles; none in a battle without
+  them). The Spargus Citizen stays a playable class (battlefront-player.gc), which runs no
+  wastelander code.
+|#
+
+;; DECOMP BEGINS
+
+;; attack-controller types (city-target-type) used below
+(defconstant BF_CTT_JAK 0)
+(defconstant BF_CTT_GUARD_TAZER 3)
+(defconstant BF_CTT_ROBOGUARD 9)
+
+(deftype bf-city-saved (structure)
+  "Stock hatred indices overwritten during a battle, to write back at its end."
+  ((saved?        symbol)
+   (robot-to-jak  uint8 4)   ;; rows 9-12 (roboguard, turret, spydroid, giant), column Jak
+   (guard-to-jak  uint8 3)   ;; rows 3-5 (tazer, rifle, grenade guards), column Jak
+   (faction-time  time-frame) ;; last re-application of the battle's faction commands
+   (reinforce-time time-frame) ;; last reinforcement (`bf-city-reinforce`)
+   )
+  )
+
+(define *bf-city-saved* (new 'static 'bf-city-saved))
+
+(defun bf-city-hatred-slot ((row int) (col int))
+  "Index of the (attacker ROW, target COL) entry of the attack controller's hatred table."
+  (+ (* row (-> *cty-attack-controller* max-num-object-types)) col)
+  )
+
+(defun bf-city-controller? ()
+  "#t when Haven City's attack controller exists (it is built at ctywide login)."
+  (and *cty-attack-controller* (nonzero? *cty-attack-controller*))
+  )
+
+(defun bf-city-apply-hatred ((kg-player symbol))
+  "With KG-PLAYER, robots ignore the player and guards hate him as robots do. The stock entries
+   are saved the first time. The battle's are written on every call: a death reset rebuilds the
+   stock table (ctywide-activate -> cty-attack-reset -> init-attack-controller), and the writes are
+   idempotent."
+  (when (bf-city-controller?)
+    (let ((saved *bf-city-saved*)
+          (table (-> *cty-attack-controller* hatred-indices))
+          )
+      (when (not (-> saved saved?))
+        (dotimes (i 4)
+          (set! (-> saved robot-to-jak i) (-> table (bf-city-hatred-slot (+ BF_CTT_ROBOGUARD i) BF_CTT_JAK)))
+          )
+        (dotimes (i 3)
+          (set! (-> saved guard-to-jak i) (-> table (bf-city-hatred-slot (+ BF_CTT_GUARD_TAZER i) BF_CTT_JAK)))
+          )
+        (set! (-> saved saved?) #t)
+        )
+      (when kg-player
+        (let ((robot-vs-jak (-> saved robot-to-jak 0)))
+          ;; entry 0 is the controller's empty hatred: no attack
+          (dotimes (i 4)
+            (set! (-> table (bf-city-hatred-slot (+ BF_CTT_ROBOGUARD i) BF_CTT_JAK)) 0)
+            )
+          (dotimes (i 3)
+            (set! (-> table (bf-city-hatred-slot (+ BF_CTT_GUARD_TAZER i) BF_CTT_JAK)) robot-vs-jak)
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-city-restore-hatred ()
+  "Write back the entries `bf-city-apply-hatred` changed."
+  (when (and (bf-city-controller?) (-> *bf-city-saved* saved?))
+    (let ((saved *bf-city-saved*)
+          (table (-> *cty-attack-controller* hatred-indices))
+          )
+      (dotimes (i 4)
+        (set! (-> table (bf-city-hatred-slot (+ BF_CTT_ROBOGUARD i) BF_CTT_JAK)) (-> saved robot-to-jak i))
+        )
+      (dotimes (i 3)
+        (set! (-> table (bf-city-hatred-slot (+ BF_CTT_GUARD_TAZER i) BF_CTT_JAK)) (-> saved guard-to-jak i))
+        )
+      )
+    )
+  (set! (-> *bf-city-saved* saved?) #f)
+  (none)
+  )
+
+(defun bf-city-zone-branch? ((branch nav-branch))
+  "#t when nav BRANCH (a lane of a segment, or the one a unit walks) belongs to a section of the
+   battle's zone: it lies in that section's nav-graph branch array (the traffic engine patches
+   each segment's branch to point there, traffic-engine.gc level-link). A lane of a section next
+   to the zone, which the game loads at its edge, is not one. #f for a missing branch."
+  (let ((addr (the-as uint branch))
+        (found #f)
+        )
+    (when (and branch (nonzero? addr))
+      (dotimes (i 2)
+        (let* ((name (if (zero? i) (-> *bf-zones* (-> *bf* zone) level0) (-> *bf-zones* (-> *bf* zone) level1)))
+               (lev (if name (level-get *level* name)))
+               )
+          (when (and lev (= (-> lev status) 'active) (nonzero? (-> lev bsp city-level-info)))
+            (let ((graph (-> lev bsp city-level-info nav-graph)))
+              (if (and (nonzero? graph)
+                       (>= addr (the-as uint (-> graph branch-array 0)))
+                       (< addr (the-as uint (-> graph branch-array (-> graph branch-count))))
+                       )
+                  (set! found #t)
+                  )
+              )
+            )
+          )
+        )
+      )
+    found
+    )
+  )
+
+(defun bf-keep-unit? ((unit process))
+  "Called by the traffic engine (traffic-engine.gc, its per-frame check of the awake pedestrians)
+   for UNIT outside the cells it keeps awake, the ones its camera's visibility marks: the stock
+   sends such a unit back to its pool. During a fight, #t keeps it awake wherever the camera is
+   while it walks a lane of the zone (`bf-city-zone-branch?`): units vanished out of the camera's
+   view (the author's notes), and with them the fight the reserves count. One on a lane of the
+   next section goes back to its pool as in the stock (no death: the reserves keep it), since that
+   section unloads as the player walks away. One on no lane (a flying unit) stays awake."
+  (and (bf-fighting?)
+       (let ((branch (-> (the-as citizen unit) controller branch)))
+         (or (not branch) (zero? (the-as uint branch)) (bf-city-zone-branch? branch))
+         )
+       )
+  )
+
+(defconstant BF_REINFORCE_MIN_DIST (meters 30)) ;; reinforcements wake this far from the player at least
+(defconstant BF_REINFORCE_NEAR (meters 150))    ;; and mostly this close to him
+
+(defun bf-city-pick-segment ((found traffic-find-segment-struct) (seg nav-segment))
+  "Callback of `bf-city-reinforce`'s search: keep, at random, a pedestrian segment the traffic
+   could fill now (the stock steady spawn's tests, traffic-engine.gc update-traffic-amount), on a
+   section of the zone (`bf-city-zone-branch?`: the next section can be loaded too, at the edge)
+   and at least BF_REINFORCE_MIN_DIST from the player, whose position `found` carries in `dir`;
+   one within BF_REINFORCE_NEAR of him weighs three times more."
+  (when (and (nonzero? (-> seg nav-mesh-id))
+             (bf-city-zone-branch? (-> seg branch))
+             (< (-> seg branch density) (the-as uint 128))
+             (not (can-dest-be-used? *traffic-engine* (-> seg branch)))
+             (< BF_REINFORCE_MIN_DIST (vector-vector-distance (-> seg vertex 0) (-> found dir)))
+             )
+    ;; anywhere in the district, but mostly within BF_REINFORCE_NEAR of the player, where he fights
+    (let ((roll (* (rand-vu)
+                   (if (< (vector-vector-distance (-> seg vertex 0) (-> found dir)) BF_REINFORCE_NEAR) 1.0 0.3)
+                   )
+                )
+          )
+      (when (< (-> found best-rating) roll)
+        (set! (-> found best-rating) roll)
+        (set! (-> found best-seg) seg)
+        )
+      )
+    )
+  (none)
+  )
+
+(defconstant BF_REINFORCE_BATCH 3) ;; units woken by one reinforcement at most
+
+(defun bf-city-reinforce ()
+  "Wake up to BF_REINFORCE_BATCH sleeping units of the battle, each on a segment of the battlefield,
+   away from the player. The traffic wakes its pedestrians only on segments entering its active
+   cells, one a frame (update-traffic-amount): around the Port's spawns it found so few that the
+   dead were not replaced and the battle starved (3 to 5 guards awake of 14, 0 to 2 Freedom League
+   units). Each unit woken is of the battle's type furthest below its cap (`bf-want-count`), and
+   `activate-by-type` keeps every stock check of a spawn (pool, faction permission, room on the
+   spot). One unit a time left the armies of 20 per side at 14 to 17 (units die as fast)."
+  (let ((te *traffic-engine*))
+    (dotimes (n BF_REINFORCE_BATCH)
+      (when (and te (nonzero? te) (> (-> te tracker1 inactive-object-count) 0) *target*)
+        (let ((kind -1)
+              (gap 0)
+              )
+          (dotimes (i 4)
+            (let* ((type (-> (new 'static 'array int32 4 6 16 14 15) i))
+                   (info (-> te object-type-info-array type))
+                   (left (- (bf-want-count type 0) (-> info active-count)))
+                   )
+              (when (and (> (-> info inactive-count) 0) (< gap left))
+                (set! gap left)
+                (set! kind type)
+                )
+              )
+            )
+          ;; a spawn can be refused (a unit already on the spot, the territory's faction rules):
+          ;; another random segment then, three tries in all (the unit's type awake count tells)
+          (when (>= kind 0)
+            (let ((found (new 'stack-no-clear 'traffic-find-segment-struct))
+                  (info (-> te object-type-info-array kind))
+                  )
+              (let ((before (-> info active-count))
+                    (tries 0)
+                    )
+                (while (and (< tries 3) (= (-> info active-count) before))
+                  (+! tries 1)
+                  (vector-copy! (-> found dir) (-> *target* control trans))
+                  (set! (-> found best-rating) -1.0)
+                  (set! (-> found best-seg) #f)
+                  ;; the whole district (center w covers its map), on the guards' tracker (1)
+                  (callback-on-nav-segments-in-sphere te (-> *bf* center) 1 found bf-city-pick-segment)
+                  (if (-> found best-seg)
+                      (activate-by-type (-> te tracker1) (the-as traffic-type kind) (-> found best-seg) 0.0)
+                      )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-city-command ((cmd int))
+  "`*bf-city-hook*`. CMD: BF_CITY_PREPARE once the zone is loaded, BF_CITY_UPDATE every frame of
+   the fight, BF_CITY_RESET when the battle ends. The unit pools are not rebuilt here: the director
+   respawns the player with `initialize!` 'life at both ends of a battle (battlefront.gc), which
+   rebuilds them the way a death does."
+  (cond
+    ((= cmd BF_CITY_PREPARE)
+     (bf-city-restore-hatred)
+     )
+    ((= cmd BF_CITY_UPDATE)
+     (bf-city-apply-hatred (= (-> *bf* team) BF_TEAM_KG))
+     ;; a death reset (ctywide activates again) or a task change restores the stock faction
+     ;; state: apply the battle's every 2 seconds
+     (when (and *cty-faction-manager*
+                (nonzero? *cty-faction-manager*)
+                (time-elapsed? (-> *bf-city-saved* faction-time) (seconds 2))
+                )
+       (set-time! (-> *bf-city-saved* faction-time))
+       (cty-faction-evaluate-commands *bf-faction-commands*)
+       )
+     ;; reinforcements, four a second at most
+     (when (time-elapsed? (-> *bf-city-saved* reinforce-time) (seconds 0.25))
+       (set-time! (-> *bf-city-saved* reinforce-time))
+       (bf-city-reinforce)
+       )
+     )
+    ((= cmd BF_CITY_RESET)
+     (bf-city-restore-hatred)
+     )
+    )
+  (none)
+  )
+
+(defun bf-city-throw-grenade ((from vector) (to vector))
+  "`*bf-city-grenade*`: the player throws a guard grenade from FROM onto TO, the projectile and arc
+   of the grenade guards (guard-grenade.gc crimson-guard-method-264). Jak owns it and it skips him;
+   with no charge it bursts where it lands."
+  (let ((traj (new 'stack-no-clear 'traj3d-params)))
+    (vector-copy! (-> traj src) from)
+    (vector-copy! (-> traj dest) to)
+    (set! (-> traj initial-tilt) 8192.0)
+    (set! (-> traj gravity) 184320.0)
+    (when (traj3d-calc-initial-velocity-using-tilt traj)
+      (let ((params (new 'stack-no-clear 'projectile-init-by-other-params)))
+        (set! (-> params ent) (-> *target* entity))
+        (set! (-> params charge) 0.0)
+        (set! (-> params options) (projectile-options))
+        (vector-copy! (-> params pos) from)
+        (vector-copy! (-> params vel) (-> traj initial-velocity))
+        (set! (-> params notify-handle) (the-as handle #f))
+        (set! (-> params owner-handle) (process->handle *target*))
+        (set! (-> params target-handle) (the-as handle #f))
+        (set! (-> params target-pos quad) (the-as uint128 0))
+        (set! (-> params ignore-handle) (process->handle *target*))
+        (let* ((info *game-info*)
+               (id (+ (-> info attack-id) 1))
+               )
+          (set! (-> info attack-id) id)
+          (set! (-> params attack-id) id)
+          )
+        (set! (-> params timeout) (seconds 4))
+        (spawn-projectile vehicle-grenade-deflect params *target* *default-dead-pool*)
+        )
+      )
+    )
+  (none)
+  )
+
+;; install the hooks at every link of CWI (the previous values pointed into the previous link)
+(set! *bf-city-hook* bf-city-command)
+(set! *bf-city-grenade* bf-city-throw-grenade)

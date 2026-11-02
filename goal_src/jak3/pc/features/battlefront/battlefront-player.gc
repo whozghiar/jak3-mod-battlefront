@@ -1,0 +1,1651 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: battlefront-player.gc
+;; name in dgo: battlefront-player
+;; dgos: GAME
+
+#|
+  Battlefront mod -- playing a class.
+
+  Jak's `target` stays the player: the camera, the controls, the collision that enemy shots hit,
+  health and death are all Jak's. `bf-avatar` hides him and draws the class instead: it follows
+  Jak's position and facing every frame, picks the class's own clips from Jak's motion, and turns
+  Jak's buttons into the class's moves:
+
+    class            model (art level)            moves                          R1             Square      Circle
+    Blue Guard       crimson-guard (ctypesa)      D-pad: weapon                  weapon         rifle butt
+    Blue Jetpack     bf-hover-blue (ctypesc)      X: up, Circle: down (fuel)     2-shot salvo   dive kick
+    Spargus Citizen  wlander-male (ctypesa)       faster                         rifle shot     rifle butt
+    Red Guard        bf-red-guard (ctypesa)       D-pad: weapon                  weapon         rifle butt
+    Red Jetpack      bf-hover-red (ctypesc)       X: up, Circle: down (fuel)     2-shot salvo   dive kick
+    Robotguard       roboguard-city (ctypesc)     slower, R2: rolling ball       2-shot salvo   punch       shield
+    Spider Robot     spydroid (ctypesc)           x1.5, higher jumps, R2: x2                                bite
+
+  Jak himself (class 3) is no longer playable.
+
+  Guard weapons (D-pad left, down, up): tazer (an electric arc, blue ammo), rifle (yellow ammo),
+  grenade launcher (red ammo). The Spargus citizen's rifle spends yellow ammo; the jetpacks' and
+  the robotguard's built-in guns spend none, their salvos are paced by a delay. The ammo is Jak's own gun ammo,
+  refilled by the stock ammo pickups the dead units leave (battlefront-h.gc `bf-queue-drop`).
+
+  Jak's own gun, melee, board and dark/light powers are turned off by settings the avatar owns,
+  so they come back by themselves when it dies. The shots are the stock `guard-shot` the guards
+  fire, spawned with Jak as their parent: they skip Jak's collision and count as Jak's hits.
+
+  `bf-icon` draws a class model over the game: the turning preview of the class page
+  (battlefront.gc).
+|#
+
+;; DECOMP BEGINS
+
+(defconstant BF_FIRE_RANGE (meters 70))     ;; auto-aim range of the class weapons
+(defconstant BF_SHOT_SPEED (meters 200))    ;; guard-shot speed (stock guards fire at 200 m/s)
+(defconstant BF_JET_LIFT (meters 7))        ;; upward speed while the jetpack climbs (X)
+(defconstant BF_JET_DROP (meters 6))        ;; downward speed while it comes down (Circle)
+(defconstant BF_JET_SINK (meters 3))        ;; fastest fall once the fuel is spent
+(defconstant BF_JET_FUEL 4.0)               ;; seconds of climb in a full jetpack
+(defconstant BF_JET_HOVER 3.0)              ;; hovering or coming down spends fuel this many times slower
+(defconstant BF_JET_FLOAT (meters 0.8))     ;; the jetpack model floats this high above Jak
+(defconstant BF_GAUGE_REFILL 10.0)          ;; seconds an empty fuel or blue eco gauge takes to refill
+(defconstant BF_BOOST_TIME 3.0)             ;; seconds of spider boost in a full blue eco gauge
+(defconstant BF_BOOST_SPEED 2.0)            ;; spider speed multiplier while it boosts
+(defconstant BF_SPIDER_JUMP (meters 13))    ;; upward speed the spider robot keeps early in a jump
+(defconstant BF_SPIDER_LEAP (seconds 0.3))  ;; how long it keeps it while X is held
+(defconstant BF_ROLL_TIME (seconds 1.2))    ;; roboguard rolling time
+(defconstant BF_ROLL_RECHARGE (seconds 5))  ;; roboguard: from the end of a roll to the next one
+(defconstant BF_SALVO_GAP (seconds 0.12))   ;; between the two shots of a jetpack or robotguard salvo
+(defconstant BF_SHIELD_RECHARGE (seconds 5)) ;; robotguard: from its shield breaking to the next one
+(defconstant BF_SHIELD_SIZE 3.0)            ;; its radius in meters, centered 2.2 m above Jak's feet
+(defconstant BF_SHIELD_STRENGTH 3)          ;; damage it takes before it breaks (the guards' own: 3)
+(defconstant BF_LUNGE_RANGE (meters 7))     ;; spider lunge reach
+(defconstant BF_MELEE_RANGE (meters 4))     ;; reach of the rifle butt
+(defconstant BF_PUNCH_RANGE (meters 6.5))   ;; reach of the robotguard's punch (it stands 4.8 m tall)
+(defconstant BF_MELEE_DELAY (seconds 0.6))  ;; between two Square attacks, at least
+(defconstant BF_MELEE_MAX (seconds 3))      ;; a close attack's clip is held this long at most
+(defconstant BF_DIVE_SPEED (meters 22))     ;; jetpack dive kick and spider pounce speed
+(defconstant BF_DIVE_TIME (seconds 1))      ;; a dive hits within this time or misses
+(defconstant BF_TAZER_RANGE (meters 12))    ;; length of the tazer arc
+(defconstant BF_TAZER_TICK (seconds 0.2))   ;; the arc spends one blue ammo and hits once per tick
+(defconstant BF_GRENADE_DELAY (seconds 1))  ;; between two grenades
+(defconstant BF_GRENADE_RANGE (meters 35))  ;; farthest grenade landing point
+(defconstant BF_AIM_REACH (meters 80))      ;; length of the free aim's ray
+(defconstant BF_CROSS_X 256.0)              ;; the crosshair, on the 512 x 416 screen: just above the
+(defconstant BF_CROSS_Y 196.0)              ;; player's head, on the units a few meters ahead
+(defconstant BF_DARK_FUEL 6.0)              ;; dark eco for a full jetpack (one drop: 3 pills of 2)
+(defconstant BF_MAG_RIFLE 6)                ;; guard magazines, as the stock guards' (guard.gc
+(defconstant BF_MAG_GRENADE 2)              ;; crimson-guard-method-286): rifle 6, grenade launcher 2
+
+(deftype bf-class-art (structure)
+  "How one class is drawn and fights. Indices are art-group indices of its model."
+  ((skel        string)
+   (level       symbol)   ;; level holding the model, #f for Jak's own (always loaded)
+   (idle        int16)
+   (walk        int16)
+   (run         int16)
+   (jump        int16)
+   (shoot       int16)
+   (special     int16)    ;; roboguard ball, spider attack-jump
+   (melee       int16)    ;; clip of the Square attack, -1 none
+   (gun0        int16)    ;; node-list index of the muzzle(s), -1 none
+   (gun1        int16)
+   (ammo        int16)    ;; BF_AMMO_* the R1 weapon spends (guard classes: by weapon); the
+                         ;; jetpacks' and the robotguard's built-in guns spend none
+   (speed       float)    ;; Jak's speed multiplier
+   (height      float)    ;; model height in meters, to size its icons: the bind pose of its rip
+                         ;; (decompiler glb; build-actor glb), guards 3.8, robotguard 4.8
+   (fire-delay  time-frame)
+   )
+  )
+
+;; Indexed by BF_CLASS_*. Jak (3) has no avatar; his entry draws his class page preview.
+(define *bf-class-art*
+  (new 'static 'inline-array bf-class-art 8
+    ;; blue guard: crimson-guard-ag idle 4, walk 5, run 6, jump-high 38, gun-attack 26; blast joint 14
+    (new 'static 'bf-class-art :skel "skel-crimson-guard" :level 'ctypesa
+         :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
+         :ammo BF_AMMO_YELLOW :speed 0.95 :height 3.8 :fire-delay (seconds 0.5))
+    ;; blue jetpack: bf-hover-blue (battlefront-h.gc order); gun tips 9 and 11
+    (new 'static 'bf-class-art :skel "skel-bf-hover-blue" :level 'ctypesc
+         :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
+         :ammo BF_AMMO_NONE :speed 1.0 :height 4.3 :fire-delay (seconds 0.8))
+    ;; Spargus citizen: wlander-male-ag idle0 4, walk0 5, run0 7, shoot0 10, attack-rifle-butt 12;
+    ;; gunblast 21
+    (new 'static 'bf-class-art :skel "skel-wlander-male" :level 'ctypesa
+         :idle 4 :walk 5 :run 7 :jump 7 :shoot 10 :special -1 :melee 12 :gun0 21 :gun1 21
+         :ammo BF_AMMO_YELLOW :speed 1.15 :height 3.1 :fire-delay (seconds 0.5))
+    ;; Jak: no longer playable; the entry keeps the indices
+    (new 'static 'bf-class-art :skel "skel-jchar" :level #f
+         :idle 18 :walk 18 :run 18 :jump 18 :shoot 18 :special -1 :melee -1 :gun0 -1 :gun1 -1
+         :ammo BF_AMMO_NONE :speed 1.0 :height 3.0 :fire-delay (seconds 1))
+    ;; red guard: same clip indices as the blue guard (make_models.py)
+    (new 'static 'bf-class-art :skel "skel-bf-red-guard" :level 'ctypesa
+         :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
+         :ammo BF_AMMO_YELLOW :speed 0.95 :height 3.8 :fire-delay (seconds 0.5))
+    ;; red jetpack
+    (new 'static 'bf-class-art :skel "skel-bf-hover-red" :level 'ctypesc
+         :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
+         :ammo BF_AMMO_NONE :speed 1.0 :height 4.3 :fire-delay (seconds 0.8))
+    ;; roboguard: roboguard-city-ag idle0 3, walk 10, run 11, idle-shoot0-loop 5, ball 13,
+    ;; punch-close-go 20; fists 11, 15
+    (new 'static 'bf-class-art :skel "skel-roboguard-city" :level 'ctypesc
+         :idle 3 :walk 10 :run 11 :jump 3 :shoot 5 :special 13 :melee 20 :gun0 11 :gun1 15
+         :ammo BF_AMMO_NONE :speed 0.7 :height 4.8 :fire-delay (seconds 0.9))
+    ;; spider: spydroid-ag idle 3, walk 4, run 5, attack-jump 6 (its bite)
+    (new 'static 'bf-class-art :skel "skel-spydroid" :level 'ctypesc
+         :idle 3 :walk 4 :run 5 :jump 6 :shoot 6 :special 6 :melee 6 :gun0 -1 :gun1 -1
+         :ammo BF_AMMO_NONE :speed 1.5 :height 2.0 :fire-delay (seconds 0.8))
+    )
+  )
+
+;; crimson-guard-ag clips of the guard weapons (the red guard models share them)
+(defconstant BF_CLIP_TAZER_HOLD 20) ;; stab-idle-loop: the tazer held out
+(defconstant BF_CLIP_TAZER 22)      ;; stab-attack
+(defconstant BF_CLIP_GRENADE 37)    ;; grenade-attack
+(defconstant BF_CLIP_RELOAD 44)     ;; grenade-reload, the stock rifle guards' reload too
+(defconstant BF_CLIP_COCK 45)       ;; cock-gun, the end of a reload
+
+;; Joints of the guard skeleton above the hips (crimson-guard-lod0: swivelMe 3 to left_wrist 17,
+;; the fingers 25 to 27, the head, ears and thumbs 29 to 40; the hips 18 hold the legs, 18 to 24 and
+;; 28): the bits of the guards' weapon clips (`bf-avatar-top-play`), as Jak's gun clips take his
+;; arms (process-drawable.gc top-anim).
+(defconstant BF_GUARD_UPPER #x1ffee03fff8)
+
+(deftype bf-avatar (process-drawable)
+  "The model of the class the player plays, drawn in Jak's place."
+  ((class       int32)
+   (anim        int32)          ;; art-group index of the clip playing
+   (anim-time   time-frame)     ;; when it started
+   (anim-wait   time-frame)     ;; since when a new clip waits for a free blend channel, 0 none
+   (fire-time   time-frame)     ;; last shot (tazer: last paid tick)
+   (grenade-time time-frame)    ;; guard: last grenade, its own delay (a rifle shot does not hold it)
+   (fire-side   int32)          ;; alternates the two muzzles
+   (shoot-until time-frame)     ;; shooting clip held until then
+   (roll-until  time-frame)     ;; roboguard rolling until then
+   (salvo-left  int32)          ;; jetpack, robotguard: shots of the salvo still to fire
+   (salvo-time  time-frame)     ;; when the next one goes
+   (melee-time  time-frame)     ;; last Square attack
+   (melee-until time-frame)     ;; close attack running until then: cleared when its clip ends
+   (melee-step  int32)          ;; robotguard: clip of its punch playing (`*bf-punch-clips*`)
+   (top-step    int32)          ;; guard: upper-body clip playing (`bf-avatar-top-update`), 0 none
+   (reload?     symbol)         ;; guard: the weapon in hand is empty and reloads when it can
+   (dive-until  time-frame)     ;; jetpack dive kick flying until then
+   (dive-foe    handle)         ;; what the dive aims at
+   (fuel        float)          ;; jetpack fuel, 0 to 1
+   (boost       float)          ;; spider blue eco, 0 to 1
+   (was-ground? symbol)
+   (leap-until  time-frame)     ;; spider: its jump is pushed up until then
+   (shield?     symbol)         ;; robotguard: its shield is up
+   (shield      handle)         ;; its `bf-shield`, #f for none
+   (shield-time time-frame)     ;; when it last broke
+   (tazing?     symbol)         ;; guard: the tazer arc is drawn
+   (hover-y     float)          ;; jetpack: the height it holds in the air
+   (locked?     symbol)         ;; the tazer locked a foe this frame (its automatic aim)
+   (bolt        lightning-control) ;; guard: the tazer arc, #f for the other classes
+   (aim-foe     handle)         ;; foe under the crosshair (the tazer's: the locked foe), #f for none
+   (aim         vector :inline) ;; where the class weapon aims this frame
+   )
+  (:state-methods
+    idle
+    )
+  )
+
+;; The avatar's handle is `(-> *bf* avatar)` (battlefront-h.gc explains why).
+
+(defun bf-class-art-of ((class int))
+  "Drawing and weapon data of CLASS."
+  (-> *bf-class-art* class)
+  )
+
+(defun bf-guard-class? ((class int))
+  "#t for the two guard classes, which carry the tazer, the rifle and the grenade launcher."
+  (or (= class BF_CLASS_BLUE_GUARD) (= class BF_CLASS_RED_GUARD))
+  )
+
+(defun bf-class-skel-name ((class int) (weapon int))
+  "Skeleton-group name of CLASS holding WEAPON. A build-actor model draws all its meshes, so the
+   red guard with the tazer or the grenade launcher is a second model (battlefront-h.gc)."
+  (if (and (= class BF_CLASS_RED_GUARD) (!= weapon BF_WEAPON_RIFLE))
+      "skel-bf-red-guard-gl"
+      (-> (bf-class-art-of class) skel)
+      )
+  )
+
+(defun bf-class-skel ((class int))
+  "Skeleton-group of CLASS, with the guard weapon in hand, when its model is loaded, else #f. The
+   model must be in the level the class art table names, which must be active: the avatar and the
+   icons bind to it."
+  (let ((art (bf-class-art-of class)))
+    (cond
+      ((= (level-status? *level* (-> art level) #f) 'active)
+       (the-as skeleton-group
+               (art-group-get-by-name *level* (bf-class-skel-name class (-> *bf* weapon)) (the-as (pointer level) #f))
+               )
+       )
+      )
+    )
+  )
+
+(defun bf-class-masks ((draw draw-control) (class int) (weapon int))
+  "Mesh segments of CLASS holding WEAPON. The stock units pick theirs in their own init; a plain
+   process-drawable shows them all."
+  (case class
+    ((BF_CLASS_BLUE_GUARD)
+     ;; crimson-guard-method-267: the rifle (8) or the weapon the tazer and the grenade launcher
+     ;; share (16), and the normal armor (3), not the dark guard armor
+     (setup-masks draw 0 30)
+     (setup-masks draw (if (= weapon BF_WEAPON_RIFLE) 8 16) 0)
+     (setup-masks draw 3 0)
+     )
+    ((BF_CLASS_WASTELANDER)
+     ;; wlander-male init: one look, the first choice of each of its random groups
+     (setup-masks draw 0 -1)
+     (setup-masks draw #x200061e 0)
+     )
+    )
+  (none)
+  )
+
+(defun bf-class-ammo ((class int))
+  "BF_AMMO_* the R1 weapon of CLASS spends: the guard classes by the weapon in hand."
+  (if (bf-guard-class? class)
+      (case (-> *bf* weapon)
+        ((BF_WEAPON_TAZER) BF_AMMO_BLUE)
+        ((BF_WEAPON_GRENADE) BF_AMMO_RED)
+        (else BF_AMMO_YELLOW)
+        )
+      (the-as int (-> (bf-class-art-of class) ammo))
+      )
+  )
+
+(defun bf-take-ammo ((ammo int))
+  "Spend one unit of AMMO (BF_AMMO_*). #t when there was one, or when the weapon needs none."
+  (cond
+    ((< ammo 0)
+     #t
+     )
+    ((>= (-> *game-info* gun-ammo ammo) 1.0)
+     (+! (-> *game-info* gun-ammo ammo) -1.0)
+     #t
+     )
+    (else
+      #f
+      )
+    )
+  )
+
+(defun bf-target-on-ground? ()
+  "#t while Jak stands on something."
+  (if (and *target* (logtest? (-> *target* control status) (collide-status on-surface)))
+      #t
+      #f
+      )
+  )
+
+(defun bf-target-airborne? ()
+  "#t while Jak is clearly off the ground: not on a surface and more than 0.6 m above his ground
+   probe's point. The on-surface flag alone goes off for single frames on the run, which flashed the
+   jump clip."
+  (and *target*
+       (not (logtest? (-> *target* control status) (collide-status on-surface)))
+       (< (meters 0.6) (- (-> *target* root trans y) (-> *target* control gspot-pos y)))
+       )
+  )
+
+(defun bf-joint-pos ((proc process-drawable) (idx int) (out vector))
+  "World position of node IDX of PROC into OUT; PROC's position 1.5 m up when IDX is not a node."
+  (if (and (>= idx 0) (< idx (-> proc node-list length)))
+      (vector<-cspace! out (-> proc node-list data idx))
+      (begin
+        (vector-copy! out (-> proc root trans))
+        (+! (-> out y) (meters 1.5))
+        )
+      )
+  out
+  )
+
+(defun bf-avatar-aim ((from vector) (team int) (range float) (out vector))
+  "Automatic aim from FROM into OUT: the nearest foe within RANGE in front of Jak (60 degrees each
+   side), else 30 m straight ahead. Returns the foe or #f. Used by the tazer and the close attacks;
+   the guns aim freely (`bf-free-aim`)."
+  (let ((fwd (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> *target* root quat)))
+        (probe (new 'stack-no-clear 'vector))
+        (shapes (new 'stack-no-clear 'array 'collide-shape 64))
+        (best (the-as process-focusable #f))
+        (best-dist range)
+        )
+    (set! (-> fwd y) 0.0)
+    (vector-normalize! fwd 1.0)
+    (vector-copy! probe from)
+    (set! (-> probe w) range)
+    (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 64))
+      (let ((shape (as-type (-> shapes i) collide-shape)))
+        (when shape
+          (let ((proc (-> shape process)))
+            (when (bf-foe? proc team)
+              (let* ((foe (the-as process-focusable proc))
+                     (dir (vector-! (new 'stack-no-clear 'vector) (get-trans foe 3) from))
+                     (dist (vector-length dir))
+                     )
+                (set! (-> dir y) 0.0)
+                (vector-normalize! dir 1.0)
+                (when (and (< dist best-dist) (< 0.5 (vector-dot dir fwd)))
+                  (set! best-dist dist)
+                  (set! best foe)
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    (cond
+      (best
+        (vector-copy! out (get-trans best 3))
+        )
+      (else
+        (vector+float*! out from fwd (meters 30))
+        )
+      )
+    best
+    )
+  )
+
+(defun bf-send-attack ((foe process) (damage float))
+  "Hit FOE with a generic melee attack of DAMAGE, sent from Jak (the foe reacts to Jak)."
+  (let ((id (+ (-> *game-info* attack-id) 1))
+        (msg (new 'stack-no-clear 'event-message-block))
+        )
+    (set! (-> *game-info* attack-id) id)
+    (set! (-> msg from) (process->ppointer *target*))
+    (set! (-> msg num-params) 2)
+    (set! (-> msg message) 'attack)
+    (set! (-> msg param 0) (the-as uint #f))
+    (set! (-> msg param 1)
+          (the-as uint (static-attack-info :mask (vehicle-impulse-factor) ((id id)
+                                                                           (damage damage)
+                                                                           (vehicle-damage-factor 1.0)
+                                                                           (vehicle-impulse-factor 1.0)
+                                                                           (mode 'generic)
+                                                                           (penetrate-using (penetrate generic-attack lunge))
+                                                                           )
+                                  )
+                   )
+          )
+    (send-event-function foe msg)
+    )
+  (none)
+  )
+
+(defun bf-free-aim ()
+  "Free aim, once a frame: the ray from the camera through the crosshair (BF_CROSS_X, BF_CROSS_Y of
+   the 512 x 416 screen), BF_AIM_REACH long, stopped by the scenery or a unit. Its end goes to `*bf*`
+   `aim`, the foe it meets, if any, to `aim-foe`. The ray's direction is the crosshair's screen
+   offset turned into meters at 1 m ahead of the camera (projections of the camera's right and up
+   axes there, as `bf-icon-place`); it skips Jak's own collision."
+  (let ((frame (-> *display* real-clock frame-counter)))
+    (when (!= frame (-> *bf* aim-frame))
+      (set! (-> *bf* aim-frame) frame)
+      (let* ((rot (-> *math-camera* inv-camera-rot))
+             (eye (-> *math-camera* trans))
+             (ahead (vector+float*! (new 'stack-no-clear 'vector) eye (-> rot fvec) (meters 1)))
+             (probe (new 'stack-no-clear 'vector))
+             (s0 (new 'stack-no-clear 'vector))
+             (sr (new 'stack-no-clear 'vector))
+             (su (new 'stack-no-clear 'vector))
+             (dir (new 'stack-no-clear 'vector))
+             (cq (new 'stack-no-clear 'collide-query))
+             )
+        (transform-point-vector! s0 ahead)
+        (transform-point-vector! sr (vector+float*! probe ahead (-> rot rvec) (meters 1)))
+        (transform-point-vector! su (vector+float*! probe ahead (-> rot uvec) (meters 1)))
+        (vector-copy! dir (-> rot fvec))
+        (vector+float*! dir dir (-> rot rvec) (/ (- (+ BF_CROSS_X 1792.0) (-> s0 x)) (- (-> sr x) (-> s0 x))))
+        (vector+float*! dir dir (-> rot uvec) (/ (- (-> s0 y) (+ BF_CROSS_Y 1840.0)) (- (-> s0 y) (-> su y))))
+        (vector-normalize! dir BF_AIM_REACH)
+        (set! (-> cq radius) 819.2)
+        (set! (-> cq collide-with)
+              (collide-spec backgnd civilian enemy obstacle hit-by-others-list vehicle-sphere bot)
+              )
+        (set! (-> cq ignore-process0) *target*)
+        (set! (-> cq ignore-process1) #f)
+        (set! (-> cq ignore-pat)
+              (new 'static 'pat-surface :noentity #x1 :nojak #x1 :probe #x1 :noendlessfall #x1 :board #x1)
+              )
+        (set! (-> cq action-mask) (collide-action solid))
+        (vector-copy! (-> cq start-pos) eye)
+        (vector-copy! (-> cq move-dist) dir)
+        (set! (-> *bf* aim-foe) (the-as handle #f))
+        (let ((t (fill-and-probe-using-line-sphere *collide-cache* cq)))
+          (cond
+            ((>= t 0.0)
+             (vector+float*! (-> *bf* aim) eye dir t)
+             (let ((prim (as-type (-> cq best-other-tri collide-ptr) collide-shape-prim)))
+               (when prim
+                 (let ((proc (-> prim cshape process)))
+                   (if (bf-foe? proc (-> *bf* team))
+                       (set! (-> *bf* aim-foe) (process->handle proc))
+                       )
+                   )
+                 )
+               )
+             )
+            (else
+              (vector+! (-> *bf* aim) eye dir)
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-update-aim bf-avatar ()
+  "Aim of the class weapon this frame: the free aim (`bf-free-aim`), which the guns and the grenade
+   launcher follow. The tazer aims by itself at short range: the nearest foe within BF_TAZER_RANGE
+   ahead of its gun, if any (`locked?`); the HUD's crosshair then moves onto it."
+  (bf-free-aim)
+  (vector-copy! (-> self aim) (-> *bf* aim))
+  (set! (-> self aim-foe) (-> *bf* aim-foe))
+  (set! (-> self locked?) #f)
+  (when (and (bf-guard-class? (-> self class)) (= (-> *bf* weapon) BF_WEAPON_TAZER))
+    (let* ((from (bf-joint-pos self (-> (bf-class-art-of (-> self class)) gun0) (new 'stack-no-clear 'vector)))
+           (spot (new 'stack-no-clear 'vector))
+           (foe (bf-avatar-aim from (-> *bf* team) BF_TAZER_RANGE spot))
+           )
+      (when foe
+        (set! (-> self locked?) #t)
+        (vector-copy! (-> self aim) spot)
+        (set! (-> self aim-foe) (process->handle foe))
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-guard-mag-size ((weapon int))
+  "Shots in a full magazine of guard WEAPON; 0 for the tazer, which has none."
+  (case weapon
+    ((BF_WEAPON_RIFLE) BF_MAG_RIFLE)
+    ((BF_WEAPON_GRENADE) BF_MAG_GRENADE)
+    (else 0)
+    )
+  )
+
+(defun bf-refill-mags ()
+  "Full magazines in both guard weapons (a deployment, a respawn)."
+  (set! (-> *bf* mag BF_WEAPON_RIFLE) BF_MAG_RIFLE)
+  (set! (-> *bf* mag BF_WEAPON_GRENADE) BF_MAG_GRENADE)
+  (none)
+  )
+
+(defbehavior bf-avatar-top-play bf-avatar ((clip int) (from float) (to float) (speed float) (put-away? symbol))
+  "Guard classes: play CLIP's artist frames FROM to TO (counted as the stock code's ja-aframe counts
+   them; TO below 0 for its end) at SPEED on the upper body (BF_GUARD_UPPER), over the legs' own clip
+   (`top-anim`, as Jak's gun clips play on his arms). PUT-AWAY? blends the upper body back into the
+   legs' clip at its end; else it holds the clip's end until the next one (`bf-avatar-top-update`)."
+  (let ((top (-> self skel top-anim))
+        (anim (the-as art-joint-anim (-> self draw art-group data clip)))
+        )
+    (when top
+      (let* ((step (-> anim artist-step))
+             (last (the float (+ (-> anim frames num-frames) -1)))
+             (f0 (fmax 0.0 (/ (- from (-> anim artist-base)) step)))
+             (f1 (if (< to 0.0)
+                     last
+                     (fmin last (/ (- to (-> anim artist-base)) step))
+                     )
+                 )
+             )
+        ;; push-anim-to-targ does nothing while the upper body is off
+        (set! (-> top interp) 1.0)
+        (push-anim-to-targ top anim (* f0 step) 3 6 speed (* (- last f1) step) #f)
+        (set! (-> top frame-post-put-away) (the-as basic put-away?))
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-top-stop bf-avatar ()
+  "Guard classes: the upper body back into the legs' clip, any throw or reload dropped (a weapon
+   change, a close attack). An empty magazine reloads again at the next R1."
+  (let ((top (-> self skel top-anim)))
+    (if top
+        (set! (-> top interp) 0.0)
+        )
+    )
+  (set! (-> self top-step) 0)
+  (set! (-> self reload?) #f)
+  (none)
+  )
+
+(defbehavior bf-avatar-top-update bf-avatar ()
+  "Guard classes, every frame: the next clip of the upper body once one ends. A grenade throw is the
+   stock grenade guard's two parts (guard-grenade.gc: artist frames 1 to 12 at 1.5 times, then 22 to
+   37); a reload, the stock rifle guard's (guard-rifle.gc rifle-reload: grenade-reload at 1.1 times,
+   then cock-gun at half speed), which refills the magazine as it ends. A reload starts only when the
+   weapon in hand is empty (`reload?`, set by its last shot) and its ammo lasts."
+  (let ((top (-> self skel top-anim))
+        (weapon (-> *bf* weapon))
+        )
+    (when (and top (not (-> top frame-targ)))
+      (case (-> self top-step)
+        ((1)
+         (set! (-> self top-step) 0)
+         (bf-avatar-top-play BF_CLIP_GRENADE 22.0 37.0 1.0 #t)
+         )
+        ((2)
+         (set! (-> self top-step) 3)
+         (bf-avatar-top-play BF_CLIP_COCK 0.0 -1.0 0.5 #t)
+         )
+        ((3)
+         (set! (-> self top-step) 0)
+         (set! (-> *bf* mag weapon)
+               (min (bf-guard-mag-size weapon) (the int (-> *game-info* gun-ammo (bf-class-ammo (-> self class)))))
+               )
+         )
+        (else
+          (when (and (-> self reload?) (>= (-> *game-info* gun-ammo (bf-class-ammo (-> self class))) 1.0))
+            (set! (-> self reload?) #f)
+            (set! (-> self top-step) 2)
+            (bf-avatar-top-play BF_CLIP_RELOAD 0.0 -1.0 1.1 #f)
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-reloading? bf-avatar ()
+  "#t while a guard's weapon in hand waits for or plays its reload: it does not fire."
+  (and (bf-guard-class? (-> self class))
+       (!= (-> *bf* weapon) BF_WEAPON_TAZER)
+       (or (-> self reload?) (>= (-> self top-step) 2))
+       )
+  )
+
+(defbehavior bf-avatar-tazer bf-avatar ((on? symbol))
+  "Guard tazer, R1 held (ON?): an electric arc from the gun to the crosshair, BF_TAZER_RANGE long at
+   most. Each BF_TAZER_TICK it spends one blue ammo and hits the foe under the crosshair if the arc
+   reaches it; without ammo it stops. The arc is the guards' own lightning, drawn the way their
+   tazer draws a miss (guard-tazer.gc crimson-guard-method-263)."
+  (let ((bolt (-> self bolt))
+        (from (bf-joint-pos self (-> (bf-class-art-of (-> self class)) gun0) (new 'stack-no-clear 'vector)))
+        )
+    (when (and on? (time-elapsed? (-> self fire-time) BF_TAZER_TICK))
+      (cond
+        ((bf-take-ammo BF_AMMO_BLUE)
+         (set-time! (-> self fire-time))
+         (let ((foe (handle->process (-> self aim-foe))))
+           (if (and foe (< (vector-vector-distance (-> self aim) from) BF_TAZER_RANGE))
+               (bf-send-attack foe 1.0)
+               )
+           )
+         )
+        (else
+          (set! on? #f)
+          )
+        )
+      )
+    (cond
+      ((and on? bolt)
+       (let ((to (vector-! (new 'stack-no-clear 'vector) (-> self aim) from)))
+         (if (< BF_TAZER_RANGE (vector-length to))
+             (vector-normalize! to BF_TAZER_RANGE)
+             )
+         (vector+! to to from)
+         (when (not (-> self tazing?))
+           (set! (-> self tazing?) #t)
+           (change-mode bolt (lightning-mode lm1))
+           (sound-play "guard-zap")
+           ;; the arm thrusts the tazer out and holds it there while the arc lasts
+           (let ((top (-> self skel top-anim)))
+             (if top
+                 (set! (-> top base-anim) (-> self draw art-group data BF_CLIP_TAZER_HOLD))
+                 )
+             )
+           (bf-avatar-top-play BF_CLIP_TAZER 0.0 -1.0 1.0 #f)
+           )
+         (set! (-> bolt spec) (-> *lightning-spec-id-table* 20))
+         (set! (-> bolt state points-to-draw) 9)
+         (set-first-meet-point bolt from)
+         (set-last-meet-point bolt to)
+         (set! (-> self shoot-until) (+ (current-time) (seconds 0.15)))
+         )
+       )
+      ((-> self tazing?)
+       (set! (-> self tazing?) #f)
+       (if bolt
+           (change-mode bolt (lightning-mode lm3))
+           )
+       (let ((top (-> self skel top-anim)))
+         (when top
+           (set! (-> top base-anim) (-> self draw art-group data (-> (bf-class-art-of (-> self class)) idle)))
+           (set! (-> top interp) 0.0)
+           )
+         )
+       )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-shot bf-avatar ()
+  "One gun shot of the class at the aim point, from its muzzles in turn: a stock `guard-shot` with
+   Jak as its parent (it plays its own firing sound, guard-shot play-impact-sound)."
+  (let* ((art (bf-class-art-of (-> self class)))
+         (from (bf-joint-pos self (if (zero? (-> self fire-side)) (-> art gun0) (-> art gun1)) (new 'stack-no-clear 'vector)))
+         )
+    (spawn-guard-projectile *target* from (-> self aim) BF_SHOT_SPEED (the-as vector #f))
+    (set! (-> self fire-side) (- 1 (-> self fire-side)))
+    )
+  (set-time! (-> self fire-time))
+  (none)
+  )
+
+(defbehavior bf-avatar-fire bf-avatar ()
+  "R1: fire the class weapon if its ammo lasts: a shot, a grenade, or the first shot of a salvo
+   (jetpacks and robotguard: a second shot follows BF_SALVO_GAP later, `bf-avatar-moves`). A guard's
+   rifle and grenade launcher fire from their magazine, their clip on the upper body
+   (`bf-avatar-top-play`); the shot that empties it starts a reload (`bf-avatar-top-update`), and an
+   empty one reloads instead of firing."
+  (let* ((art (bf-class-art-of (-> self class)))
+         (hold (seconds 0.4))
+         (guard? (bf-guard-class? (-> self class)))
+         (weapon (-> *bf* weapon))
+         )
+    (cond
+      ((and guard? (<= (-> *bf* mag weapon) 0))
+       (set! (-> self reload?) #t)
+       (set! hold 0)
+       )
+      ((not (bf-take-ammo (bf-class-ammo (-> self class))))
+       ;; out of ammo: nothing fires
+       (set! hold 0)
+       )
+      ((and guard? (= weapon BF_WEAPON_GRENADE))
+       ;; a guard grenade thrown at the crosshair, 35 m away at most
+       (let ((from (bf-joint-pos self (-> art gun0) (new 'stack-no-clear 'vector)))
+             (to (new 'stack-no-clear 'vector))
+             )
+         (vector-! to (-> self aim) from)
+         (if (< BF_GRENADE_RANGE (vector-length to))
+             (vector-normalize! to BF_GRENADE_RANGE)
+             )
+         (vector+! to to from)
+         (if (and *bf-city-grenade* (= (level-status? *level* 'ctywide #f) 'active))
+             (*bf-city-grenade* from to)
+             )
+         )
+       (set-time! (-> self grenade-time))
+       (bf-avatar-top-play BF_CLIP_GRENADE 1.0 12.0 1.5 #f)
+       (set! (-> self top-step) 1)
+       (set! hold (seconds 0.7))
+       )
+      (else
+        (bf-avatar-shot)
+        (if guard?
+            (bf-avatar-top-play (the-as int (-> art shoot)) 0.0 -1.0 1.0 #t)
+            )
+        (case (-> self class)
+          ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK BF_CLASS_ROBOGUARD)
+           (set! (-> self salvo-left) 1)
+           (set! (-> self salvo-time) (+ (current-time) BF_SALVO_GAP))
+           )
+          )
+        )
+      )
+    ;; a guard's shot or grenade came out of its magazine
+    (when (and guard? (> hold 0))
+      (+! (-> *bf* mag weapon) -1)
+      (if (<= (-> *bf* mag weapon) 0)
+          (set! (-> self reload?) #t)
+          )
+      )
+    (set! (-> self shoot-until) (+ (current-time) hold))
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-bite bf-avatar ()
+  "Spider, Circle: jump at the nearest foe ahead and bite what is in reach (BF_LUNGE_RANGE)."
+  (let* ((aim (new 'stack-no-clear 'vector))
+         (foe (bf-avatar-aim (-> *target* root trans) (-> *bf* team) BF_FIRE_RANGE aim))
+         (dir (vector-! (new 'stack-no-clear 'vector) aim (-> *target* root trans)))
+         )
+    (set! (-> dir y) 0.0)
+    (vector-normalize! dir (meters 14))
+    (set! (-> *target* control transv x) (-> dir x))
+    (set! (-> *target* control transv z) (-> dir z))
+    (set! (-> *target* control transv y) (meters 6))
+    (if (and foe (< (vector-vector-distance (-> foe root trans) (-> *target* root trans)) BF_LUNGE_RANGE))
+        (bf-send-attack foe 4.0)
+        )
+    )
+  (set-time! (-> self melee-time))
+  (set! (-> self melee-until) (+ (current-time) BF_MELEE_MAX))
+  (set! (-> self anim) -1)
+  (none)
+  )
+
+;; roboguard-city-ag punch, as roboguard-city.gc plays it: wind-up (punch-close-rotate), punch
+;; (punch-close-go), back (punch-close-end). The punch alone, 0.18 s, read as a twitch.
+(define *bf-punch-clips* (new 'static 'array int32 3 19 20 22))
+
+(defbehavior bf-avatar-melee-clip bf-avatar ()
+  "Clip of the close attack running: the robotguard's punch goes through its three clips."
+  (if (= (-> self class) BF_CLASS_ROBOGUARD)
+      (-> *bf-punch-clips* (-> self melee-step))
+      (the-as int (-> (bf-class-art-of (-> self class)) melee))
+      )
+  )
+
+(defbehavior bf-avatar-punch bf-avatar ()
+  "The robotguard's punch lands, as its punch clip starts: the nearest foe ahead within
+   BF_PUNCH_RANGE takes 3."
+  (let ((foe (bf-avatar-aim (-> *target* root trans) (-> *bf* team) BF_PUNCH_RANGE (new 'stack-no-clear 'vector))))
+    (if foe
+        (bf-send-attack foe 3.0)
+        )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-melee bf-avatar ()
+  "Square: the unit's own close attack. Guards and Spargus citizens strike with the rifle butt,
+   hitting the nearest foe ahead within BF_MELEE_RANGE; the robotguard punches (`bf-avatar-punch`). The jetpack
+   guards dive kick at the foe ahead (the Jak 2 hover guard's kick-attack); the hit lands when the
+   dive reaches it (`bf-avatar-dive`). The spider bites with Circle instead (`bf-avatar-bite`)."
+  (let* ((aim (new 'stack-no-clear 'vector))
+         (foe (bf-avatar-aim (-> *target* root trans) (-> *bf* team) BF_FIRE_RANGE aim))
+         )
+    (case (-> self class)
+      ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK)
+       (when foe
+         (let ((dir (vector-! (new 'stack-no-clear 'vector) aim (-> *target* root trans))))
+           (vector-normalize! dir BF_DIVE_SPEED)
+           ;; leave the ground: on it, Jak's own stance code cancels the velocity every frame (seen
+           ;; in game: a dive from the ground did not move): a dive kick hops
+           (set! (-> dir y) (fmax (-> dir y) (meters 4)))
+           (vector-copy! (-> *target* control transv) dir)
+           (set! (-> self dive-until) (+ (current-time) BF_DIVE_TIME))
+           (set! (-> self dive-foe) (process->handle foe))
+           )
+         )
+       )
+      ((BF_CLASS_ROBOGUARD)
+       ;; its punch lands as its second clip starts (`bf-avatar-punch`)
+       (set! (-> self melee-step) 0)
+       )
+      (else
+        (if (and foe (< (vector-vector-distance (-> foe root trans) (-> *target* root trans)) BF_MELEE_RANGE))
+            (bf-send-attack foe 2.0)
+            )
+        ;; the rifle butt is a whole-body clip: the upper body's goes
+        (if (bf-guard-class? (-> self class))
+            (bf-avatar-top-stop)
+            )
+        )
+      )
+    (set-time! (-> self melee-time))
+    (set! (-> self melee-until) (+ (current-time) BF_MELEE_MAX))
+    ;; the attack's clip starts again from its first frame (`anim` -1 makes the code loop switch)
+    (set! (-> self anim) -1)
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-dive bf-avatar ()
+  "During a dive kick: steer Jak at the foe every frame (his air control would bend
+   the path away from a single push) and hit the foe once Jak reaches it."
+  (when (< (current-time) (-> self dive-until))
+    (let ((foe (as-type (handle->process (-> self dive-foe)) process-focusable)))
+      (cond
+        ((not foe)
+         (set! (-> self dive-until) 0)
+         )
+        ((< (vector-vector-distance (-> foe root trans) (-> *target* root trans)) BF_MELEE_RANGE)
+         (bf-send-attack foe 4.0)
+         (set! (-> self dive-until) 0)
+         )
+        (else
+          (let ((dir (vector-! (new 'stack-no-clear 'vector) (-> foe root trans) (-> *target* root trans))))
+            (set! (-> dir y) 0.0)
+            (vector-normalize! dir BF_DIVE_SPEED)
+            (set! (-> *target* control transv x) (-> dir x))
+            (set! (-> *target* control transv z) (-> dir z))
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(deftype bf-shield (shield-sphere)
+  "The robotguard's shield: the Dark Makers' shield sphere (shield-sphere.gc, the dp-bipedal
+   troopers' `shield-idle`), glowing red. Shots hit it and heat it up; past its strength it breaks
+   into shards (its stock `explode`). Its code is in GAME, its art in CTYPESA."
+  ()
+  )
+
+(defmethod init-collision! ((this bf-shield))
+  "The collision of the mech's shield (target-mech.gc mech-shield): an obstacle the shots hit, which
+   neither pushes nor hurts Jak inside it (the stock one is deadly to Jak)."
+  (let ((cshape (new 'process 'collide-shape-moving this (collide-list-enum usually-hit-by-player))))
+    (set! (-> cshape dynam) (copy *standard-dynamics* 'process))
+    (set! (-> cshape reaction) cshape-reaction-default)
+    (set! (-> cshape no-reaction)
+          (the-as (function collide-shape-moving collide-query vector vector object) nothing)
+          )
+    (set! (-> cshape penetrated-by) (penetrate))
+    (let ((prim (new 'process 'collide-shape-prim-sphere cshape (the-as uint 0))))
+      (set! (-> prim prim-core collide-as) (collide-spec obstacle impenetrable-obj))
+      (set! (-> prim prim-core action) (collide-action))
+      (set-vector! (-> prim local-sphere) 0.0 0.0 0.0 (* 4096.0 (-> this sphere-size)))
+      (set! (-> cshape total-prims) (the-as uint 1))
+      (set! (-> cshape root-prim) prim)
+      )
+    (set! (-> cshape nav-radius) (* 0.75 (-> cshape root-prim local-sphere w)))
+    (let ((prim (-> cshape root-prim)))
+      (set! (-> cshape backup-collide-as) (-> prim prim-core collide-as))
+      (set! (-> cshape backup-collide-with) (-> prim prim-core collide-with))
+      )
+    (set! (-> this root) cshape)
+    )
+  0
+  (none)
+  )
+
+(defmethod shield-post ((this bf-shield))
+  "The stock post (its fade and transform), then a red aura: the stock one only turns red as it
+   heats up."
+  (let ((ret (call-parent-method this))
+        (heat (-> this heat-info current-heat-value))
+        )
+    (set-vector! (-> this draw color-emissive) (+ 0.5 (* 0.5 heat)) 0.0 0.0 1.0)
+    ret
+    )
+  )
+
+(defbehavior bf-shield-init-by-other bf-shield ((params shield-sphere-spawn-params))
+  "The stock init, bound first to CTYPESA, the level holding the shield's art: initialize-skeleton
+   looks the art up in the process's level (mech-shield binds itself to its own level the same way;
+   without it the shield went straight to process-drawable-art-error, seen in game)."
+  (let ((lev (level-get *level* 'ctypesa)))
+    (if lev
+        (set! (-> self level) lev)
+        )
+    )
+  (shield-sphere-init-by-other params)
+  )
+
+(defun bf-shield-close ((avatar bf-avatar))
+  "Take down the robotguard shield of AVATAR, if up."
+  (let ((shield (handle->process (-> avatar shield))))
+    (if shield
+        (deactivate shield)
+        )
+    )
+  (set! (-> avatar shield) (the-as handle #f))
+  (set! (-> avatar shield?) #f)
+  (set! (-> *bf* shield?) #f)
+  (none)
+  )
+
+(defbehavior bf-avatar-shield bf-avatar ((want symbol))
+  "Robotguard, Circle held (WANT): its red shield sphere around Jak. It breaks under fire (then
+   BF_SHIELD_RECHARGE before the next one) and goes when Circle is let go. While it is up Jak cannot
+   jump (the `jump` setting, owned by the avatar). While it is up, the
+   `target-attacked` wrapper of battlefront.gc stops the shots and blasts that still reach Jak."
+  (let ((shield (handle->process (-> self shield))))
+    (cond
+      ((and shield (not (send-event shield 'active)))
+       ;; broken: it explodes and dies by itself
+       (set! (-> self shield) (the-as handle #f))
+       (set! (-> self shield?) #f)
+       (set! (-> *bf* shield?) #f)
+       (set-time! (-> self shield-time))
+       (remove-setting! 'jump)
+       )
+      ((and shield (not want))
+       (bf-shield-close self)
+       (remove-setting! 'jump)
+       )
+      ((and want
+            (not shield)
+            (time-elapsed? (-> self shield-time) BF_SHIELD_RECHARGE)
+            (= (level-status? *level* 'ctypesa #f) 'active)
+            (art-group-get-by-name *level* "skel-shield-sphere" (the-as (pointer level) #f))
+            )
+       (let ((params (new 'stack-no-clear 'shield-sphere-spawn-params)))
+         (set! (-> params owner) (process->handle *target*))
+         (set! (-> params sphere-size) BF_SHIELD_SIZE)
+         (set! (-> params track-joint) -1)
+         (set-vector! (-> params offset-vec) 0.0 (meters 2.2) 0.0 1.0)
+         (set! (-> params enable-time) 0)
+         (set! (-> params disable-time) 0)
+         (set! (-> params shield-strength) BF_SHIELD_STRENGTH)
+         (set! (-> params shield-type) (shield-type shield-type-0))
+         (let ((proc (process-spawn bf-shield :init bf-shield-init-by-other params :name "bf-shield" :to *target*)))
+           (when proc
+             (set! (-> self shield) (ppointer->handle proc))
+             (set! (-> self shield?) #t)
+             (set! (-> *bf* shield?) #t)
+             (set-setting! 'jump #f 0.0 0)
+             )
+           )
+         )
+       )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-pick-weapon bf-avatar ()
+  "Guard classes: the D-pad picks the weapon, left the tazer, down the rifle, up the grenade
+   launcher. The blue guard shows it with its mesh segments; the red guard's tazer and grenade
+   launcher are its second model, so the director draws the class again (`redraw?`)."
+  (let ((old (-> *bf* weapon))
+        (want (cond
+                ((cpad-pressed? 0 left) BF_WEAPON_TAZER)
+                ((cpad-pressed? 0 down) BF_WEAPON_RIFLE)
+                ((cpad-pressed? 0 up) BF_WEAPON_GRENADE)
+                (else (-> *bf* weapon))
+                )
+              )
+        )
+    (when (!= want old)
+      (set! (-> *bf* weapon) want)
+      (bf-avatar-tazer #f)
+      (bf-avatar-top-stop)
+      (sound-play "gun-takeout")
+      (cond
+        ((= (-> self class) BF_CLASS_BLUE_GUARD)
+         (bf-class-masks (-> self draw) (-> self class) want)
+         )
+        ((not (string= (bf-class-skel-name (-> self class) old) (bf-class-skel-name (-> self class) want)))
+         (set! (-> *bf* redraw?) #t)
+         )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-moves bf-avatar ()
+  "The class's moves, applied to Jak: jetpack flight and fuel, spider jump and blue eco boost (R2),
+   roboguard roll (R2) and shield, guard weapon choice, weapons and salvos, close attacks."
+  (let* ((art (bf-class-art-of (-> self class)))
+         (ground? (bf-target-on-ground?))
+         (dt (seconds-per-frame))
+         (refill (/ dt BF_GAUGE_REFILL))
+         (speed (if (< (current-time) (-> self roll-until)) 1.6 (-> art speed)))
+         )
+    (case (-> self class)
+      ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK)
+       ;; In the air, on fuel: X climbs (a full tank in BF_JET_FUEL seconds), Circle comes down,
+       ;; neither holds the height reached (`hover-y`); hovering and coming down spend the fuel
+       ;; BF_JET_HOVER times slower. The vertical speed is set every frame from the gap to the height
+       ;; wanted, so the hover holds still: a thrust switched on and off made the jetpack jerk up
+       ;; and down. The climb slows into a hover under the force-field ceiling. Out of fuel it sinks
+       ;; no faster than BF_JET_SINK; on the ground the gauge refills in BF_GAUGE_REFILL seconds and
+       ;; the model still floats above Jak (`bf-avatar-follow`). Jak's own Circle attack is off.
+       ;; Landed means on a surface AND near the ground probe's point: hovering 2 m up, Jak's
+       ;; on-surface flag came on for a frame about once a second (seen in game), which reset the
+       ;; held height and let the jetpack sink a step each time.
+       (let ((y (-> *target* root trans y))
+             (vy (-> *target* control transv y))
+             )
+         (cond
+           ((and ground? (< (- y (-> *target* control gspot-pos y)) (meters 0.5)))
+            (set! (-> self fuel) (fmin 1.0 (+ (-> self fuel) refill)))
+            (set! (-> self hover-y) y)
+            )
+           ((>= 0.0 (-> self fuel))
+            (set! (-> *target* control transv y) (fmax vy (- BF_JET_SINK)))
+            (set! (-> self hover-y) y)
+            )
+           ((cpad-hold? 0 x)
+            (set! (-> self fuel) (fmax 0.0 (- (-> self fuel) (/ dt BF_JET_FUEL))))
+            (let* ((gap (- (-> *bf* ceiling) y))
+                   (lift (fmin BF_JET_LIFT (* 4.0 gap)))
+                   )
+              ;; far below the ceiling, keep a faster jump's speed; near it, hover
+              (set! (-> *target* control transv y) (if (< gap (meters 2)) lift (fmax lift vy)))
+              )
+            (set! (-> self hover-y) y)
+            )
+           ((cpad-hold? 0 circle)
+            (set! (-> self fuel) (fmax 0.0 (- (-> self fuel) (/ dt (* BF_JET_FUEL BF_JET_HOVER)))))
+            (set! (-> *target* control transv y) (- BF_JET_DROP))
+            (set! (-> self hover-y) y)
+            )
+           (else
+             (set! (-> self fuel) (fmax 0.0 (- (-> self fuel) (/ dt (* BF_JET_FUEL BF_JET_HOVER)))))
+             (set! (-> *target* control transv y)
+                   (fmax (- BF_JET_DROP) (fmin BF_JET_LIFT (* 4.0 (- (-> self hover-y) y))))
+                   )
+             )
+           )
+         )
+       )
+      ((BF_CLASS_SPYDROID)
+       ;; a jump started: keep pushing it up for a moment. Jak's jump sets his upward speed again
+       ;; each frame of its rise, so a single push did not change its height (seen in game: the
+       ;; same 3.5 m as every class).
+       (when (and (-> self was-ground?) (not ground?) (cpad-hold? 0 x) (< 0.0 (-> *target* control transv y)))
+         (set! (-> self leap-until) (+ (current-time) BF_SPIDER_LEAP))
+         )
+       (when (and (not ground?) (cpad-hold? 0 x) (< (current-time) (-> self leap-until)))
+         (set! (-> *target* control transv y) (fmax (-> *target* control transv y) BF_SPIDER_JUMP))
+         )
+       ;; R2 held: blue eco boost while the gauge lasts; it refills in BF_GAUGE_REFILL seconds
+       (cond
+         ((and (cpad-hold? 0 r2) (< 0.0 (-> self boost)))
+          (set! (-> self boost) (fmax 0.0 (- (-> self boost) (/ dt BF_BOOST_TIME))))
+          (set! speed (* speed BF_BOOST_SPEED))
+          )
+         (else
+           (set! (-> self boost) (fmin 1.0 (+ (-> self boost) refill)))
+           )
+         )
+       )
+      ((BF_CLASS_ROBOGUARD)
+       ;; R2: roll as a ball for BF_ROLL_TIME, then BF_ROLL_RECHARGE before the next one (its red
+       ;; gauge); shots and blasts do not hurt it while it rolls (battlefront.gc target-attacked)
+       (when (and ground?
+                  (not (-> self shield?))
+                  (cpad-pressed? 0 r2)
+                  (time-elapsed? (-> self roll-until) BF_ROLL_RECHARGE)
+                  )
+         (set! (-> self roll-until) (+ (current-time) BF_ROLL_TIME))
+         )
+       ;; Circle held, not while it rolls: the shield. Behind it the robotguard stands still: no
+       ;; move, no jump (`bf-avatar-shield`), no roll, no attack
+       (bf-avatar-shield (and (cpad-hold? 0 circle) (>= (current-time) (-> self roll-until))))
+       (when (-> self shield?)
+         ;; not 0: Jak's surfaces multiply their target and top speeds by it (logic-target.gc), and
+         ;; his walk divides by them (a game crash once, Jak walking with 0)
+         (set! speed 0.01)
+         (when ground?
+           (set! (-> *target* control transv x) 0.0)
+           (set! (-> *target* control transv z) 0.0)
+           )
+         )
+       )
+      )
+    ;; dark eco: the battle keeps Jak's at 0 (saved and given back by the director) and turns what
+    ;; he picks up into jetpack fuel, BF_DARK_FUEL for a full tank (other classes waste it)
+    (let ((dark (-> *game-info* eco-pill-dark)))
+      (when (< 0.0 dark)
+        (set! (-> *game-info* eco-pill-dark) 0.0)
+        (if (or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
+            (set! (-> self fuel) (fmin 1.0 (+ (-> self fuel) (/ dark BF_DARK_FUEL))))
+            )
+        )
+      )
+    ;; speed of the class (Jak's surfaces read it every frame)
+    (set! (-> *setting-control* user-default speed-mult) speed)
+    (set! (-> self was-ground?) ground?)
+    (when (bf-guard-class? (-> self class))
+      (bf-avatar-pick-weapon)
+      (bf-avatar-top-update)
+      )
+    (bf-avatar-update-aim)
+    (cond
+      ((-> self shield?)
+       ;; no attack behind the shield
+       0
+       )
+      ((and (bf-guard-class? (-> self class)) (= (-> *bf* weapon) BF_WEAPON_TAZER))
+       (bf-avatar-tazer (cpad-hold? 0 r1))
+       )
+      ((> (-> self salvo-left) 0)
+       ;; the second shot of a salvo, if the ammo lasts
+       (when (>= (current-time) (-> self salvo-time))
+         (set! (-> self salvo-left) 0)
+         (when (bf-take-ammo (bf-class-ammo (-> self class)))
+           (bf-avatar-shot)
+           (set! (-> self shoot-until) (+ (current-time) (seconds 0.4)))
+           )
+         )
+       )
+      ((= (-> self class) BF_CLASS_SPYDROID)
+       ;; no R1 weapon: it bites with Circle
+       (if (and (cpad-pressed? 0 circle)
+                (>= (current-time) (-> self melee-until))
+                (time-elapsed? (-> self melee-time) BF_MELEE_DELAY)
+                )
+           (bf-avatar-bite)
+           )
+       )
+      ((and (cpad-hold? 0 r1)
+            (not (bf-avatar-reloading?))
+            ;; the grenade launcher has its own delay: picked right after a rifle shot or a tazer
+            ;; tick, it fired nothing for a second (seen in game)
+            (if (and (bf-guard-class? (-> self class)) (= (-> *bf* weapon) BF_WEAPON_GRENADE))
+                (time-elapsed? (-> self grenade-time) BF_GRENADE_DELAY)
+                (time-elapsed? (-> self fire-time) (-> art fire-delay))
+                )
+            )
+       (bf-avatar-fire)
+       )
+      )
+    (when (and (not (-> self shield?))
+               (>= (-> art melee) 0)
+               (!= (-> self class) BF_CLASS_SPYDROID)
+               (cpad-pressed? 0 square)
+               ;; one close attack at a time: the previous one's clip has ended, and a dive kick has
+               ;; hit or missed
+               (>= (current-time) (-> self melee-until))
+               (>= (current-time) (-> self dive-until))
+               (time-elapsed? (-> self melee-time) BF_MELEE_DELAY)
+               )
+      (bf-avatar-melee)
+      )
+    (bf-avatar-dive)
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-shoot-clip bf-avatar ()
+  "Clip of the R1 weapon: the guards' own for the tazer and the grenade launcher."
+  (if (bf-guard-class? (-> self class))
+      (case (-> *bf* weapon)
+        ((BF_WEAPON_TAZER) BF_CLIP_TAZER)
+        ((BF_WEAPON_GRENADE) BF_CLIP_GRENADE)
+        (else (the-as int (-> (bf-class-art-of (-> self class)) shoot)))
+        )
+      (the-as int (-> (bf-class-art-of (-> self class)) shoot))
+      )
+  )
+
+(defbehavior bf-avatar-pick-anim bf-avatar ()
+  "Clip of the class for Jak's current motion."
+  (let* ((art (bf-class-art-of (-> self class)))
+         (v (if *target* (-> *target* control transv) *zero-vector*))
+         (speed (sqrtf (+ (* (-> v x) (-> v x)) (* (-> v z) (-> v z)))))
+         )
+    (cond
+      ((not *target*)
+       ;; Jak is being respawned (`stop` clears *target*): keep the clip
+       (-> self anim)
+       )
+      ((and (>= (-> art special) 0) (= (-> self class) BF_CLASS_ROBOGUARD) (< (current-time) (-> self roll-until)))
+       (-> art special)
+       )
+      ((and (>= (-> art melee) 0) (< (current-time) (-> self melee-until)))
+       (bf-avatar-melee-clip)
+       )
+      ((or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
+       ;; the jetpacks always float: their hover or forward flight clip by speed alone, with some
+       ;; slack so the clip does not flip at the edge, and no firing clip: switching to it for each
+       ;; salvo (0.4 s on, 0.4 s off), each time from its first frame, shook the legs (seen in game)
+       (if (< (if (= (-> self anim) (-> art walk)) (meters 1) (meters 2.5)) speed)
+           (-> art walk)
+           (-> art idle)
+           )
+       )
+      ;; the guards' weapon clips play on their upper body (`bf-avatar-top-play`), their legs
+      ;; keep walking
+      ((and (< (current-time) (-> self shoot-until)) (not (bf-guard-class? (-> self class))))
+       (bf-avatar-shoot-clip)
+       )
+      ((bf-target-airborne?)
+       (-> art jump)
+       )
+      ;; idle, walk and run: each one plays a quarter of a second at least, and run and walk switch
+      ;; with some slack, so a speed near a threshold (or jittering against a wall) does not flip
+      ;; the clip every few frames (seen in game on the spider)
+      ((and (or (= (-> self anim) (-> art idle)) (= (-> self anim) (-> art walk)) (= (-> self anim) (-> art run)))
+            (not (time-elapsed? (-> self anim-time) (seconds 0.25)))
+            )
+       (-> self anim)
+       )
+      ((< (if (= (-> self anim) (-> art run)) (meters 5) (meters 7)) speed)
+       (-> art run)
+       )
+      ((< (if (= (-> self anim) (-> art walk)) (meters 0.3) (meters 0.8)) speed)
+       (-> art walk)
+       )
+      (else
+        (-> art idle)
+        )
+      )
+    )
+  )
+
+(defun bf-avatar-place ((av bf-avatar))
+  "Put AV where Jak stands, facing where he faces (where the weapon aims while it fires: the free
+   aim can shoot to his side)."
+  (vector-copy! (-> av root trans) (-> *target* root trans))
+  ;; the jetpack guards float above the ground, even out of fuel: on it they would stand among the
+  ;; foot guards, their flying pose's feet in the ground
+  (if (or (= (-> av class) BF_CLASS_BLUE_JETPACK) (= (-> av class) BF_CLASS_RED_JETPACK))
+      (+! (-> av root trans y) BF_JET_FLOAT)
+      )
+  (let ((dir (vector-! (new 'stack-no-clear 'vector) (-> av aim) (-> av root trans))))
+    (set! (-> dir y) 0.0)
+    (if (and (< (current-time) (-> av shoot-until)) (< (meters 1) (vector-length dir)))
+        (forward-up->quaternion (-> av root quat) (vector-normalize! dir 1.0) *y-vector*)
+        (quaternion-copy! (-> av root quat) (-> *target* root quat))
+        )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-follow bf-avatar ()
+  "Stand in Jak's place (`bf-avatar-place`) and keep him hidden. `bf-avatar-cam-post` places the
+   model again once Jak has moved this frame."
+  (when *target*
+    (bf-avatar-place self)
+    (logior! (-> *target* draw status) (draw-control-status no-draw))
+    )
+  (none)
+  )
+
+(defun bf-target-bones! ()
+  "Compute Jak's bones where he stands now, even while he is hidden: with `no-draw` the game skips
+   their math (process-drawable.gc `do-joint-math`), and his collision follows them. The flag is
+   lifted for the call only, so he stays hidden. As Jak's own edge-grab code does
+   (logic-target.gc), the clips' data first (`update-anim-data`); only in play, Jak alive with an
+   initialized skeleton playing a clip: without these tests the game crashed on the avatar's first
+   frame after the deployment's class page (seen twice, same moment). After a death, the avatar
+   drawn again at the spawn calls it from its first frame."
+  (when (and *target*
+             (= *master-mode* 'game)
+             (not (focus-test? *target* dead))
+             (nonzero? (-> *target* skel))
+             (> (-> *target* skel active-channels) 0)
+             (not (logtest? (-> *target* draw status) (draw-control-status uninited)))
+             )
+    (let ((hidden? (logtest? (-> *target* draw status) (draw-control-status no-draw))))
+      (logclear! (-> *target* draw status) (draw-control-status no-draw))
+      (update-anim-data (-> *target* skel))
+      (do-joint-math (-> *target* draw) (-> *target* node-list) (-> *target* skel))
+      (if hidden?
+          (logior! (-> *target* draw status) (draw-control-status no-draw))
+          )
+      )
+    )
+  (none)
+  )
+
+(defun bf-avatar-cam-post ((proc process))
+  "`*cam-post-hook-engine*` connection of the avatar, run once the frame's camera is set (main.gc
+   update-camera) and before anything is drawn: the model is put on Jak's place of this frame and
+   its joints computed again. The avatar runs in *entity-pool*, before Jak (Lisp wiki jak3 4.20):
+   placed from its own run alone, it showed Jak where he was the frame before while the camera
+   followed him where he is, a gap that changed with each change of speed: the jetpack shook.
+   Jak's own bones are computed here too: hidden (`no-draw`), the game skips their math
+   (`do-joint-math`), and his collision, which follows them, stayed where he was last drawn. Moved
+   by a respawn or the force field, he then fell through the ground (seen at 5 of the Port's 9
+   continue points, none outside a battle)."
+  (let ((av (the-as bf-avatar proc)))
+    (when *target*
+      (bf-target-bones!)
+      (bf-avatar-place av)
+      (do-joint-math (-> av draw) (-> av node-list) (-> av skel))
+      )
+    )
+  0
+  )
+
+(defmethod relocate ((this bf-avatar) (offset int))
+  "The avatar comes from a dead-pool heap, which moves its processes when it compacts: the tazer
+   arc lives in the avatar's heap, so its pointer moves with it (as crimson-guard's l-control). Seen
+   in game without it: the first tazer shot read the old address and crashed the game."
+  (if (-> this bolt)
+      (&+! (-> this bolt) offset)
+      )
+  (call-parent-method this offset)
+  )
+
+(defmethod deactivate ((this bf-avatar))
+  "Give Jak back his model and speed, and take the shield down, when the avatar goes."
+  (set! (-> *setting-control* user-default speed-mult) 1.0)
+  (bf-shield-close this)
+  (if *target*
+      (send-event *target* 'draw #t)
+      )
+  (call-parent-method this)
+  (none)
+  )
+
+(defstate idle (bf-avatar)
+  :virtual #t
+  :trans (behavior ()
+    (bf-avatar-follow)
+    (if (and *target* (not (focus-test? *target* dead)))
+        (bf-avatar-moves)
+        )
+    )
+  :code (behavior ()
+    (until #f
+      (let ((want (bf-avatar-pick-anim)))
+        ;; every new clip blends in (0.1 s). With two blends still running it waits for one to end
+        ;; rather than switch at once: a third pushed channel, with the guards' two upper-body
+        ;; ones, would fill the joint-control's 6 (seen in game: "could not do (ja-channel-push!
+        ;; 1)"), and switching at once popped the pose (2 of 14 changes in a guard run). It waits
+        ;; 0.3 s at most, then switches at once.
+        (cond
+          ((= want (-> self anim))
+           (set! (-> self anim-wait) 0)
+           )
+          ((and (>= (-> self skel active-channels) 3)
+                (or (zero? (-> self anim-wait)) (not (time-elapsed? (-> self anim-wait) (seconds 0.3))))
+                )
+           (if (zero? (-> self anim-wait))
+               (set-time! (-> self anim-wait))
+               )
+           )
+          (else
+            (if (< (-> self skel active-channels) 3)
+                (ja-channel-push! 1 (seconds 0.1))
+                (ja-channel-set! 1)
+                )
+            (set! (-> self anim) want)
+            (set-time! (-> self anim-time))
+            (set! (-> self anim-wait) 0)
+            (ja :group! (-> self draw art-group data want) :num! min)
+            )
+          )
+        )
+      ;; a close attack's clip plays once to its end, which ends the attack: the next one waits
+      ;; for it (`bf-avatar-moves`)
+      (cond
+        ((and (< (current-time) (-> self melee-until)) (= (-> self anim) (bf-avatar-melee-clip)))
+         (ja :num! (seek!))
+         (when (ja-done? 0)
+           (cond
+             ((and (= (-> self class) BF_CLASS_ROBOGUARD) (< (-> self melee-step) 2))
+              ;; the robotguard's punch: its next clip, the hit as the punch clip starts
+              (+! (-> self melee-step) 1)
+              (if (= (-> self melee-step) 1)
+                  (bf-avatar-punch)
+                  )
+              )
+             (else
+               (set! (-> self melee-until) 0)
+               )
+             )
+           )
+         )
+        (else
+          (ja :num! (loop!))
+          )
+        )
+      (suspend)
+      )
+    )
+  :post (behavior ()
+    (ja-post)
+    )
+  )
+
+(defbehavior bf-avatar-init-by-other bf-avatar ((class int) (skel skeleton-group))
+  "Set up the avatar of CLASS with SKEL (checked loaded by `bf-avatar-spawn`). Turns off Jak's
+   own weapons for as long as the avatar lives."
+  (set! (-> self class) class)
+  (set! (-> self root) (new 'process 'trsqv))
+  (let ((lev (level-get *level* (-> (bf-class-art-of class) level))))
+    (if lev
+        (set! (-> self level) lev)
+        )
+    )
+  (initialize-skeleton self skel (the-as pair 0))
+  (bf-class-masks (-> self draw) class (-> *bf* weapon))
+  (logclear! (-> self mask) (process-mask actor-pause))
+  (set! (-> self anim) -1)
+  (set! (-> self anim-wait) 0)
+  (set! (-> self fire-time) 0)
+  (set! (-> self grenade-time) 0)
+  (set! (-> self shoot-until) 0)
+  (set! (-> self roll-until) 0)
+  (set! (-> self salvo-left) 0)
+  (set! (-> self salvo-time) 0)
+  (set! (-> self melee-time) 0)
+  (set! (-> self melee-until) 0)
+  (set! (-> self melee-step) 0)
+  (set! (-> self top-step) 0)
+  (set! (-> self reload?) #f)
+  (set! (-> self dive-until) 0)
+  (set! (-> self dive-foe) (the-as handle #f))
+  (set! (-> self fuel) 1.0)
+  (set! (-> self boost) 1.0)
+  (set! (-> self was-ground?) #t)
+  (set! (-> self leap-until) 0)
+  (set! (-> self shield?) #f)
+  (set! (-> self shield) (the-as handle #f))
+  (set! (-> self shield-time) 0)
+  (set! (-> self tazing?) #f)
+  (set! (-> self hover-y) (-> self root trans y))
+  (set! (-> self locked?) #f)
+  (set! (-> self aim-foe) (the-as handle #f))
+  (vector-copy! (-> self aim) (-> self root trans))
+  ;; the guards' tazer arc (guard.gc init: spec 19, nothing drawn until it fires)
+  (set! (-> self bolt) (the-as lightning-control #f))
+  (when (bf-guard-class? class)
+    (set! (-> self bolt) (new 'process 'lightning-control (-> *lightning-spec-id-table* 19) self 0.0))
+    (set! (-> self bolt state points-to-draw) 0)
+    ;; the weapon clips play on the upper body (`bf-avatar-top-play`); its resting clip is the idle,
+    ;; never none (top-anim falls back to it between two clips)
+    (let ((top (new 'process 'top-anim-joint-control self)))
+      (set! (-> top interp-select 0) (the-as uint BF_GUARD_UPPER))
+      (set! (-> top interp-select 1) (the-as uint 0))
+      (set! (-> top base-anim) (-> self draw art-group data (-> (bf-class-art-of class) idle)))
+      (set! (-> self skel top-anim) top)
+      )
+    )
+  (set-setting! 'gun #f 0.0 0)
+  (set-setting! 'attack #f 0.0 0)
+  (set-setting! 'board #f 0.0 0)
+  (set-setting! 'darkjak #f 0.0 0)
+  (set-setting! 'lightjak #f 0.0 0)
+  (bf-avatar-follow)
+  ;; placed again after each camera update (`bf-avatar-cam-post`); the process's death disconnects it
+  (add-connection *cam-post-hook-engine* self bf-avatar-cam-post #f #f #f)
+  (go-virtual idle)
+  )
+
+(defun bf-avatar-kill ()
+  "Remove the avatar, if any: Jak is himself again."
+  (let ((proc (handle->process (-> *bf* avatar))))
+    (if proc
+        (deactivate proc)
+        )
+    )
+  (set! (-> *bf* avatar) (the-as handle #f))
+  (none)
+  )
+
+(defun bf-avatar-alive? ()
+  "#t while the avatar process exists."
+  (if (handle->process (-> *bf* avatar)) #t #f)
+  )
+
+(defun bf-avatar-spawn ((class int))
+  "Draw CLASS in Jak's place. Returns #f while its model is not loaded yet (call again later),
+   #t when done."
+  (bf-avatar-kill)
+  (let ((skel (bf-class-skel class)))
+    (when skel
+      ;; heap: skeleton, joint control and the tazer arc's point arrays
+      (set! (-> *bf* avatar)
+            (ppointer->handle (process-spawn bf-avatar class skel :name "bf-avatar" :to *entity-pool* :stack-size #x8000))
+            )
+      #t
+      )
+    )
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Class models in the HUD
+;; ---------------------------------------------------------------------------------------------
+
+(deftype bf-icon (process-drawable)
+  "A class model drawn over the game: the turning preview of the class page. Its owner places it
+   every frame (`bf-icon-place`)."
+  ((class  int32)
+   (spin   float)   ;; turning speed, degrees per second
+   (angle  float)   ;; heading, degrees
+   (spot?  symbol)  ;; its owner gave it a place on the screen
+   (spot   vector :inline) ;; that place: x, y on the 512 x 416 screen, height, distance (`bf-icon-place`)
+   )
+  (:state-methods
+    idle
+    )
+  )
+
+(defstate idle (bf-icon)
+  :virtual #t
+  :event (behavior ((proc process) (argc int) (message symbol) (block event-message-block))
+    ;; a HUD shows and hides its child processes with 'draw (hud-arriving, hud-hidden)
+    (case message
+      (('draw)
+       (if (-> block param 0)
+           (logclear! (-> self draw status) (draw-control-status no-draw))
+           (logior! (-> self draw status) (draw-control-status no-draw))
+           )
+       )
+      )
+    )
+  :code (behavior ()
+    ;; its owner places it every frame (`bf-icon-place`) before it runs (a child runs after it),
+    ;; and its camera hook again before it is drawn (`bf-icon-cam-post`)
+    (until #f
+      (+! (-> self angle) (* (-> self spin) (seconds-per-frame)))
+      (if (< 360.0 (-> self angle))
+          (+! (-> self angle) -360.0)
+          )
+      (ja :num! (loop!))
+      (ja-post)
+      (suspend)
+      )
+    #f
+    )
+  )
+
+(defun bf-icon-put ((proc bf-icon))
+  "Stand the class model PROC at its `spot`: DIST in front of the camera, facing it, centered on
+   the screen point (X, Y) of the 512 x 416 screen and HEIGHT units tall. The screen scale at that
+   depth comes from projecting the camera's right and up axes there (transform-point-vector!, whose
+   screen origin is at (1792, 1840))."
+  (let* ((x (-> proc spot x))
+         (y (-> proc spot y))
+         (height (-> proc spot z))
+         (dist (-> proc spot w))
+         (rot (-> *math-camera* inv-camera-rot))
+         (center (vector+float*! (new 'stack-no-clear 'vector) (-> *math-camera* trans) (-> rot fvec) dist))
+         (probe (new 'stack-no-clear 'vector))
+         (s0 (new 'stack-no-clear 'vector))
+         (sr (new 'stack-no-clear 'vector))
+         (su (new 'stack-no-clear 'vector))
+         )
+    (transform-point-vector! s0 center)
+    (transform-point-vector! sr (vector+float*! probe center (-> rot rvec) (meters 1)))
+    (transform-point-vector! su (vector+float*! probe center (-> rot uvec) (meters 1)))
+    ;; screen units per meter at that depth, across and up
+    (let* ((per-x (- (-> sr x) (-> s0 x)))
+           (per-y (- (-> s0 y) (-> su y)))
+           (right (/ (- (+ x 1792.0) (-> s0 x)) per-x))
+           (up (/ (- (-> s0 y) (+ y 1840.0 (* 0.5 height))) per-y))
+           (scale (/ (/ height per-y) (-> (bf-class-art-of (-> proc class)) height)))
+           (pos (-> proc root trans))
+           )
+      ;; its origin is at its feet, half the height below the center
+      (vector+float*! pos center (-> rot rvec) (meters right))
+      (vector+float*! pos pos (-> rot uvec) (meters up))
+      (set-vector! (-> proc root scale) scale scale scale 1.0)
+      )
+    ;; facing the camera, upright on the screen, turned by its heading
+    (let ((face (new 'stack-no-clear 'quaternion))
+          (turn (new 'stack-no-clear 'quaternion))
+          )
+      (forward-up->quaternion face (vector-negate! probe (-> rot fvec)) (-> rot uvec))
+      (quaternion-axis-angle! turn 0.0 1.0 0.0 (degrees (-> proc angle)))
+      (quaternion*! (-> proc root quat) face turn)
+      )
+    )
+  (none)
+  )
+
+(defun bf-icon-cam-post ((icon process))
+  "`*cam-post-hook-engine*` connection of a `bf-icon`, run once the frame's camera is set
+   (main.gc update-camera) and before anything is drawn: the model is put at its spot again from
+   that camera and its joints computed again. Placed from the process run, it used the camera of
+   the frame before, and its joints were computed before the camera moved (execute-math-engine):
+   it trailed a moving camera (seen in game: the HUD icon at the bottom of the ring while the
+   camera swung)."
+  (let ((proc (the-as bf-icon icon)))
+    (when (-> proc spot?)
+      (bf-icon-put proc)
+      (do-joint-math (-> proc draw) (-> proc node-list) (-> proc skel))
+      )
+    )
+  0
+  )
+
+(defbehavior bf-icon-init-by-other bf-icon ((class int) (skel skeleton-group) (spin float) (angle float))
+  "CLASS drawn with SKEL over the game, playing its idle clip, at heading ANGLE and turning SPIN
+   degrees per second. It runs on the real clock and in the menu master mode, like the HUD's own
+   icons (hud.gc hud-create-icon), so the class page turns it while the game is paused. It is drawn
+   with the world, in front of the camera (`bf-icon-place`): the HUD's model path
+   (foreground-draw-hud) feeds the PS2 generic renderer, which the build-actor models (red guard,
+   jetpack guards) have no data for, and it crashed the game with the red guard."
+  (set! (-> self class) class)
+  (set! (-> self spin) spin)
+  (set! (-> self angle) angle)
+  (set! (-> self spot?) #f)
+  (set! (-> self root) (new 'process 'trsqv))
+  ;; placed again after each camera update (`bf-icon-cam-post`); the process's death disconnects it
+  (add-connection *cam-post-hook-engine* self bf-icon-cam-post #f #f #f)
+  (let ((art-level (-> (bf-class-art-of class) level)))
+    (when art-level
+      (let ((lev (level-get *level* art-level)))
+        (if lev
+            (set! (-> self level) lev)
+            )
+        )
+      )
+    )
+  (initialize-skeleton self skel (the-as pair 0))
+  (bf-class-masks (-> self draw) class (-> *bf* weapon))
+  (logclear! (-> self mask) (process-mask menu progress pause actor-pause))
+  (+! (-> self clock ref-count) -1)
+  (+! (-> *display* real-clock ref-count) 1)
+  (set! (-> self clock) (-> *display* real-clock))
+  (ja-channel-set! 1)
+  (ja :group! (-> self draw art-group data (-> (bf-class-art-of class) idle)) :num! min)
+  (go-virtual idle)
+  )
+
+(defun bf-icon-spawn ((class int) (spin float) (angle float) (parent process-tree))
+  "A `bf-icon` of CLASS under PARENT, or #f while its model is not loaded."
+  (let ((skel (bf-class-skel class)))
+    (when skel
+      (ppointer->process (process-spawn bf-icon class skel spin angle
+                                        :name "bf-icon"
+                                        :to parent
+                                        :stack-size #x4000
+                                        )
+                         )
+      )
+    )
+  )
+
+(defun bf-icon-place ((icon process) (x float) (y float) (height float) (dist float))
+  "Give the class model ICON its place, centered on the screen point (X, Y) of the 512 x 416 screen,
+   HEIGHT units tall, DIST in front of the camera, and put it there now (`bf-icon-put`). Its
+   camera hook puts it there again each frame from the frame's own camera (`bf-icon-cam-post`)."
+  (let ((proc (the-as bf-icon icon)))
+    (set-vector! (-> proc spot) x y height dist)
+    (set! (-> proc spot?) #t)
+    (bf-icon-put proc)
+    )
+  (none)
+  )
