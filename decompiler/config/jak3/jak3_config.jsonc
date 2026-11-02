@@ -122,6 +122,13 @@
 
   // turn this on to extract level background graphics data as .fr3 files in out/<game>/fr3
   "levels_extract": true,
+  // Bake merc models of art groups a mod adds to a level DGO into that level's .fr3, so the PC
+  // renderer can draw them. Entry syntax: "<art-group>:<HOME.DGO>", HOME.DGO being the level whose
+  // texture-remap-table resolves the model's textures (wrong home = untextured model).
+  "extra_art_groups_by_dgo": {
+    // MOD battlefront -- the Spargus citizen (wastelander) fights for the Freedom League in Haven City
+    "CTYPESA.DGO": ["wlander-male-ag:LWLANDM.DGO"]
+  },
   // turn this on if you want extracted levels to be saved out as .glb files in decompiler_out/<game>/levels
   "rip_levels": false,
   // should we also extract collision meshes to the .fr3 files?
