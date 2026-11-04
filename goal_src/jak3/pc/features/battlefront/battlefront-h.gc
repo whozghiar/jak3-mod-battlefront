@@ -43,8 +43,8 @@
 (defconstant BF_TEAM_FF 0)            ;; Freedom League ("Ligue de la liberte")
 (defconstant BF_TEAM_KG 1)            ;; Krimzon Guard ("Grenagarde")
 
-;; Classes. 0-3 Freedom League, 4-7 Krimzon Guard. Jak (3) is no longer playable: the Freedom
-;; League offers 0 to 2, and his entries only keep the indices.
+;; Classes. 0-3 Freedom League, 4-7 Krimzon Guard. Neither the Spargus Citizen (2) nor Jak (3) is
+;; playable any more: the Freedom League offers 0 and 1, and their entries only keep the indices.
 (defconstant BF_CLASS_BLUE_GUARD 0)
 (defconstant BF_CLASS_BLUE_JETPACK 1)
 (defconstant BF_CLASS_WASTELANDER 2)
@@ -269,6 +269,7 @@
     (new 'static 'bf-class-info :name "Blue Guard (Jetpack)" :team BF_TEAM_FF
          :desc "X: up, Circle: down, else hover while the fuel lasts (dark eco gauge). R1: two quick shots. Square: dive kick."
          :name-fr "Garde bleu (jetpack)" :desc-fr "X : monter, Rond : descendre, sinon sur place selon le carburant (jauge noire). R1 : deux tirs. Carré : piqué.")
+    ;; Spargus Citizen: no longer playable (kept for the indices)
     (new 'static 'bf-class-info :name "Spargus Citizen" :team BF_TEAM_FF
          :desc "Wasteland militia. Fast and light. R1: rifle. Square: rifle butt."
          :name-fr "Citoyen de Spargus" :desc-fr "Milice du désert. Rapide et léger. R1 : fusil. Carré : crosse.")
@@ -405,10 +406,12 @@
   )
 
 (defun bf-art-name ((proc process))
-  "Name of the art group PROC draws, or \"\" when it has no draw-control yet."
+  "Name of the joint geometry (the skeleton, named <art group>-lod0) PROC draws, or \"\" when it has
+   no draw-control yet. A unit is told by its skeleton, not by its art group: a red guard plays the
+   blue guard's clips, from crimson-guard-ag (`bf-guard-clips`)."
   (let ((pd (the-as process-drawable proc)))
-    (if (and (type? proc process-drawable) (nonzero? (-> pd draw)) (-> pd draw) (-> pd draw art-group))
-        (-> pd draw art-group name)
+    (if (and (type? proc process-drawable) (nonzero? (-> pd draw)) (-> pd draw) (-> pd draw jgeo))
+        (-> pd draw jgeo name)
         ""
         )
     )
@@ -418,15 +421,60 @@
   "#t when PROC is a crimson-guard drawn with one of the red Jak 2 models."
   (and (= (-> proc type symbol) 'crimson-guard)
        (let ((name (bf-art-name proc)))
-         (or (string= name "bf-red-guard") (string= name "bf-red-guard-gl"))
+         (or (string= name "bf-red-guard-lod0") (string= name "bf-red-guard-gl-lod0"))
          )
        )
+  )
+
+(defun bf-guard-clips ((this process-drawable))
+  "Called right after a red guard's skeleton is set up (guard.gc init-enemy!, and the red guard
+   class's avatar): it plays the blue guard's clips. Its model is Jak 2's on Jak 3's 41-joint guard
+   skeleton (the same joints and bind pose), so its draw takes crimson-guard-ag, when that art group
+   is in its level, as the art group its clips (and their sound and death effects) are looked up
+   in; its own meshes stay. The model's own clips (build-actor, 15 frames a second) ran too fast;
+   these run at the blue guard's pace. The effects need an effect-control, which a process only gets
+   when its model has an effect-name lump (effect-control's new), and a build-actor model has none:
+   it gets one, made like effect-control's new does. The method comes from the mod Haven City: New
+   Dawn. Returns nothing. Side effects: the draw-control's art-group, the skeleton's effect-control
+   (process heap)."
+  (when (and (-> this level)
+             (let ((name (bf-art-name this)))
+               (or (string= name "bf-red-guard-lod0") (string= name "bf-red-guard-gl-lod0"))
+               )
+             )
+    (let ((ag (load-to-heap-by-name (-> this level art-group) "crimson-guard" 'test global 0)))
+      (when (and ag
+                 (= (-> ag type) art-group)
+                 (= (-> (the-as art-joint-geo (-> ag data 0)) length) (-> this draw jgeo length))
+                 )
+        (set! (-> this draw art-group) ag)
+        (when (not (-> this skel effect))
+          (let ((ec (the-as effect-control ((method-of-type object new) 'process effect-control (the-as int (-> effect-control size))))))
+            (set! (-> ec process) this)
+            (set! (-> ec last-frame-group) #f)
+            (set! (-> this skel effect) ec)
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-reload-break-ok? ((this process-drawable))
+  "Called by guard-grenade.gc grenade-throw-post-reloading's trans before a grenade guard breaks off
+   its reload because its target came close. During a battle it breaks it off only for the player:
+   against another guard it finishes reloading. With a guard as its target within half its
+   keep-away distance, the reload, the backing away and the grenade state chained within one frame,
+   a new reload grenade each time, until the stack overflowed and the game crashed (Lisp wiki jak3
+   4.40, seen in the mod Haven City: New Dawn). #t out of a battle. No side effects."
+  (or (not (bf-active?)) (= (handle->process (-> (the-as enemy this) focus handle)) *target*))
   )
 
 (defun bf-hover-art? ((proc process))
   "#t when PROC draws one of the two jetpack guard models."
   (let ((name (bf-art-name proc)))
-    (or (string= name "bf-hover-red") (string= name "bf-hover-blue"))
+    (or (string= name "bf-hover-red-lod0") (string= name "bf-hover-blue-lod0"))
     )
   )
 
@@ -436,7 +484,7 @@
     (cond
       ((= proc *target*) (-> *bf* team))
       ((= sym 'crimson-guard) (if (bf-red-guard? proc) BF_TEAM_KG BF_TEAM_FF))
-      ((= sym 'flying-turret) (if (string= (bf-art-name proc) "bf-hover-blue") BF_TEAM_FF BF_TEAM_KG))
+      ((= sym 'flying-turret) (if (string= (bf-art-name proc) "bf-hover-blue-lod0") BF_TEAM_FF BF_TEAM_KG))
       ((or (= sym 'roboguard-city) (= sym 'spydroid)) BF_TEAM_KG)
       (else BF_TEAM_NONE)
       )
@@ -486,11 +534,11 @@
         (when (or (= sym 'crimson-guard) (= sym 'flying-turret))
           (let ((name (bf-art-name p)))
             (cond
-              ((string= name "crimson-guard") (+! (-> *bf-looks* BF_LOOK_BLUE) 1))
-              ((string= name "bf-red-guard") (+! (-> *bf-looks* BF_LOOK_RED) 1))
-              ((string= name "bf-red-guard-gl") (+! (-> *bf-looks* BF_LOOK_RED_GL) 1))
-              ((string= name "bf-hover-blue") (+! (-> *bf-looks* BF_LOOK_JET_BLUE) 1))
-              ((string= name "bf-hover-red") (+! (-> *bf-looks* BF_LOOK_JET_RED) 1))
+              ((string= name "crimson-guard-lod0") (+! (-> *bf-looks* BF_LOOK_BLUE) 1))
+              ((string= name "bf-red-guard-lod0") (+! (-> *bf-looks* BF_LOOK_RED) 1))
+              ((string= name "bf-red-guard-gl-lod0") (+! (-> *bf-looks* BF_LOOK_RED_GL) 1))
+              ((string= name "bf-hover-blue-lod0") (+! (-> *bf-looks* BF_LOOK_JET_BLUE) 1))
+              ((string= name "bf-hover-red-lod0") (+! (-> *bf-looks* BF_LOOK_JET_RED) 1))
               )
             )
           )
@@ -613,7 +661,7 @@
   (cond
     ((not (bf-active?)) stock)
     ((bf-red-guard? proc) 9)
-    ((string= (bf-art-name proc) "bf-hover-blue") 4)
+    ((string= (bf-art-name proc) "bf-hover-blue-lod0") 4)
     (else stock)
     )
   )
@@ -629,18 +677,19 @@
   )
 
 (defun bf-queue-drop ((proc process))
-  "Maybe leave a pickup where PROC died: 25 % yellow ammo (rifles, guns), 12 % red (grenades), 12 %
-   blue (tazer), 12 % health, 6 % dark eco (jetpack fuel), else nothing. Queued for the director,
+  "Maybe leave a pickup where PROC died: 10 % yellow ammo (rifles, guns), 5 % red (grenades), 4 %
+   blue (tazer), 5 % health, 3 % dark eco (jetpack fuel), else nothing (27 % in all, 67 % before:
+   the ground was covered with them). Queued for the director,
    which spawns it in its own process (`bf-spawn-drops`): this runs on the traffic manager's small
    stack."
   (when (and (type? proc process-drawable) (< (-> *bf* drop-count) BF_DROP_MAX))
     (let* ((roll (rand-vu-int-count 100))
            (kind (cond
-                   ((< roll 25) (pickup-type ammo-yellow))
-                   ((< roll 37) (pickup-type ammo-red))
-                   ((< roll 49) (pickup-type ammo-blue))
-                   ((< roll 61) (pickup-type health))
-                   ((< roll 67) (pickup-type eco-pill-dark))
+                   ((< roll 10) (pickup-type ammo-yellow))
+                   ((< roll 15) (pickup-type ammo-red))
+                   ((< roll 19) (pickup-type ammo-blue))
+                   ((< roll 24) (pickup-type health))
+                   ((< roll 27) (pickup-type eco-pill-dark))
                    (else (pickup-type none))
                    )
                  )

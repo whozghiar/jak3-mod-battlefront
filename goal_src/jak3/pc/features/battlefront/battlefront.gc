@@ -178,8 +178,9 @@
   (cond
     ((= page BF_PAGE_ZONE) BF_ZONE_COUNT)
     ((= page BF_PAGE_TEAM) BF_TEAM_COUNT)
-    ;; the Freedom League's fourth class, Jak, is no longer playable
-    ((= page BF_PAGE_CLASS) (if (= (-> *bf* team) BF_TEAM_FF) 3 4))
+    ;; the Freedom League's third and fourth classes, the Spargus Citizen and Jak, are no longer
+    ;; playable
+    ((= page BF_PAGE_CLASS) (if (= (-> *bf* team) BF_TEAM_FF) 2 4))
     (else 1)
     )
   )
@@ -199,8 +200,8 @@
   (cond
     ((= page BF_PAGE_ZONE) (bf-tr (-> *bf-zones* i desc) (-> *bf-zones* i desc-fr)))
     ((= page BF_PAGE_TEAM) (if (= i BF_TEAM_FF)
-                               (bf-tr "Blue guards, jetpack guards and Spargus citizens."
-                                      "Gardes bleus, gardes à jetpack et citoyens de Spargus."
+                               (bf-tr "Blue guards and jetpack guards."
+                                      "Gardes bleus et gardes à jetpack."
                                       )
                                (bf-tr "Red Krimzon Guards, jetpack guards, robotguards and spider robots."
                                       "Gardes rouges, gardes à jetpack, robotgardes et araignées robots."
@@ -1451,6 +1452,11 @@
              target-attacked
              )
 
+;; Health by class: the player keeps Jak's health (8 hits of the guards' shots, the health HUD's
+;; 8 segments), and each hit counts this many times for a class. Guards 8 hits, jetpacks 6 (the
+;; fliers), robotguard 16 (the heavy robot), spider 6 (the fast one). Indexed by BF_CLASS_*.
+(define *bf-class-damage* (new 'static 'array float 8 1.0 1.333 1.0 1.0 1.0 1.333 0.5 1.333))
+
 (defbehavior target-attacked target ((arg0 symbol)
                                      (arg1 attack-info)
                                      (arg2 process)
@@ -1461,7 +1467,18 @@
    as a ball, Jak's shield level stops an attack sent by a shot or a blast (a projectile, an
    explosion) and lets through a blow, sent by the attacker itself: it is set for each attack, then
    the stock handler runs. The shield sphere stops most shots itself (they hit it); this stops the
-   blasts and the shots fired from inside it."
+   blasts and the shots fired from inside it. During a battle, the attack's damage (Jak's default
+   health-single-inc when it names none) is scaled by the class's `*bf-class-damage*`."
+  (when (and (bf-fighting?) (bf-avatar-alive?))
+    (set! (-> arg1 damage) (* (if (logtest? (attack-mask damage) (-> arg1 mask))
+                                  (-> arg1 damage)
+                                  (-> *FACT-bank* health-single-inc)
+                                  )
+                              (-> *bf-class-damage* (-> *bf* class))
+                              )
+          )
+    (logior! (-> arg1 mask) (attack-mask damage))
+    )
   (let ((av (the-as bf-avatar (handle->process (-> *bf* avatar)))))
     (if (or (-> *bf* shield?) (and av (< (current-time) (-> av roll-until))))
         (set! (-> self fact shield-level) (if (or (type? arg2 projectile) (type? arg2 explosion)) 1.0 0.0))

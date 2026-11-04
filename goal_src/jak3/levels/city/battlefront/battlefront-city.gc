@@ -19,8 +19,7 @@
   No Spargus citizen fights here: wastelanders brought into Haven City by the traffic engine froze
   or crashed the game within minutes (in the background collision query
   fill-bg-using-line-sphere-new, seen in two of two ten-minute battles; none in a battle without
-  them). The Spargus Citizen stays a playable class (battlefront-player.gc), which runs no
-  wastelander code.
+  them). The Spargus Citizen class is gone too: nothing of the wastelanders loads in Haven City.
 |#
 
 ;; DECOMP BEGINS

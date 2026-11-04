@@ -12,6 +12,8 @@
 ;; MOD battlefront -- a unit of a battle stays awake anywhere on its battlefield
 ;; (levels/city/battlefront/battlefront-city.gc, CWI)
 (define-extern bf-keep-unit? (function process symbol))
+;; MOD battlefront -- a battle is fighting (pc/features/battlefront/battlefront-h.gc, GAME)
+(define-extern bf-fighting? (function symbol))
 
 (deftype traffic-engine-stack-var0 (structure)
   ((params traffic-object-spawn-params :inline :offset 0)
@@ -1258,8 +1260,10 @@
                   )
                 (when (logtest? (-> (the-as citizen s3-1) flags) (citizen-flag in-formation))
                   )
-                ;; MOD battlefront -- or anywhere on the battlefield during a fight (no-op outside one)
-                (if (or (sphere-in-loaded-city-infos? this s5-0 1) (bf-keep-unit? s3-1))
+                ;; MOD battlefront -- or anywhere on the battlefield during a fight. bf-keep-unit? is CWI
+                ;; code: this file also runs in Spargus (WWD), where calling it, undefined there, crashed
+                ;; the game natively, so it is asked during a fight only (always in Haven City)
+                (if (or (sphere-in-loaded-city-infos? this s5-0 1) (and (bf-fighting?) (bf-keep-unit? s3-1)))
                     (fill-actor-list-for-vec+r (-> this object-hash) s5-0 (the-as (pointer collide-shape) s3-1))
                     (deactivate-object (-> this tracker1) (the-as int s4-1) #f)
                     )

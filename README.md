@@ -22,10 +22,12 @@ Battlefront for Jak 3: the Freedom League and the Krimzon Guard fight over a war
 
 ## Key Features
 - **Battles in Haven City:** pick a war zone, a whole district (Port, Industrial Zone, Slums, Freedom HQ), a side, and a class. Each side starts with 500 units; every death takes one, and the first side down to 0 loses. Up to 20 units per side fight at once, and they stay on the battlefield wherever you look.
-- **Two armies:** the Freedom League (blue guards, jetpack guards) against the Krimzon Guard (red Krimzon Guards from Jak 2, jetpack guards, robotguards, spider robots). You can also fight as a Spargus citizen.
-- **Play any class:** each of the seven classes has its own model, moves and weapons, previewed turning on the class page: switch between tazer, rifle and grenade launcher as a guard, climb, hover and come down on a fuel gauge with the jetpack, roll and raise a red shield as a robotguard, or sprint on blue eco as a spider robot.
+- **Two armies:** the Freedom League (blue guards, jetpack guards) against the Krimzon Guard (red Krimzon Guards from Jak 2, jetpack guards, robotguards, spider robots).
+- **Play any class:** each of the six classes has its own model, moves and weapons, previewed turning on the class page: switch between tazer, rifle and grenade launcher as a guard, climb, hover and come down on a fuel gauge with the jetpack, roll and raise a red shield as a robotguard, or sprint on blue eco as a spider robot.
+- **A third-person camera:** as in Star Wars Battlefront (2004), close behind your class and above its head, so the crosshair sits on the units ahead.
 - **Free aim:** every class shoots where the crosshair points; only the tazer locks onto the nearest foe by itself.
-- **Ammo and pickups:** the guns use Jak's ammo (yellow for the rifles, red for grenades, blue for the tazer). Fallen units drop ammo, health, and now and then dark eco, which refills a jetpack.
+- **Health by class:** a guard takes 8 hits, a jetpack guard or a spider robot 6, a robotguard 16.
+- **Ammo and pickups:** the guns use Jak's ammo (yellow for the rifles, red for grenades, blue for the tazer). About one fallen unit in four drops something: ammo, health, or dark eco, which refills a jetpack.
 - **A soldier's HUD:** the reserves at the top, as bars in the style of Star Wars Battlefront (2004) (yours in green, the enemy's in red), the crosshair, your gun's icon, shells and ammo at the top right, as in the original game, and your class's gauge in Jak's eco gauges: jetpack fuel as dark eco, spider blue eco in blue, robotguard roll in red.
 - **Outside the campaign:** during a battle no mission can start, no vehicle can be taken, and saving is off; loading a save ends the battle.
 - **A force field** keeps you in the district and the jetpacks under its ceiling. Every street of the district is yours to fight in.
@@ -79,7 +81,6 @@ Each war zone is a whole district of Haven City: every street of it is yours, an
 |---|---|
 | Blue Guard, Red Krimzon Guard | R1: fire, while you walk. The rifle holds 6 shots and the grenade launcher 2: the guard reloads when one is empty. Square: rifle butt. D-pad: left tazer, down rifle, up grenade launcher |
 | Jetpack guards | Hold X to climb, hold Circle to come down, let go of both to hover, while the fuel lasts; out of fuel you float down slowly. The gauge refills on the ground in 10 s, or at once with dark eco. The jetpack always floats a little above the ground. R1: two quick shots. Square: dive kick |
-| Spargus Citizen | Faster run. R1: rifle. Square: rifle butt |
 | Robotguard | Slower. R1: two shots. Square: a full punch. R2: roll as a ball, fast and shot-proof, then 5 s to recharge. Hold Circle: a red shield that breaks when shot; behind it you stand still and cannot shoot |
 | Spider Robot | Faster, jumps higher. Circle: bite. Hold R2: blue eco sprint at double speed; the gauge refills in 10 s |
 
@@ -92,12 +93,10 @@ Aim with the camera: shots and grenades go where the crosshair points, and it tu
 | Blue Guard | Blue Guard (Jetpack) |
 |---|---|
 | <img src="docs/img/mod/blue-guard.gif" width="400" alt="Blue Guard: rifle, tazer arc, grenade launcher and rifle butt, with their gun icons"> | <img src="docs/img/mod/jetpack.gif" width="400" alt="Blue jetpack guard: climb, salvos while hovering, coming down, dive kick"> |
-| **Spargus Citizen** | **Red Krimzon Guard** |
-| <img src="docs/img/mod/spargus.gif" width="400" alt="Spargus Citizen: rifle shots and rifle butt"> | <img src="docs/img/mod/red-guard.gif" width="400" alt="Red Krimzon Guard: rifle, tazer arc, grenade launcher and rifle butt"> |
-| **Red Krimzon Guard (Jetpack)** | **Robotguard** |
-| <img src="docs/img/mod/red-jetpack.gif" width="400" alt="Red jetpack guard: climb, salvos while hovering, coming down, dive kick"> | <img src="docs/img/mod/robotguard.gif" width="400" alt="Robotguard: salvos, the red shield, a roll as a ball, a punch"> |
-| **Spider Robot** | |
-| <img src="docs/img/mod/spider.gif" width="400" alt="Spider Robot: blue eco sprint, leap, bites"> | |
+| **Red Krimzon Guard** | **Red Krimzon Guard (Jetpack)** |
+| <img src="docs/img/mod/red-guard.gif" width="400" alt="Red Krimzon Guard: rifle, tazer arc, grenade launcher and rifle butt"> | <img src="docs/img/mod/red-jetpack.gif" width="400" alt="Red jetpack guard: climb, salvos while hovering, coming down, dive kick"> |
+| **Robotguard** | **Spider Robot** |
+| <img src="docs/img/mod/robotguard.gif" width="400" alt="Robotguard: salvos, the red shield, a roll as a ball, a punch"> | <img src="docs/img/mod/spider.gif" width="400" alt="Spider Robot: blue eco sprint, leap, bites"> |
 
 *Recorded in game, at the Port: every weapon of every class.*
 
@@ -148,8 +147,8 @@ task set-game-jak3
 ```
 
 ### 2. Binary Compilation
-- **Status:** Required: the mod changes the renderer (`Shadow2.cpp`, so that a battle full of shadows does not stop the game), so build the game with `task build-release-game`. It also changes `decompiler/config`, so step 3 is mandatory.
-- **Details:** The decompiler must include master-dev's `extra_art_groups_by_dgo` support.
+- **Status:** Required: the mod changes the renderer (`Shadow2.cpp`, so that a battle full of shadows does not stop the game), so build the game with `task build-release-game`.
+- **Details:** The decompiler is master-dev's.
 ```bash
 # GOAL-only mod: nothing to build — go straight to the REPL below.
 # Engine / compiler C++ changed:
@@ -160,7 +159,7 @@ task build-release-decomp
 
 ### 3. Asset Extraction
 - **Status:** Required (`task extract`).
-- **Details:** Bakes the Jak 2 models (`custom_assets/jak3/models/ctypesa`, `ctypesc`) and the Spargus citizen's model (for its class) into the Haven City unit levels.
+- **Details:** Bakes the Jak 2 models (`custom_assets/jak3/models/ctypesa`, `ctypesc`) into the Haven City unit levels.
 ```bash
 task extract
 ```

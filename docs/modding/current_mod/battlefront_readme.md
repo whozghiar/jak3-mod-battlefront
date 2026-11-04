@@ -2,7 +2,7 @@
 
 - **Game:** Jak 3
 - **Repository:** `whozghiar/jak3-mod-battlefront` (prepared locally as `mods/jak3-mod-battlefront`, not published yet)
-- **Status:** In development, no release. Tested in game by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
+- **Status:** In development, no release. Round 12 (2026-11-04) compiled and smoke-run only (§5). Tested in game by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
 
 This is the developer and agent documentation of the mod: what it changes, how it works, how to
 test it, its limits, and its change log. Players read the root [`README.md`](../../../README.md).
@@ -20,11 +20,12 @@ four classes.
 
 | Side | AI units | Playable classes |
 |---|---|---|
-| Freedom League (French: Ligue de la liberté) | blue guards, blue jetpack guards | Blue Guard, Blue Guard (Jetpack), Spargus Citizen |
+| Freedom League (French: Ligue de la liberté) | blue guards, blue jetpack guards | Blue Guard, Blue Guard (Jetpack) |
 | Krimzon Guard (French: Grenagarde) | red Krimzon Guards, red jetpack guards, robotguards, spider robots | Red Krimzon Guard, Red Krimzon Guard (Jetpack), Robotguard, Spider Robot |
 
 The red Krimzon Guard and the jetpack guard are Jak 2 models brought into Jak 3 (§2.3). Jak himself
-was a Freedom League class until the fifth round; he is no longer playable.
+was a Freedom League class until the fifth round, the Spargus Citizen until the twelfth; neither is
+playable any more.
 
 ### Switching it on
 
@@ -87,8 +88,9 @@ get into a vehicle during a battle.
   be taken, the START menu's
   Save is grey and refused, and loading a save (or starting a new game) ends the battle and loads
   the save normally.
-- **Pickups:** a dead unit may leave a stock pickup: yellow ammo (25 %), red ammo (12 %), blue ammo
-  (12 %), health (12 %) or dark eco (6 %, three pills). Dark eco refills a jetpack: one drop fills
+- **Pickups:** a dead unit may leave a stock pickup: yellow ammo (10 %), red ammo (5 %), blue ammo
+  (4 %), health (5 %) or dark eco (3 %, three pills); 27 % in all (67 % until the twelfth round,
+  which covered the ground with them). Dark eco refills a jetpack: one drop fills
   its tank. Jak's light and dark eco are set aside for the battle and given back at its end, and the
   "endless dark eco" and "endless light eco" secrets are off during a battle (they would keep every
   jetpack full and the light eco gauge lit).
@@ -107,7 +109,6 @@ hides him, draws its own model in his place with its own clips, and changes some
 |---|---|---|---|---|
 | Blue Guard / Red Krimzon Guard | run speed x0.95 | the weapon in hand, its clip on the upper body while the legs walk or run: rifle shot (yellow ammo) at the crosshair, one every 0.5 s, 6 to a magazine; tazer arc (blue ammo), 12 m, locked by itself on the nearest foe ahead within its reach, a hit every 0.2 s; grenade (red ammo), lands on the crosshair's point, 35 m away at most, one a second on its own delay (it fires at once after a rifle shot or a tazer tick), 2 to a magazine. An empty magazine reloads (the stock guards' reload, about 2 s), and only then | rifle butt (2 damage, 4 m) | D-pad: left tazer, down rifle, up grenade launcher |
 | Blue / Red Jetpack | in the air, on fuel: X held climbs (6 m/s measured, a full tank in 4 s), slowing into a hover under the ceiling; Circle held comes down (7 m/s); neither holds the height reached, still; hovering and coming down spend the fuel three times slower; out of fuel it sinks at 4 m/s at most; the gauge refills on the ground in 10 s, and at once with dark eco; the model floats 0.8 m above the ground, even out of fuel | a salvo of two quick shots at the crosshair, 0.8 s between salvos; built-in guns, no ammo | dive kick at the foe ahead (22 m/s, 4 damage on contact within 1 s) | |
-| Spargus Citizen | run speed x1.15 | rifle shot (yellow ammo), one every 0.5 s | rifle butt | |
 | Robotguard | run speed x0.7; R2: rolls as a ball for 1.2 s at x1.6, shots and blasts do not hurt it meanwhile, then 5 s before the next roll (red gauge) | a salvo of two shots, 0.9 s between salvos; built-in guns, no ammo | punch: wind-up, punch, back (0.9 s), 3 damage within 6.5 m | Circle held: the Dark Makers' shield sphere around it, glowing red; shots hit the sphere instead, which breaks after two guard shots; then 5 s before the next one; behind it the robot stands still: no move, jump, roll or attack |
 | Spider Robot | run speed x1.5, higher jumps; R2 held: blue eco sprint at x2 while the gauge lasts (3 s), refilled in 10 s | nothing | nothing | Circle: bite, a leap at the nearest foe ahead, 4 damage within 7 m |
 
@@ -116,9 +117,9 @@ crosshair's line of sight meets the scenery or a unit (80 m at most), and a clas
 that point while it fires. Only the tazer aims by itself, at short range; the crosshair then moves
 onto the foe it locked. Square attacks and the spider's lunge go for the nearest foe within 70 m
 and 60 degrees of Jak's facing. Each attack plays the unit's own clip (guard rifle, tazer and
-grenade throw, wastelander rifle butt, roboguard punch, spider attack jump, jetpack forward
+grenade throw, roboguard punch, spider attack jump, jetpack forward
 flight). A close attack (Square, the spider's Circle) plays its clip once, to its end, and the
-next one waits for that end, 0.6 s at least (measured clips: blue guard and Spargus rifle butt 1 s,
+next one waits for that end, 0.6 s at least (measured clips: blue guard rifle butt 1 s,
 red guard rifle butt 0.22 s, robotguard punch 0.93 s, spider bite 0.38 s); a jetpack's dive kick
 also waits for the previous one to hit or miss. The jetpacks keep one clip while they fire: their
 hover, or their forward flight above 2.5 m/s (back under 1 m/s), never the firing clip. Without
@@ -146,10 +147,9 @@ board, Dark Jak and Light Jak are off while a class is played.
 | `goal_src/jak3/levels/city/protect/flying-turret.gc` | `init-enemy!` takes its skeleton from `bf-turret-skel-name` and its scale from `bf-unit-scale`; `citizen-method-215` registers with `bf-attacker-type`; `enemy-common-post` calls `bf-hover-animate`. | Jetpack guards run the stock flying-turret code (§2.2). |
 | `goal_src/jak3/dgos/game.gd` | `battlefront-h.o`, `battlefront-player.o`, `battlefront-minimaps.o`, `battlefront.o` at the end. | After the engine code they use (enemy, guard-projectile) and `mods-menu.o`. |
 | `goal_src/jak3/dgos/cwi.gd` | `battlefront-city.o` after `mh-squad-control.o`. | After every type it uses. |
-| `goal_src/jak3/dgos/ctypesa.gd` | `wlander-h.o`, `wlander-male.o`, `tpage-1550.go`, `tpage-1551.go`, `bf-red-guard-ag.go`, `bf-red-guard-gl-ag.go`, `wlander-male-ag.go`; art groups sorted by decreasing size. | Units drawn by CTYPESA processes (§2.3); the wastelander's code and art for the Spargus Citizen class (its `skel-wlander-male` skeleton group is defined in `wlander-male.gc`). |
+| `goal_src/jak3/dgos/ctypesa.gd` | `bf-red-guard-ag.go`, `bf-red-guard-gl-ag.go`; art groups sorted by decreasing size. | Units drawn by CTYPESA processes (§2.3). |
 | `goal_src/jak3/dgos/ctypesc.gd` | `bf-hover-red-ag.go`, `bf-hover-blue-ag.go`; art groups sorted by decreasing size. | Jetpack guards are flying-turret processes, whose level is CTYPESC. |
 | `goal_src/jak3/game.gp` | Four `build-actor` steps (`:framerate 15.0`), and the four art groups pre-marked in `*file-entry-map*` before `cgo-file "game.gd"`. | Without the pre-mark, `cgo-file` also adds a copy step from the decompiler output for the same `.go` and the build stops ("multiple ways to make output"). |
-| `decompiler/config/jak3/jak3_config.jsonc` | `extra_art_groups_by_dgo`: `wlander-male-ag:LWLANDM.DGO` into `CTYPESA.DGO`. | Bakes the wastelander's mesh into `ctypesa.fr3`. |
 | `scripts/battlefront/make_models.py` (new) | Builds the three models from the Jak 2 and Jak 3 rips. | §2.3. |
 | `scripts/battlefront/make_minimaps.py` (new) | Writes `battlefront-minimaps.gc` from the decompiled minimap textures. | §2.6. |
 | `custom_assets/jak3/models/custom_levels/bf-*.glb`, `custom_assets/jak3/models/ctypesa/bf-red-guard*-lod0.glb`, `custom_assets/jak3/models/ctypesc/bf-hover-*-lod0.glb` (new) | The generated models (same content in both folders). | `custom_levels/` is read by `build-actor`; `<level>/` is baked into that level's `.fr3` by `task extract`. |
@@ -194,8 +194,8 @@ traffic (code and art in CTYPESA, a traffic pool of 8, their `target-counts` wri
 engine woke them). With them, ten-minute battles froze or crashed the game: the engine thread
 stuck (or faulted) in the background collision query `fill-bg-using-line-sphere-new`, in two
 battles of two; a battle without them ran ten minutes clean. They were removed;
-`wlander-male.gc` is stock again. The Spargus Citizen class keeps the wastelander's model and
-runs none of its code.
+`wlander-male.gc` is stock again. The Spargus Citizen class went in the twelfth round, with its
+code and art in CTYPESA.
 
 **Counts.** The battle's faction commands (`*bf-faction-commands*` in `battlefront-h.gc`) give both
 factions strength 20 everywhere and Metal Heads -20, set the guards to the stock "combat" spawn
@@ -309,8 +309,8 @@ group after the file, so the skeleton groups in `battlefront-h.gc` reference `bf
 ### 2.4 Playing a class
 
 `bf-avatar` (`battlefront-player.gc`) is spawned to `*entity-pool*` with the class's skeleton group,
-bound to the level that holds its art (`*bf-class-art*`: ctypesa for the guards and the Spargus
-citizen, ctypesc for the jetpacks and the robots). Each frame it:
+bound to the level that holds its art (`*bf-class-art*`: ctypesa for the guards, ctypesc for the
+jetpacks and the robots). Each frame it:
 
 1. copies Jak's position and facing, and sets `no-draw` on Jak (Daxter, the gun and the board
    copy Jak's draw status);
@@ -337,6 +337,34 @@ citizen, ctypesc for the jetpacks and the robots). Each frame it:
    math, and his collision follows them; moved by a respawn or the force field, he fell through the
    ground at 5 of the Port's 9 continue points (Lisp wiki jak3 4.34).
 
+**The red guards' clips.** The red guard model's own clips (build-actor at 15 frames a second)
+played too fast. A red guard, an AI unit (`guard.gc` init-enemy!, right after its skeleton) or the
+class's avatar, now plays the blue guard's clips: `bf-guard-clips` sets its draw's art group to
+`crimson-guard-ag` (same 41 joints and bind pose) and gives it an effect-control for the clips'
+sounds and death effect, the method of the mod Haven City: New Dawn. A unit is therefore told by its
+skeleton, not its art group: `bf-art-name` reads the joint geometry's name (`bf-red-guard-lod0`,
+`bf-hover-blue-lod0`...).
+
+**The spider's legs.** The avatar loops its walk and run clips at the rate of the ground it covers
+over the ground the clip covers (`bf-avatar-loop-rate`: spydroid.gc's walk 4 m/s, run 8 m/s, rate
+0.5 to 4) for the spider; the other classes keep rate 1. At rate 1 the spider, at Jak's speed times
+1.5 (twice that boosting), slid over the ground.
+
+**The camera.** The avatar holds a third-person camera, as in Star Wars Battlefront (2004)
+(`bf-avatar-camera`, settings of the avatar that go with it): the stock string 4 to 6 m behind,
+2.5 to 3.5 m above Jak's feet, looking at a point 3 m up (`target-height`, Jak's 2.15 m), so the
+crosshair (256, 196) sits on the units ahead. A death's spectating sets its own, further back.
+
+**Health by class.** The player keeps Jak's health (8, the health HUD's 8 segments); the
+`target-attacked` wrapper scales the damage of each attack during a fight by the class's
+`*bf-class-damage*` (the attack's damage, or Jak's default `health-single-inc`): guards 1.0 (8
+hits), jetpacks and spider 1.333 (6 hits), robotguard 0.5 (16 hits).
+
+**Grenade guards against guards.** A grenade guard reloading broke off for any target within half
+its keep-away distance; with another guard there, the reload, the backing away and the grenade
+state chained within one frame until the stack overflowed (Lisp wiki jak3 4.40).
+`bf-reload-break-ok?` (`guard-grenade.gc`) breaks it off for the player only during a battle.
+
 **Free aim.** `bf-free-aim` (once a frame, keyed on the real clock's frame counter) casts a ray from
 the camera through the crosshair's screen point (256, 196 of the 512 x 416 screen), 80 m long, with
 `fill-and-probe-using-line-sphere` against the scenery and the units (Jak's own collision skipped).
@@ -345,7 +373,7 @@ camera, turned into meters with the projections of the camera's right and up axe
 of `bf-icon-place`). Its end goes to `*bf*` `aim`, and the foe it meets to `aim-foe`. The class
 weapons fire from their muzzle at that point.
 
-**Ammo.** The guard and Spargus citizen weapons spend Jak's own gun ammo (`*game-info*` gun-ammo:
+**Ammo.** The guard weapons spend Jak's own gun ammo (`*game-info*` gun-ammo:
 0 yellow, 1 red, 2 blue), so the stock ammo pickups refill them with no new pickup code; the
 jetpacks' and the robotguard's built-in guns spend none, their salvos are paced by a delay. The director saves Jak's ammo,
 light eco and dark eco when a battle starts and writes them back when it ends; each deployment
@@ -419,8 +447,7 @@ code cancels a single push.
 
 The stock units pick their mesh segments in their own init; the avatar does it for the classes
 that have several: the blue guard shows the rifle and the normal armor (masks of
-`crimson-guard-method-267`), the Spargus citizen one fixed look (first choice of each random group
-of the `wlander-male` init).
+`crimson-guard-method-267`).
 
 ### 2.5 Battle life cycle
 
@@ -498,7 +525,7 @@ crashed the game in native code. `bf-icon-place` instead stands the model a few 
 the camera (3 m for the preview, 1.5 m for the icon), facing it: the screen scale at that depth
 comes from projecting the camera's right and up axes with `transform-point-vector!` (screen origin
 at (1792, 1840)), and each class's model height comes from the bind pose of its rip (guards 3.8,
-jetpack guards 4.3, Spargus citizen 3.1, Jak 3.0, robotguard 4.8, spider 2.0, in game meters).
+jetpack guards 4.3, robotguard 4.8, spider 2.0, in game meters).
 Guessed human heights (2 m) drew them twice too large. The director gives each model its screen
 spot every frame, and a `*cam-post-hook-engine*` connection of the model puts it there again
 right after the frame's camera is set (`update-camera`, `main.gc`), then computes its joints again
@@ -613,10 +640,9 @@ play `shield-hit`; a jetpack holding X stopped at 0.1 m above the ceiling.
 1. Select the game: `task set-game-jak3`.
 2. Models: they are committed. To rebuild them from your own rips, extract Jak 2 and Jak 3 with
    `rip_levels` on, then run `python scripts/battlefront/make_models.py` (`--check` only checks).
-3. Re-extract, so `ctypesa.fr3` gets the red guard and the wastelander and `ctypesc.fr3` the
-   jetpack guards: `task extract`. The log should show `Adding custom model bf-red-guard-lod0 to
-   ctypesa`, the two `bf-hover` models for ctypesc, and `extra_art_groups_by_dgo: baking
-   'wlander-male-ag' into CTYPESA.DGO (.fr3)`.
+3. Re-extract, so `ctypesa.fr3` gets the red guard and `ctypesc.fr3` the jetpack guards:
+   `task extract`. The log should show `Adding custom model bf-red-guard-lod0 to ctypesa` and the
+   two `bf-hover` models for ctypesc.
 4. Compile: `task compile-check`, or `(make-group "iso" :force #t)` for the first compile in this
    worktree.
 5. Boot cold: `task boot-game-retail` (proves the Mods menu works in a retail boot). Use a save
@@ -631,13 +657,13 @@ play `shield-hit`; a jetpack holding X stopped at 0.1 m above the ceiling.
    |---|---|
    | Zone and side pages | black screen; the whole district on its minimap (dark gray ground, white streets, blue water), the other districts black, blue and red spawns |
    | Deployment | blackout, then the player at his side's spawn and the class page |
-   | Class page | black screen; three Freedom League classes, four Krimzon Guard ones; the class under the cursor stands in the right frame and turns; X deploys, HUD with 500 / 500 |
+   | Class page | black screen; two Freedom League classes, four Krimzon Guard ones; the class under the cursor stands in the right frame and turns; X deploys, HUD with 500 / 500 |
    | Units | blue guards and red Krimzon Guards in the streets, jetpack guards in the air, robotguards, spider robots; the two sides shoot each other; at most 20 per side, still there when the camera turns away; no citizen |
    | Losses | each kill lowers the right side's reserve; pickups appear where units die, dark eco now and then |
    | Each class | its model in Jak's place, its clips, the moves, R1, Square and Circle of §1 |
    | Guard weapons | D-pad left, down, up: tazer arc (locks the nearest foe within 12 m), rifle, grenades; each spends its ammo; firing while walking keeps the legs walking; a reload after 6 rifle shots or 2 grenades, never before |
    | Free aim | shots and grenades go where the crosshair points, for every class and for Jak; the crosshair turns red on a foe |
-   | HUD | stock health ring, no model; the stock gun HUD (icon, shells, ammo) top right for the guards and the Spargus citizen; jetpack fuel in the dark eco gauge, spider blue eco and robotguard roll in the light eco gauge, blue and red |
+   | HUD | stock health ring, no model; the stock gun HUD (icon, shells, ammo) top right for the guards; jetpack fuel in the dark eco gauge, spider blue eco and robotguard roll in the light eco gauge, blue and red |
    | Robotguard | R2 rolls, then the red gauge refills in 5 s; Circle held: red shield sphere, breaks under fire, and the robot stands still behind it (no move, jump, roll or shot); R1: salvos of two shots; Square: a full punch |
    | Outside the campaign | no mission prompt; START menu: Save grey, X refused; loading a save ends the battle |
    | Jetpack | X climbs, Circle comes down, neither hovers still, while the fuel lasts; out of fuel a slow descent; the model floats above the ground; dark eco refills it |
@@ -878,7 +904,7 @@ code (its name cannot be printed); the object is sound.
 
 | Symptom | Cause |
 |---|---|
-| A red guard, a jetpack guard or the Spargus Citizen class is invisible or untextured | `task extract` not run since the models or `extra_art_groups_by_dgo` changed |
+| A red guard or a jetpack guard is invisible or untextured | `task extract` not run since the models changed |
 | `multiple ways to make output out/jak3/obj/bf-...-ag.go` | the `*file-entry-map*` pre-marks are missing from `game.gp` |
 | `dgo file header ... has overrun heap` while loading Haven City | art groups of `ctypesa.gd` / `ctypesc.gd` no longer sorted by decreasing size |
 | "battlefront: the war zone did not load" in the console | ctypesa or ctypesc never became active within 60 s |
@@ -952,6 +978,7 @@ code (its name cannot be printed); the object is sound.
 
 | Date | Touched/Created Files | Technical Description | Objective |
 |---|---|---|---|
+| 2026-11-04 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `battlefront-city.gc`, `guard.gc`, `guard-grenade.gc`, `ctypesa.gd`, `jak3_config.jsonc`, `README.md`, `docs/img/mod/spargus.gif` (removed) | Red guards (AI and avatar) play the blue guard's clips (`bf-guard-clips`), units told by their skeleton (`bf-art-name`); the spider's walk and run follow its speed (`bf-avatar-loop-rate`); pickups 27 % instead of 67 %; a third-person camera held by the avatar (`bf-avatar-camera`); damage scaled by class (`*bf-class-damage*`: guards 8 hits, jetpacks and spider 6, robotguard 16); the Spargus Citizen class removed, with its code and art in CTYPESA and the decompiler config; grenade guards break off a reload for the player only (`bf-reload-break-ok?`, Lisp wiki jak3 4.40). `traffic-engine.gc` asks `bf-keep-unit?` (CWI code) during a fight only: the file also runs in Spargus, where calling it, undefined there, crashed the game at boot with a save in Spargus (seen twice). Compiled; a smoke run (Port, mode on, 4 minutes) showed red guards on the blue guard's clips and no crash; the battle itself could not be started from the test scenario, so the camera, the damage by class, the spider and the pickups are not checked in a fight yet. | The author's round 12 goal: animations, spider legs, rarer pickups, a Battlefront camera, health by class, no Spargus Citizen. |
 | 2026-11-01 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `battlefront-minimaps.gc`, `battlefront-city.gc`, `traffic-engine.gc`, `scripts/battlefront/make_minimaps.py`, `README.md`, `docs/img/mod/zone-port.gif`, `zone-industrial.gif`, `zone-slums.gif`, `zone-freehq.gif` (new) | War zones are whole districts: the Port, the Industrial Zone (`ctyinda`, `ctyindb`), the Slums (`ctysluma`), Freedom HQ (`ctyslumb`, `ctyslumc`), with new camps at their ends and maps of the whole district. Force field on the game's level of the player (vis-nick), the district's minimap cells (`bf-zone-cell?`, `*bf-zone-cells*`) and a 20 m fall, putting him back at his last safe place. Loading: the stock one in a one-section district, the two sections kept in a two-section one (`bf-want-zone-levels`, an `add-borrow-levels` wrapper). Reinforcements and units kept out of view on the district's lanes only (`bf-city-zone-branch?`, `bf-keep-unit?` moved to `battlefront-city.gc`, the stock hook passes the unit). A respawn wants its camp's levels and waits for them (`bf-want-camp-levels`). Jak's bones computed while he is hidden (`bf-target-bones!`): he fell through the ground after teleports. Verified in game in the four districts and at both sides' camps (§3.1). | The author's note: each zone must be its whole district, tested in each with a demo GIF. |
 | 2026-11-01 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `battlefront-minimaps.gc` (new), `traffic-engine.gc`, `game.gd`, `scripts/battlefront/make_minimaps.py` (new), `README.md`, `docs/img/mod/menu.gif` | Mods menu on L1 + SELECT, with the mode's switch alone; START > Options > Gamemode > Battlefront (new battle, change class, restart, quit), labels through a `lookup-text!` wrapper; the mode switched off in a battle loads the last save; zone pages on each zone's own minimap texture; armies of 20 per side, the battlefield's units kept awake out of the camera's cells (`bf-keep-unit?`); guard magazines (6 rifle shots, 2 grenades), a reload only when one is empty, the weapon clips on the upper body (`top-anim`), every clip change blended (`anim-wait`); reinforcements of up to three units a tick with retried spawns; a death watches the battle 4 s on a unit of the side, then respawns at the spawn as the same class, with no reset of the city. Verified in game in the four zones (§3.1). | The author's sixth notes. |
 | 2026-11-01 | `battlefront.gc`, `battlefront-player.gc`, `README.md`, `docs/img/mod/menu.gif`, `blue-guard.gif`, `jetpack.gif`, `spargus.gif`, `red-guard.gif`, `red-jetpack.gif`, `robotguard.gif`, `spider.gif` | Zone and side pages on the game's world map of Haven City framed on the battlefield (`bf-zone-view!`, `bf-draw-zone-minimap`, `bf-draw-zone-marks`); the save picture, the lane map and its stored lanes removed. The class model placed again after the camera (`bf-avatar-cam-post`). Robotguard: full punch (three clips, 6.5 m), standing still behind its shield (no move, jump, roll or shot). Jump clip only when clearly airborne; walk and run with slack; 0.25 s per locomotion clip. Verified in game (§3.1). | The author's fifth notes. |

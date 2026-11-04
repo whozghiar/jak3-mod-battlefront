@@ -16,17 +16,19 @@
     class            model (art level)            moves                          R1             Square      Circle
     Blue Guard       crimson-guard (ctypesa)      D-pad: weapon                  weapon         rifle butt
     Blue Jetpack     bf-hover-blue (ctypesc)      X: up, Circle: down (fuel)     2-shot salvo   dive kick
-    Spargus Citizen  wlander-male (ctypesa)       faster                         rifle shot     rifle butt
     Red Guard        bf-red-guard (ctypesa)       D-pad: weapon                  weapon         rifle butt
     Red Jetpack      bf-hover-red (ctypesc)       X: up, Circle: down (fuel)     2-shot salvo   dive kick
     Robotguard       roboguard-city (ctypesc)     slower, R2: rolling ball       2-shot salvo   punch       shield
     Spider Robot     spydroid (ctypesc)           x1.5, higher jumps, R2: x2                                bite
 
-  Jak himself (class 3) is no longer playable.
+  Neither the Spargus Citizen (class 2) nor Jak himself (class 3) is playable any more.
+
+  The camera: a third-person one, as in the 2004 Battlefront, while the avatar lives: close behind
+  the class model and above its head (`bf-avatar-camera`), so the crosshair of the free aim sits on
+  the units ahead. A death's spectating sets its own, further back.
 
   Guard weapons (D-pad left, down, up): tazer (an electric arc, blue ammo), rifle (yellow ammo),
-  grenade launcher (red ammo). The Spargus citizen's rifle spends yellow ammo; the jetpacks' and
-  the robotguard's built-in guns spend none, their salvos are paced by a delay. The ammo is Jak's own gun ammo,
+  grenade launcher (red ammo). The jetpacks' and the robotguard's built-in guns spend none, their salvos are paced by a delay. The ammo is Jak's own gun ammo,
   refilled by the stock ammo pickups the dead units leave (battlefront-h.gc `bf-queue-drop`).
 
   Jak's own gun, melee, board and dark/light powers are turned off by settings the avatar owns,
@@ -75,6 +77,8 @@
 (defconstant BF_DARK_FUEL 6.0)              ;; dark eco for a full jetpack (one drop: 3 pills of 2)
 (defconstant BF_MAG_RIFLE 6)                ;; guard magazines, as the stock guards' (guard.gc
 (defconstant BF_MAG_GRENADE 2)              ;; crimson-guard-method-286): rifle 6, grenade launcher 2
+(defconstant BF_SPIDER_WALK (meters 4))     ;; ground the spider's walk and run clips cover at rate 1
+(defconstant BF_SPIDER_RUN (meters 8))      ;; (spydroid.gc walk-travel-speed, run-travel-speed)
 
 (deftype bf-class-art (structure)
   "How one class is drawn and fights. Indices are art-group indices of its model."
@@ -109,8 +113,8 @@
     (new 'static 'bf-class-art :skel "skel-bf-hover-blue" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
          :ammo BF_AMMO_NONE :speed 1.0 :height 4.3 :fire-delay (seconds 0.8))
-    ;; Spargus citizen: wlander-male-ag idle0 4, walk0 5, run0 7, shoot0 10, attack-rifle-butt 12;
-    ;; gunblast 21
+    ;; Spargus citizen: no longer playable; the entry keeps the indices (wlander-male-ag idle0 4,
+    ;; walk0 5, run0 7, shoot0 10, attack-rifle-butt 12; gunblast 21)
     (new 'static 'bf-class-art :skel "skel-wlander-male" :level 'ctypesa
          :idle 4 :walk 5 :run 7 :jump 7 :shoot 10 :special -1 :melee 12 :gun0 21 :gun1 21
          :ammo BF_AMMO_YELLOW :speed 1.15 :height 3.1 :fire-delay (seconds 0.5))
@@ -1164,6 +1168,39 @@
       )
   )
 
+(defbehavior bf-avatar-loop-rate bf-avatar ()
+  "Rate the looping clip plays at: 1, but for the spider walking or running, the ground it covers
+   over the ground its clip covers (`BF_SPIDER_WALK`, `BF_SPIDER_RUN`), so its legs step at its
+   speed. Jak's speed times 1.5, or 2 more while it boosts, played at rate 1, its legs slid over the
+   ground. From 0.5 to 4."
+  (let ((art (bf-class-art-of (-> self class))))
+    (if (and *target*
+             (= (-> self class) BF_CLASS_SPYDROID)
+             (or (= (-> self anim) (-> art walk)) (= (-> self anim) (-> art run)))
+             )
+        (let* ((v (-> *target* control transv))
+               (speed (sqrtf (+ (* (-> v x) (-> v x)) (* (-> v z) (-> v z)))))
+               )
+          (fmax 0.5 (fmin 4.0 (/ speed (if (= (-> self anim) (-> art run)) BF_SPIDER_RUN BF_SPIDER_WALK))))
+          )
+        1.0
+        )
+    )
+  )
+
+(defbehavior bf-avatar-camera bf-avatar ()
+  "The battle's third-person camera, as in the 2004 Battlefront: the stock camera string held close
+   behind the class model (4 to 6 m) and above its head (2.5 to 3.5 m over Jak's feet), looking at a
+   point 3 m up (Jak's own: 2.15 m) since the classes stand taller than Jak. Settings of the avatar:
+   they go with it. Returns nothing."
+  (set-setting! 'string-min-length 'abs (meters 4) 0)
+  (set-setting! 'string-max-length 'abs (meters 6) 0)
+  (set-setting! 'string-min-height 'abs (meters 2.5) 0)
+  (set-setting! 'string-max-height 'abs (meters 3.5) 0)
+  (set-setting! 'target-height 'abs (meters 3) 0)
+  (none)
+  )
+
 (defbehavior bf-avatar-pick-anim bf-avatar ()
   "Clip of the class for Jak's current motion."
   (let* ((art (bf-class-art-of (-> self class)))
@@ -1376,7 +1413,7 @@
            )
          )
         (else
-          (ja :num! (loop!))
+          (ja :num! (loop! (bf-avatar-loop-rate)))
           )
         )
       (suspend)
@@ -1398,6 +1435,8 @@
         )
     )
   (initialize-skeleton self skel (the-as pair 0))
+  ;; the red guard plays the blue guard's clips
+  (bf-guard-clips self)
   (bf-class-masks (-> self draw) class (-> *bf* weapon))
   (logclear! (-> self mask) (process-mask actor-pause))
   (set! (-> self anim) -1)
@@ -1446,6 +1485,7 @@
   (set-setting! 'board #f 0.0 0)
   (set-setting! 'darkjak #f 0.0 0)
   (set-setting! 'lightjak #f 0.0 0)
+  (bf-avatar-camera)
   (bf-avatar-follow)
   ;; placed again after each camera update (`bf-avatar-cam-post`); the process's death disconnects it
   (add-connection *cam-post-hook-engine* self bf-avatar-cam-post #f #f #f)

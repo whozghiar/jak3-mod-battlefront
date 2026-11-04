@@ -5,6 +5,9 @@
 ;; name in dgo: guard-grenade
 ;; dgos: CWI
 
+;; MOD battlefront -- the battle's rule for the reload (pc/features/battlefront/battlefront-h.gc, GAME)
+(define-extern bf-reload-break-ok? (function process-drawable symbol))
+
 ;; DECOMP BEGINS
 
 (defmethod crimson-guard-method-264 ((this crimson-guard))
@@ -327,7 +330,8 @@
     (set! (-> self reloading-ammo) (the-as handle #f))
     )
   :trans (behavior ()
-    (when (>= (/ (-> self grenade-guard-min-player-dist) 2) (-> self target-self-xz-dist))
+    ;; MOD battlefront -- the reload broken off for the player alone (bf-reload-break-ok?)
+    (when (and (>= (/ (-> self grenade-guard-min-player-dist) 2) (-> self target-self-xz-dist)) (bf-reload-break-ok? self))
       (cond
         ((not (time-elapsed? (-> self state-time) (seconds 1.5)))
          (+! (-> self num-times-reloading-interrupted) 1)
