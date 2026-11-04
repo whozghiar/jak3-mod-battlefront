@@ -150,9 +150,9 @@ board, Dark Jak and Light Jak are off while a class is played.
 | `goal_src/jak3/dgos/ctypesa.gd` | `bf-red-guard-ag.go`, `bf-red-guard-gl-ag.go`; art groups sorted by decreasing size. | Units drawn by CTYPESA processes (§2.3). |
 | `goal_src/jak3/dgos/ctypesc.gd` | `bf-hover-red-ag.go`, `bf-hover-blue-ag.go`; art groups sorted by decreasing size. | Jetpack guards are flying-turret processes, whose level is CTYPESC. |
 | `goal_src/jak3/game.gp` | Four `build-actor` steps (`:framerate 15.0`), and the four art groups pre-marked in `*file-entry-map*` before `cgo-file "game.gd"`. | Without the pre-mark, `cgo-file` also adds a copy step from the decompiler output for the same `.go` and the build stops ("multiple ways to make output"). |
-| `scripts/battlefront/make_models.py` (new) | Builds the three models from the Jak 2 and Jak 3 rips. | §2.3. |
+| `custom_assets/jak3/models/models.jsonc` (new) | The four models' recipe for master-dev's `mod_models` (`task modding-models`; at an install, the extractor runs it). | §2.3. |
 | `scripts/battlefront/make_minimaps.py` (new) | Writes `battlefront-minimaps.gc` from the decompiled minimap textures. | §2.6. |
-| `custom_assets/jak3/models/custom_levels/bf-*.glb`, `custom_assets/jak3/models/ctypesa/bf-red-guard*-lod0.glb`, `custom_assets/jak3/models/ctypesc/bf-hover-*-lod0.glb` (new) | The generated models (same content in both folders). | `custom_levels/` is read by `build-actor`; `<level>/` is baked into that level's `.fr3` by `task extract`. |
+| `custom_assets/jak3/models/custom_levels/bf-*.glb`, `custom_assets/jak3/models/ctypesa/bf-red-guard*-lod0.glb`, `custom_assets/jak3/models/ctypesc/bf-hover-*-lod0.glb` (made, ignored by git) | The models `mod_models` writes (same content in both folders). | `custom_levels/` is read by `build-actor`; `<level>/` is baked into that level's `.fr3` by `task extract`. |
 
 ### 2.2 Units: everything runs on stock code
 
@@ -284,8 +284,10 @@ calls `bf-count-loss`. The player's deaths are counted by `bf-target-death` (§2
 
 ### 2.3 The Jak 2 models
 
-`scripts/battlefront/make_models.py` builds them from the user's own rips (`task extract` with
-`rip_levels` on, for Jak 2 and for Jak 3):
+They are not kept in the repository: `custom_assets/jak3/models/models.jsonc` describes them, and
+master-dev's `mod_models` makes them from the player's own Jak 2 and Jak 3 discs, ripping only the
+DGOs it needs (`task modding-models`; at a launcher install the extractor runs it before its
+decompile; [guide](../guides/models_from_the_discs.md)):
 
 | Model | Built from | Notes |
 |---|---|---|
@@ -638,8 +640,8 @@ play `shield-hit`; a jetpack holding X stopped at 0.1 m above the ceiling.
 ## 3. How to test
 
 1. Select the game: `task set-game-jak3`.
-2. Models: they are committed. To rebuild them from your own rips, extract Jak 2 and Jak 3 with
-   `rip_levels` on, then run `python scripts/battlefront/make_models.py` (`--check` only checks).
+2. Models: `task modding-models`, with both games' disc files in `iso_data/jak2` and
+   `iso_data/jak3` (`-- --check` only lists what is missing).
 3. Re-extract, so `ctypesa.fr3` gets the red guard and `ctypesc.fr3` the jetpack guards:
    `task extract`. The log should show `Adding custom model bf-red-guard-lod0 to ctypesa` and the
    two `bf-hover` models for ctypesc.

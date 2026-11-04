@@ -325,7 +325,7 @@
 ;; ---------------------------------------------------------------------------------------------
 
 ;; Red Krimzon Guard: the Jak 3 guard's skeleton and clips, at the stock crimson-guard indices
-;; (scripts/battlefront/make_models.py pads the clips so idle is 4, as in crimson-guard-ag).
+;; (custom_assets/jak3/models/models.jsonc pads the clips so idle is 4, as in crimson-guard-ag).
 (def-art-elt bf-red-guard-ag bf-red-guard-lod0-jg 0)
 (def-art-elt bf-red-guard-ag bf-red-guard-lod0-mg 1)
 (def-art-elt bf-red-guard-ag bf-red-guard-idle-ja 4)
@@ -348,7 +348,7 @@
               :origin-joint-index 3
               )
 
-;; Jetpack guards. Clip order (make_models.py): the three the flying-turret code plays first
+;; Jetpack guards. Clip order (custom_assets/jak3/models/models.jsonc): the three the flying-turret code plays first
 ;; (2 idle, 3 hover, 4 fire), then the others.
 (def-art-elt bf-hover-red-ag bf-hover-red-lod0-jg 0)
 (def-art-elt bf-hover-red-ag bf-hover-red-lod0-mg 1)

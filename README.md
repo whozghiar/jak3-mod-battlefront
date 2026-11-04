@@ -158,9 +158,10 @@ task build-release-decomp
 ```
 
 ### 3. Asset Extraction
-- **Status:** Required (`task extract`).
-- **Details:** Bakes the Jak 2 models (`custom_assets/jak3/models/ctypesa`, `ctypesc`) into the Haven City unit levels.
+- **Status:** Required, with your Jak 2 and Jak 3 disc files in `iso_data/jak2` and `iso_data/jak3`.
+- **Details:** The Jak 2 models are not in the repository: `task modding-models` makes them from your own discs (`custom_assets/jak3/models/models.jsonc`), then `task extract` bakes them into the Haven City unit levels. A launcher install does both by itself, and needs Jak 2 installed in the launcher.
 ```bash
+task modding-models
 task extract
 ```
 
