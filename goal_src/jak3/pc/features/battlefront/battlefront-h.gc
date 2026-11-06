@@ -338,7 +338,7 @@
     (new 'static 'bf-class-info :name "Spargus Citizen" :team BF_TEAM_FF :name-fr "Citoyen de Spargus")
     ;; Jak: no longer playable (kept for the indices)
     (new 'static 'bf-class-info :name "Jak" :team BF_TEAM_FF :name-fr "Jak")
-    (new 'static 'bf-class-info :name "Red Krimzon Guard" :team BF_TEAM_KG :name-fr "Garde rouge de la Grenagarde")
+    (new 'static 'bf-class-info :name "Red Krimzon Guard" :team BF_TEAM_KG :name-fr "Garde rouge")
     (new 'static 'bf-class-info :name "Red Krimzon Guard (Jetpack)" :team BF_TEAM_KG :name-fr "Garde rouge (jetpack)")
     (new 'static 'bf-class-info :name "Robotguard" :team BF_TEAM_KG
          :desc (new 'static 'boxed-array :type string
@@ -757,15 +757,19 @@
   "Called by guard.gc crimson-guard-method-267 (every weapon change of a guard) and -270 (its
    off-screen change): the guard-type a guard of a battle gets for WANT. No unit of the battle has
    the tazer: a red guard carries its model's weapon (the rifle, or the launcher of
-   bf-red-guard-gl), a blue guard the rifle or the launcher it was given, the launcher in place of
-   the tazer and the rifle in place of a vehicle gunner's type (Lisp wiki jak3 4.37: a guard on foot
-   with another type deactivates itself). WANT out of a battle."
+   bf-red-guard-gl), a blue guard the rifle or the launcher it was given, in place of the tazer the
+   rifle or the launcher by its pid (one or the other for good; the squads give the blue guards the
+   tazer mostly, and the launcher alone left no rifle among them, seen in game), and the rifle in
+   place of a vehicle gunner's type (Lisp wiki jak3 4.37: a guard on foot with another type
+   deactivates itself). WANT out of a battle."
   (let ((name (bf-art-name proc)))
     (cond
       ((not (bf-active?)) want)
       ((string= name "bf-red-guard-lod0") (the-as int (guard-type rifle)))
       ((string= name "bf-red-guard-gl-lod0") (the-as int (guard-type grenade)))
-      ((= want (the-as int (guard-type tazer))) (the-as int (guard-type grenade)))
+      ((= want (the-as int (guard-type tazer)))
+       (the-as int (if (logtest? (-> proc pid) 1) (guard-type rifle) (guard-type grenade)))
+       )
       ((or (= want (the-as int (guard-type rifle))) (= want (the-as int (guard-type grenade)))) want)
       (else (the-as int (guard-type rifle)))
       )

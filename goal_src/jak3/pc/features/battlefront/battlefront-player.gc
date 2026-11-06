@@ -2045,6 +2045,17 @@
     )
   )
 
+(defconstant BF_SPIDER_SPAN 4.4) ;; the spider robot's leg span in meters, more than its 2 m height
+
+(defun bf-icon-size ((class int))
+  "Meters a model of CLASS drawn over the game fits into the height it is given: the class's height,
+   the spider robot's leg span (wider than tall, its class page preview overflowed the frame)."
+  (if (= class BF_CLASS_SPYDROID)
+      BF_SPIDER_SPAN
+      (-> (bf-class-art-of class) height)
+      )
+  )
+
 (defun bf-icon-put ((proc bf-icon))
   "Stand the class model PROC at its `spot`: DIST in front of the camera, facing it, centered on
    the screen point (X, Y) of the 512 x 416 screen and HEIGHT units tall. The screen scale at that
@@ -2065,14 +2076,18 @@
     (transform-point-vector! sr (vector+float*! probe center (-> rot rvec) (meters 1)))
     (transform-point-vector! su (vector+float*! probe center (-> rot uvec) (meters 1)))
     ;; screen units per meter at that depth, across and up
-    (let* ((per-x (- (-> sr x) (-> s0 x)))
+    (let* ((art-height (-> (bf-class-art-of (-> proc class)) height))
+           (size (bf-icon-size (-> proc class)))
+           (per-x (- (-> sr x) (-> s0 x)))
            (per-y (- (-> s0 y) (-> su y)))
            (right (/ (- (+ x 1792.0) (-> s0 x)) per-x))
-           (up (/ (- (-> s0 y) (+ y 1840.0 (* 0.5 height))) per-y))
-           (scale (/ (/ height per-y) (-> (bf-class-art-of (-> proc class)) height)))
+           ;; drawn this many units tall: HEIGHT, less for a model fitted on its span
+           (drawn (* height (/ art-height size)))
+           (up (/ (- (-> s0 y) (+ y 1840.0 (* 0.5 drawn))) per-y))
+           (scale (/ (/ height per-y) size))
            (pos (-> proc root trans))
            )
-      ;; its origin is at its feet, half the height below the center
+      ;; its origin is at its feet, half its drawn height below the center
       (vector+float*! pos center (-> rot rvec) (meters right))
       (vector+float*! pos pos (-> rot uvec) (meters up))
       (set-vector! (-> proc root scale) scale scale scale 1.0)
