@@ -2,7 +2,7 @@
 
 - **Game:** Jak 3
 - **Repository:** `whozghiar/jak3-mod-battlefront` (prepared locally as `mods/jak3-mod-battlefront`, not published yet)
-- **Status:** In development, no release. Round 12 (2026-11-04) compiled and smoke-run only (§5). Tested in game by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
+- **Status:** In development, no release. Round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
 
 This is the developer and agent documentation of the mod: what it changes, how it works, how to
 test it, its limits, and its change log. Players read the root [`README.md`](../../../README.md).
@@ -29,7 +29,7 @@ playable any more.
 
 ### Switching it on
 
-Open the Mods menu (**L1 + SELECT** in this mod, works in a retail boot), then `battlefront` >
+Open the Mods menu (**L3 + SELECT**, as every mod, works in a retail boot), then `battlefront` >
 **Battlefront mode**: the mode's switch, off at every boot. On, it adds a **Gamemode** entry to
 START > Options; off during a battle, it loads the last save (the slot last loaded or saved), or,
 with no save since the boot, ends the battle at the side's spawn.
@@ -43,12 +43,14 @@ START > Options > Gamemode > Battlefront:
 | Restart the battle | During a fight: the same zone, side and class from 500 units each, back at the spawn with fresh ammo. |
 | Quit the battle | Ends the battle and restores the stock game. |
 
-The entries that do not apply are grey. The battle menu has two pages, war zone then side; X on
-the side deploys the player. Once he stands
-at his side's spawn, the class page opens: the classes on the left, and in a frame on the right the
-class under the cursor, turning a full circle every 4 seconds. X there deploys him as that class
-with fresh ammo; the page has no Back (the battle has started). X selects, Circle goes back. The
-texts are French when the game language is French, English otherwise.
+The entries that do not apply are grey. The battle menu has three pages, war zone, side, class.
+X on the side starts the deployment and opens the class page at once: the classes on the left, and
+in a frame on the right the class under the cursor, turning a full circle every 4 seconds, as soon
+as the unit levels holding the class models are loaded. The game runs under the page while the
+zone loads ("Loading the war zone..."); once Jak stands at his spawn it pauses, and X ("Deploy")
+puts him in the battle as that class with fresh ammo. The class page has no Back (the battle has
+started). X selects, Circle goes back. The texts are French when the game language is French,
+English otherwise.
 
 Every page is drawn on black: the world is not drawn under it. The war zone and side pages show,
 in the right frame, the zone under the cursor (or the one picked): its whole district on the
@@ -78,20 +80,32 @@ get into a vehicle during a battle.
   looks (§2.2). No citizen walks or drives in the city during a battle.
 - **HUD:** the reserves at the top middle, after the reinforcement meter of Star Wars Battlefront
   (2004): the player's side's bar runs left from the middle in green, the enemy's right in red, each
-  as long as its reserve, with both counts under them; the crosshair, fixed
-  just above Jak's head (red when it is on a foe); top right, the stock gun HUD showing the weapon
-  in hand (yellow gun 1 for the rifles, blue gun 2 for the tazer, red gun 3 for the grenade
-  launcher) with its shells and ammo count; Jak's stock health HUD kept shown, its eco gauges showing the class's gauge: the
-  jetpack's fuel in the dark eco gauge, the spider's blue eco in the light eco gauge in blue, the
-  robotguard's roll in the light eco gauge in red. No weapon name, no class model in the ring.
+  as long as its reserve, with both counts under them; the player's kills, small, on the left
+  ("Kills: n"); the crosshair in the middle (red when it is on a foe); top right, the stock gun HUD
+  showing the weapon in hand (yellow gun 1 for the rifle, blue gun 2 for the tazer, red gun 3 for
+  the grenade launcher), under it the guard's own rounds: the rifle's magazine as 10 shells and
+  "magazine/carried" (10/20), the grenades as 5 shells and their count, for the tazer no ammo, only
+  the seconds left while it recharges, in red (§2.8); Jak's stock health HUD kept shown, its eco
+  gauges showing the class's gauge: the jetpack's boost in the dark eco gauge, the spider's blue
+  eco in the light eco gauge in blue, the robotguard's shield in the light eco gauge in red
+  (draining while it is up, refilling until it can go up again). No weapon name, no class model in
+  the ring.
+- **Health and damage:** one 24 point scale for every class and unit (§2.8): guards and
+  robotguards 24, jetpack guards 18, spider robots 12; a rifle shot takes 8, a grenade's blast 20,
+  the tazer 24, a close attack 10 (rifle butt, punch, dive kick), a spider's bite 12, a jetpack's
+  shot 6, a robotguard's shot 4. A side's own fire takes nothing from its units or from the player;
+  Jak running or jumping into a unit takes nothing from it. Every close attack plays Jak's punch
+  sound ("punch-hit").
+- **Targeting:** each unit fights the nearest foe and keeps it until one of them dies; the other
+  side turns onto the player within 50 m of him; his own side never takes him as a target (§2.8).
+  No guard of the battle carries the tazer: the blue guards get the grenade launcher in its place,
+  the red guards the weapon their model holds.
 - **Outside the campaign:** while a battle runs, no mission or activity can start, no vehicle can
-  be taken, the START menu's
-  Save is grey and refused, and loading a save (or starting a new game) ends the battle and loads
-  the save normally.
-- **Pickups:** a dead unit may leave a stock pickup: yellow ammo (10 %), red ammo (5 %), blue ammo
-  (4 %), health (5 %) or dark eco (3 %, three pills); 27 % in all (67 % until the twelfth round,
-  which covered the ground with them). Dark eco refills a jetpack: one drop fills
-  its tank. Jak's light and dark eco are set aside for the battle and given back at its end, and the
+  be taken, and the START menu's Save, Load Game and Secrets are grey and refused (the stock
+  refusal beep); a load from elsewhere (or a new game) ends the battle and loads the save normally.
+- **Pickups:** a dead unit may leave a stock pickup: yellow ammo (12 %), red ammo (7 %), health
+  (6 %) or dark eco (5 %, three pills); 30 % in all, a little more than the 27 % of rounds 12 and
+  13. Dark eco is the jetpack's boost: one drop fills its gauge. Jak's light and dark eco are set aside for the battle and given back at its end, and the
   "endless dark eco" and "endless light eco" secrets are off during a battle (they would keep every
   jetpack full and the light eco gauge lit).
 - **Death:** the player's side loses a unit; for 4 seconds the camera follows a living unit of his
@@ -107,22 +121,24 @@ hides him, draws its own model in his place with its own clips, and changes some
 
 | Class | Moves | R1 | Square | Other |
 |---|---|---|---|---|
-| Blue Guard / Red Krimzon Guard | run speed x0.95 | the weapon in hand, its clip on the upper body while the legs walk or run: rifle shot (yellow ammo) at the crosshair, one every 0.5 s, 6 to a magazine; tazer arc (blue ammo), 12 m, locked by itself on the nearest foe ahead within its reach, a hit every 0.2 s; grenade (red ammo), lands on the crosshair's point, 35 m away at most, one a second on its own delay (it fires at once after a rifle shot or a tazer tick), 2 to a magazine. An empty magazine reloads (the stock guards' reload, about 2 s), and only then | rifle butt (2 damage, 4 m) | D-pad: left tazer, down rifle, up grenade launcher |
-| Blue / Red Jetpack | in the air, on fuel: X held climbs (6 m/s measured, a full tank in 4 s), slowing into a hover under the ceiling; Circle held comes down (7 m/s); neither holds the height reached, still; hovering and coming down spend the fuel three times slower; out of fuel it sinks at 4 m/s at most; the gauge refills on the ground in 10 s, and at once with dark eco; the model floats 0.8 m above the ground, even out of fuel | a salvo of two quick shots at the crosshair, 0.8 s between salvos; built-in guns, no ammo | dive kick at the foe ahead (22 m/s, 4 damage on contact within 1 s) | |
-| Robotguard | run speed x0.7; R2: rolls as a ball for 1.2 s at x1.6, shots and blasts do not hurt it meanwhile, then 5 s before the next roll (red gauge) | a salvo of two shots, 0.9 s between salvos; built-in guns, no ammo | punch: wind-up, punch, back (0.9 s), 3 damage within 6.5 m | Circle held: the Dark Makers' shield sphere around it, glowing red; shots hit the sphere instead, which breaks after two guard shots; then 5 s before the next one; behind it the robot stands still: no move, jump, roll or attack |
-| Spider Robot | run speed x1.5, higher jumps; R2 held: blue eco sprint at x2 while the gauge lasts (3 s), refilled in 10 s | nothing | nothing | Circle: bite, a leap at the nearest foe ahead, 4 damage within 7 m |
+| Blue Guard / Red Krimzon Guard | 24 points; run speed x0.95; L2 + left stick: roll toward the stick (ahead when it rests), from the ground, a jump 0.8 m high at 11 m/s (3.8 m measured each way), the stock guards' sideways jump clip toward the roll's side, no attack meanwhile, 0.4 s before the next one; R2 held + left stick: strafe at x0.75, facing ahead, the sidestep clip | the weapon in hand, its clip on the upper body while the legs walk or run: rifle shot (8) at the crosshair, one every 0.5 s, 10 to a magazine reloaded from 20 carried (Jak's yellow ammo); tazer strike (24), 12 m, locked by itself on the nearest foe ahead, then 20 s before the next, no ammo and no reload clip (the weapon joint drawn at 0.55: a short baton); grenade (20), lands on the crosshair's point, 35 m away at most, one a second, from the 5 carried (Jak's red ammo). An empty magazine reloads (the stock guards' reload, about 2 s) | rifle butt (10, 4 m), 1.5 s between two | D-pad: left tazer, down rifle, up grenade launcher |
+| Blue / Red Jetpack | 18 points; X held climbs (6 m/s measured), slowing into a hover under the ceiling; Circle held comes down (7 m/s); neither holds the height reached, still, for as long as the player likes; R2 held: a boost at 24 m/s toward the left stick (ahead when it rests) while the gauge lasts, 3 s in a full one (18 m in 1 s measured); only dark eco refills it, 6 units for a full gauge; the model floats 0.8 m above the ground | a salvo of two quick shots (6 each) at the crosshair, 0.8 s between salvos; built-in guns, no ammo | dive kick at the foe ahead (22 m/s, 10 on contact within 1 s), 0.6 s between two | |
+| Robotguard | 24 points; run speed x0.7; R2: rolls as a ball at x1.6 until R2 again (45 m in 3 s measured), no attack meanwhile | a salvo of two shots (4 each), 0.9 s between salvos; built-in guns, no ammo | punch: wind-up, punch, back (0.9 s), 10 within 6.5 m, 1.5 s between two | Circle: the Dark Makers' shield sphere around it, glowing red, for 5 s, then 25 s before the next one; Jak's shield level stops every attack meanwhile, and the robot walks and jumps behind it (9.5 m in 1.5 s measured), without attacking |
+| Spider Robot | 12 points; run speed x1.5; X: a leap 11 m high (11.03 m measured); R2 held: blue eco sprint at x2 while the gauge lasts (10 s), refilled in 10 s | nothing | nothing | Circle: bite, a leap at the nearest foe ahead, 12 within 7 m, 1 s between two |
 
-Aiming is free for every class: the camera aims. The shots and grenades go where the
-crosshair's line of sight meets the scenery or a unit (80 m at most), and a class turns to face
-that point while it fires. Only the tazer aims by itself, at short range; the crosshair then moves
-onto the foe it locked. Square attacks and the spider's lunge go for the nearest foe within 70 m
-and 60 degrees of Jak's facing. Each attack plays the unit's own clip (guard rifle, tazer and
+Aiming is free for every class: the right stick turns the third-person camera (§2.4) and the
+camera aims. The shots and grenades go where the crosshair's line of sight (the middle of the
+screen) meets the scenery or a unit (80 m at most), and a class turns to face that point while it
+fires. Only the tazer aims by itself, at short range; the crosshair then moves onto the foe it
+locked. Square attacks and the spider's lunge go for the nearest foe within 70 m and 60 degrees of
+the camera's heading. Each attack plays the unit's own clip (guard rifle, tazer and
 grenade throw, roboguard punch, spider attack jump, jetpack forward
 flight). A close attack (Square, the spider's Circle) plays its clip once, to its end, and the
 next one waits for that end, 0.6 s at least (measured clips: blue guard rifle butt 1 s,
 red guard rifle butt 0.22 s, robotguard punch 0.93 s, spider bite 0.38 s); a jetpack's dive kick
 also waits for the previous one to hit or miss. The jetpacks keep one clip while they fire: their
-hover, or their forward flight above 2.5 m/s (back under 1 m/s), never the firing clip. Without
+hover, or above 2.5 m/s (back under 1 m/s) the flight clip toward where they fly against the
+camera's heading (forward, right, left or back), never the firing clip. Without
 ammo, R1 fires nothing and the HUD shows the count in red. Jak's own gun, melee,
 board, Dark Jak and Light Jak are off while a class is played.
 
@@ -134,16 +150,17 @@ board, Dark Jak and Light Jak are off while a class is played.
 
 | File | Change | Why |
 |---|---|---|
-| `goal_src/jak3/pc/features/battlefront/battlefront-h.gc` (new, GAME) | Battle state `*bf*`, zone and class tables (English and French), skeleton groups of the Jak 2 models, army caps (no citizens during a battle) and look shares, the pickups dead units leave, and every function the stock level code calls. | The stock files that call into the mod are level code, linked with CWI, CTYPESA, CTYPESC, DESRESC or WWD; the functions they call must exist whatever is loaded, and answer like the stock game while no battle runs. |
-| `goal_src/jak3/pc/features/battlefront/battlefront-player.gc` (new, GAME) | `bf-avatar`: the class model drawn in Jak's place, its moves, weapons, salvos, ammo, gauges and the robotguard's shield (`bf-shield`); `bf-icon`: a class model drawn over the game (class page preview). | See §2.4 and §2.6. |
-| `goal_src/jak3/pc/features/battlefront/battlefront.gc` (new, GAME) | `bf-director` (battle life cycle, menu pages, HUD, force field, pickups); the code of Jak's `target-death` state during a fight (`bf-target-death`); wrappers of `target-attacked`, `game-info` `initialize!`, the START menu's ring options, `progress` `set-menu-options` and `game-text-info` `lookup-text!`; the START menu's Gamemode pages; the Mods menu entry and bind. | The director lives in `*pc-pool*` so it outlives level changes and deaths; it owns the battle's settings. |
+| `goal_src/jak3/pc/features/battlefront/battlefront-h.gc` (new, GAME) | Battle state `*bf*`, zone and class tables (English and French), skeleton groups of the Jak 2 models, army caps (no citizens during a battle) and look shares, the pickups dead units leave, every function the stock level code calls, and a wrapper of `effect-control` `do-effect` (no death effect on the mod's build-actor models). | The stock files that call into the mod are level code, linked with CWI, CTYPESA, CTYPESC, DESRESC or WWD; the functions they call must exist whatever is loaded, and answer like the stock game while no battle runs. The wrapper: §2.4. |
+| `goal_src/jak3/pc/features/battlefront/battlefront-player.gc` (new, GAME) | `bf-avatar`: the class model drawn in Jak's place, its moves, weapons, salvos, dodges, ammo, gauges and the robotguard's shield (`bf-shield`); `bf-cam-rig`: the third-person camera; `bf-icon`: a class model drawn over the game (class page preview). | See §2.4 and §2.6. |
+| `goal_src/jak3/pc/features/battlefront/battlefront.gc` (new, GAME) | `bf-director` (battle life cycle, menu pages, HUD, force field, pickups); the code of Jak's `target-death` state during a fight (`bf-target-death`); wrappers of `target-attacked`, `game-info` `initialize!`, the START menu's ring options, `progress` `set-menu-options` and `game-text-info` `lookup-text!`; the START menu's Gamemode pages; the Mods menu entry. | The director lives in `*pc-pool*` so it outlives level changes and deaths; it owns the battle's settings. |
+| `docs/modding/current_mod/battlefront_smoke.gc`, `battlefront_tests.md` (new) | The smoke test scenarios and their notebook (§3). | Never in a build: `smoke_test.py install` copies a scenario into GAME for a run. |
 | `goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc` (new, GAME, generated) | The four war zones' maps: each district's minimap cells, 256 texels on the long side, one palette, their world corners. | The zone pages show each district on the game's own minimap textures, loaded by the game only with their city section (§2.6). |
 | `goal_src/jak3/levels/city/battlefront/battlefront-city.gc` (new, CWI) | Attack-controller hatred edits, periodic faction commands, reinforcements on the district's lanes, `bf-keep-unit?`, the player's grenade throw; installs `*bf-city-hook*` and `*bf-city-grenade*`. | These need Haven City's types (the grenade is `vehicle-grenade-deflect`, a lane is a `nav-branch`, a unit a `citizen`), only known in CWI. |
 | `goal_src/jak3/engine/ui/hud-classes.gc` | `hud-health`'s `draw` calls `bf-hud-health-gauges` just before it draws its sprites. | During a battle, the class gauge takes one of the stock eco gauges, with its color (§2.6); a no-op otherwise. |
 | `goal_src/jak3/levels/city/traffic/traffic-manager.gc` | `traffic-manager-method-22` takes each pool size from `bf-want-count`. | It writes every traffic pool's `want-count` from the faction spawn levels every frame: the army caps must be applied there (§2.2). |
 | `game/graphics/opengl_renderer/foreground/Shadow2.cpp`, `Shadow2.h` | A shadow that no longer fits the frame's vertex or index buffers is dropped instead of stopping the game; the buffers are twice as large; the overflow skip loop tests `!=`. | A battle draws dozens of shadow casters: the stock buffers filled and the `alloc_verts` assertion closed the game (seen in the first deployment). Needs `task build-release-game`. |
 | `goal_src/jak3/levels/city/traffic/traffic-engine.gc` | `set-process-to-killed` calls `bf-unit-killed`; `activate-one-vehicle` takes the number of units of a type it may wake from `bf-want-count`; the per-frame check of the awake pedestrians keeps a unit when `bf-keep-unit?` (`battlefront-city.gc`) says so. | The first is reached once per real unit death (recycled units never go there): the loss counter. The second replaces the squad controls' count, which starved the Port. The third keeps the units on the district's lanes awake out of the camera's cells (§2.2). |
-| `goal_src/jak3/levels/city/traffic/citizen/guard.gc` | `init-enemy!` takes its skeleton from `bf-guard-skel-name`; `crimson-guard-method-267` registers red guards as roboguards; `citizen-method-215` registers with `bf-attacker-type`; `citizen-method-194` calls `bf-guard-activated`. | Red guards run the stock guard code (§2.2). |
+| `goal_src/jak3/levels/city/traffic/citizen/guard.gc` | `init-enemy!` takes its skeleton from `bf-guard-skel-name`; `crimson-guard-method-267` registers red guards as roboguards and takes its weapon from `bf-guard-weapon`, and method 270 compares the weapon that would give; `citizen-method-215` registers with `bf-attacker-type`; `citizen-method-194` calls `bf-guard-activated`. | Red guards run the stock guard code (§2.2); no guard of a battle carries the tazer (§2.8). |
 | `goal_src/jak3/levels/city/protect/flying-turret.gc` | `init-enemy!` takes its skeleton from `bf-turret-skel-name` and its scale from `bf-unit-scale`; `citizen-method-215` registers with `bf-attacker-type`; `enemy-common-post` calls `bf-hover-animate`. | Jetpack guards run the stock flying-turret code (§2.2). |
 | `goal_src/jak3/dgos/game.gd` | `battlefront-h.o`, `battlefront-player.o`, `battlefront-minimaps.o`, `battlefront.o` at the end. | After the engine code they use (enemy, guard-projectile) and `mods-menu.o`. |
 | `goal_src/jak3/dgos/cwi.gd` | `battlefront-city.o` after `mh-squad-control.o`. | After every type it uses. |
@@ -314,8 +331,9 @@ group after the file, so the skeleton groups in `battlefront-h.gc` reference `bf
 bound to the level that holds its art (`*bf-class-art*`: ctypesa for the guards, ctypesc for the
 jetpacks and the robots). Each frame it:
 
-1. copies Jak's position and facing, and sets `no-draw` on Jak (Daxter, the gun and the board
-   copy Jak's draw status);
+1. copies Jak's position, faces the camera's heading (turned up to 50 degrees toward its walk, its
+   walk or run clip reversed when it walks backward; facing the aim point while it fires), and sets
+   `no-draw` on Jak (Daxter, the gun and the board copy Jak's draw status);
 2. sets the class speed through `*setting-control*` `user-default speed-mult`, which the target
    reads every frame (`logic-target.gc`);
 3. applies the class moves to Jak's velocity (jetpack lift on its fuel gauge, spider jump and blue
@@ -352,10 +370,43 @@ over the ground the clip covers (`bf-avatar-loop-rate`: spydroid.gc's walk 4 m/s
 0.5 to 4) for the spider; the other classes keep rate 1. At rate 1 the spider, at Jak's speed times
 1.5 (twice that boosting), slid over the ground.
 
-**The camera.** The avatar holds a third-person camera, as in Star Wars Battlefront (2004)
-(`bf-avatar-camera`, settings of the avatar that go with it): the stock string 4 to 6 m behind,
-2.5 to 3.5 m above Jak's feet, looking at a point 3 m up (`target-height`, Jak's 2.15 m), so the
-crosshair (256, 196) sits on the units ahead. A death's spectating sets its own, further back.
+**The camera.** A third-person shooter camera, as in Star Wars Battlefront (2004): `bf-cam-rig`,
+a process spawned with the avatar under Jak (so it runs after him, before the camera) and killed
+with it. It drives the stock point-of-view camera (`cam-pov`, as the city's sniper turret uses
+it), which looks from a bone of a process: the rig is a process-drawable with a node list of one
+cspace whose bone lives in the process itself (a heap compaction moves both). Every frame it turns
+the view (`*bf*` view-yaw, view-pitch, kept across class changes and respawns) by the right stick,
+160 degrees a second sideways and 100 up and down (40 up, 45 down at most), and sets the bone: the
+view's rotation, placed behind a pivot at 80 % of the class's height by 1.6 times that height (5.5
+m at least), 0.3 times it to the right and 0.8 m above, pulled in front of any wall between the
+pivot and there (a 0.4 m sphere probe). The crosshair sits in the middle of the screen (256, 208).
+Two engine facts set its signs: the camera's rvec points to the screen's left (looking along +z,
++x is on the left), and the PC settings' default third-person inversions keep the original game's
+camera, which turns the view left for the stick pushed right; the rig turns the other way, as a
+shooter, and follows a change of those settings. The view starts as Jak's facing at the spawn, and
+a respawn looks toward the battlefield. A death's spectating gives the stock camera back, further
+back.
+
+**Guard dodges.** L2 or R2 sends Jak a stock `'launch` (`target-standard-event-handler`: a jump of
+the given height with the given velocity) 0.8 m high at 11 m/s along the camera's left or right,
+and keeps that speed across while it flies; it ends as Jak lands. An upward speed set by hand did
+not lift him: 1.2 m along the ground. The model plays the stock guards' sideways jumps (`jump-right`
+40, `jump-left` 41: the stock roll-right state throws a guard along its +x, its left, with
+jump-left).
+
+**The red guards' deaths.** Their skeleton plays `crimson-guard-ag`'s clips with an effect-control
+(above), so their death clip's `'event-death` ran the stock guard's `death-default` effect
+(`guard.gc`), which sets the draw-control's `death-timer`. On PC a model with a death timer is drawn
+through generic merc (`foreground.gc`, the PC reassign), and a build-actor model has only a dummy
+merc-ctrl for it (`build_actor.cpp`): the game crashed in `mercneric_convert` (mips2c
+`generic_merc.cpp`, found with a temporary vectored exception handler) seconds into battles, as
+units died. A `do-effect` wrapper (`battlefront-h.gc`) skips the death effects of the mod's
+build-actor models (`bf-custom-model?`): the body goes with its death clip, without the dissolve.
+
+**The jetpack clips' pace.** The jetpack guard's clips are the Jak 2 rip's frames at 15 a second,
+which build-actor stores with a speed of one frame per 60th of a second (measured: speed 1.0): the
+player's jetpack looped its 16-frame hover clip four times a second and its legs shook, the units'
+own (0.5 a frame) twice too fast. Both play at `BF_HOVER_RATE`, 0.25 (measured 0.249 a frame).
 
 **Health by class.** The player keeps Jak's health (8, the health HUD's 8 segments); the
 `target-attacked` wrapper scales the damage of each attack during a fight by the class's
@@ -368,7 +419,7 @@ state chained within one frame until the stack overflowed (Lisp wiki jak3 4.40).
 `bf-reload-break-ok?` (`guard-grenade.gc`) breaks it off for the player only during a battle.
 
 **Free aim.** `bf-free-aim` (once a frame, keyed on the real clock's frame counter) casts a ray from
-the camera through the crosshair's screen point (256, 196 of the 512 x 416 screen), 80 m long, with
+the camera through the crosshair's screen point (256, 208 of the 512 x 416 screen), 80 m long, with
 `fill-and-probe-using-line-sphere` against the scenery and the units (Jak's own collision skipped).
 The ray's direction is the crosshair's offset from the screen point of a spot 1 m ahead of the
 camera, turned into meters with the projections of the camera's right and up axes there (the method
@@ -632,8 +683,61 @@ play `shield-hit`; a jetpack holding X stopped at 0.1 m above the ceiling.
 |---|---|
 | No vehicle | The director sets `'pilot` to #f with its other settings: a vehicle takes the player only with it on (`vehicle-util.gc` `check-player-get-on`). It goes with the director too. |
 | No mission or activity starts | The director sets `exclusive-task` to `(game-task none)` with its other settings: a task node is open only if its task is one the setting names (`task-control.gc` `game-task-node-info-method-12`), and no node has the task none. NPC prompts, burning bushes, task managers and their minimap icons follow that gate. The setting goes with the director. A mission already running stays open. |
-| Save grey and refused | Wrappers of `menu-main-menu-option` `respond-progress` (X on Save: the stock refusal beep, nothing opens) and `draw-option` (the stock label, in the PC menus' disabled color) in `battlefront.gc`. |
+| Save, Load Game and Secrets grey and refused | Wrappers of `menu-main-menu-option` `respond-progress` (X on one of them, `bf-locked-option?`: the stock refusal beep, nothing opens) and `draw-option` (the stock label, in the PC menus' disabled color) in `battlefront.gc`. A load would end the battle in the middle of the menu; the secrets would change the fight. |
 | A load ends the battle | A wrapper of `game-info` `initialize!`: a `'game` reset (the START menu's load, a new game, the title) or a `'boot` during a battle calls `bf-stop-now!` first, before the reset and the save's data: the avatar and the Haven City side go, Jak gets back what the battle set aside, the mode is switched off and the director goes with every setting it owns. The battle's own respawns (`'life`) go on as before. |
+
+### 2.8 Health, damage and targeting
+
+**One 24 point scale.** `battlefront-h.gc` gives every class and unit its full health in points
+(`*bf-class-hp*`, `bf-unit-hp`) and every attack its points (`bf-attack-damage`, told by the
+sender's type: `guard-shot` 8, or the player's class gun through `bf-shot-damage`; an explosion
+20; a unit's own blow 10, a spider's 12; the player's own attacks carry theirs in `*bf*`
+`own-attack` while `bf-send-attack` sends them, so Jak's body running into a unit deals 0). Two
+wrappers turn the points into the game's units:
+
+- Units: a `damage-enemy-from-attack!` method on `nav-enemy` takes the attack's share of the
+  unit's stock hit points (`default-hit-points`, which caps them first), 0 when the attacker is of
+  the unit's side, and counts the kill in `*bf*` kills when the attacker is the player. It is set
+  on `nav-enemy`, the parent of every unit of the battle: the city's units are defined in level
+  code linked after GAME and copy it at their creation, and GAME itself links with method-set
+  propagation on (Lisp wiki jak3 4.10). Measured: a rifle hit took 1.33 of a guard's 4 hit points (8 of 24).
+- The player: `target-attacked` refuses an attack from his own side (no hit reaction) and sets any
+  other's damage to its points times `health-max / 24` (Jak's 16 health: a guard's blow 6.67,
+  measured). His health at a deployment, a respawn or a restart is his class's share of
+  `health-max` (`bf-class-health`: the spider half the bar). While the robotguard's shield is up,
+  `*bf*` `shield?` sets Jak's shield level, and the stock handler refuses every attack. The flag
+  is set to `#f` at load: a symbol field of a static structure starts as 0, which tests true, and
+  until this round no attack ever hurt the player in a battle (Lisp wiki common 1.4.16).
+
+**Targeting.** `battlefront-city.gc` pushes two hatreds into Haven City's attack controller
+(`bf-city-push-hatreds`: the nearest foe first, kept until it dies, the player twice as hated as a
+unit), writes the attacker/target table of every battle type by side (`bf-city-apply-hatred`, 0
+within a side, the player's row and column included) and clears the guards' anger callbacks.
+Twice a second `bf-city-retarget` makes three kinds of unit look again: the other side's within
+50 m of the player whose foe is farther than him, any whose foe went beyond 150 m, and any of the
+player's side that has him as its foe (a target taken with the stock table while the zone loaded
+was kept for good: a red guard and a red jetpack aiming at a Krimzon Guard player, seen in a smoke
+run). The units' weapon goes through `bf-guard-weapon` in `crimson-guard-method-267`, and method
+270 compares the weapon it would give (Lisp wiki jak3 4.37): no tazer in a battle.
+
+**Guard ammo and the gun HUD.** The rifle's magazine is `*bf*` mag (10), its reserve Jak's
+yellow ammo (capped at 20 every frame), the grenades Jak's red ammo (capped at 5). The `hud-gun`
+`draw` wrapper draws the stock icon with its count and shells scaled to nothing (they would show
+Jak's ammo against its stock maximum), then the guard's own (`bf-draw-gun-ammo`, the stock shell
+sprite 14 and string position).
+
+**The tazer.** One strike on the foe the free aim locked within 12 m (`bf-avatar-tazer`), then
+`*bf*` tazer-time holds the next for 20 s, across a class change or a respawn. Its look: a
+`joint-mod` in `joint-set*` mode on node 13, the guard skeleton's `gun` joint
+(`joint-nodes.gc`), scaled to 0.55 while the tazer is in hand (`bf-avatar-gun-look`). The avatar
+comes from a dead-pool heap: its `relocate` moves the `gun-jm` field with the process, or the
+scale written through the old address crashed the game seconds after a guard deployed (Lisp
+wiki jak3, process heaps move).
+
+**Class help.** Each class's lines (`*bf-guard-help*`, the robot's and spider's inline) are drawn
+under the list by `bf-draw-class-help`; their `<PAD_...>` tags become the font's button icons, and
+the D-pad's left arrow is drawn from the font's D-pad parts (`~3L`, `~22L` colors and `~+nH`,
+`~-nV` offsets). A line holds about 30 characters in the left frame.
 
 ---
 
@@ -652,29 +756,36 @@ play `shield-hit`; a jetpack holding X stopped at 0.1 m above the ceiling.
    after `task extract`.
 6. In a stock area first, check nothing changed (guards blue, flying turrets, no red guard in
    Haven City).
-7. Mods menu (L1 + SELECT) > battlefront > Battlefront mode, then START > Options > Gamemode >
+7. Mods menu (L3 + SELECT) > battlefront > Battlefront mode, then START > Options > Gamemode >
    Battlefront > New battle, and for each zone and side:
 
    | Check | Expected |
    |---|---|
    | Zone and side pages | black screen; the whole district on its minimap (dark gray ground, white streets, blue water), the other districts black, blue and red spawns |
-   | Deployment | blackout, then the player at his side's spawn and the class page |
-   | Class page | black screen; two Freedom League classes, four Krimzon Guard ones; the class under the cursor stands in the right frame and turns; X deploys, HUD with 500 / 500 |
+   | Class page, deployment | right after the side page, black, "Loading the war zone..." while the zone loads under it; the preview turns once the models are in; then the game pauses and "Deploy" shows |
+   | Class page | two Freedom League classes, four Krimzon Guard ones; the class under the cursor stands in the right frame and turns; X deploys, HUD with 500 / 500 |
+   | Camera | over the class's right shoulder, the crosshair in the middle; the right stick pushed right turns right, pushed up looks up; the class faces where it aims and walks sideways and backward |
+   | Guard rolls and strafes | L2 with the left stick rolls about 4 m that way (right, left or ahead), with the guards' sideways jump; R2 held with the stick strafes, the guard facing ahead |
    | Units | blue guards and red Krimzon Guards in the streets, jetpack guards in the air, robotguards, spider robots; the two sides shoot each other; at most 20 per side, still there when the camera turns away; no citizen |
    | Losses | each kill lowers the right side's reserve; pickups appear where units die, dark eco now and then |
    | Each class | its model in Jak's place, its clips, the moves, R1, Square and Circle of §1 |
-   | Guard weapons | D-pad left, down, up: tazer arc (locks the nearest foe within 12 m), rifle, grenades; each spends its ammo; firing while walking keeps the legs walking; a reload after 6 rifle shots or 2 grenades, never before |
+   | Guard weapons | D-pad left, down, up: tazer (a short baton in hand; one strike on the nearest foe within 12 m, then 20 s), rifle (10/20, a reload when the magazine is empty), grenades (5); firing while walking keeps the legs walking |
    | Free aim | shots and grenades go where the crosshair points, for every class and for Jak; the crosshair turns red on a foe |
-   | HUD | stock health ring, no model; the stock gun HUD (icon, shells, ammo) top right for the guards; jetpack fuel in the dark eco gauge, spider blue eco and robotguard roll in the light eco gauge, blue and red |
-   | Robotguard | R2 rolls, then the red gauge refills in 5 s; Circle held: red shield sphere, breaks under fire, and the robot stands still behind it (no move, jump, roll or shot); R1: salvos of two shots; Square: a full punch |
-   | Outside the campaign | no mission prompt; START menu: Save grey, X refused; loading a save ends the battle |
-   | Jetpack | X climbs, Circle comes down, neither hovers still, while the fuel lasts; out of fuel a slow descent; the model floats above the ground; dark eco refills it |
+   | HUD | stock health ring, no model; "Kills" on the left; the stock gun icon top right for the guards with 10/20 and 10 shells for the rifle, the grenades left and 5 shells, nothing but the recharge seconds for the tazer; jetpack boost in the dark eco gauge, spider blue eco and robotguard shield in the light eco gauge, blue and red |
+   | Robotguard | R2 rolls as a ball until R2 again; Circle: red shield sphere for 5 s, every attack stopped, the robot walking behind it, then 25 s before the next; R1: salvos of two shots; Square: a full punch |
+   | Outside the campaign | no mission prompt; START menu: Save, Load Game and Secrets grey, X refused |
+   | Jetpack | X climbs, Circle comes down, neither hovers still, for as long as you like; R2 boosts toward the stick while the gauge lasts; dark eco alone refills it; the model floats above the ground, its legs calm when it stands still |
    | Reserves HUD | top middle: your side's bar in green to the left, the enemy's in red to the right, the counts under them |
    | Vehicles | Triangle by a vehicle does nothing during a battle |
    | Player death | the side loses 1; 4 s on a unit of the side with a countdown; back at the spawn as the same class |
    | Whole district | every street of the district's sections can be walked; crossing into the next district puts the player back where he last stood in this one, with sparks and "FORCE FIELD"; a jetpack stops at the ceiling |
    | Change class, Restart | START > Options > Gamemode > Battlefront: the class page with the battle going on; a restart back to 500 / 500 at the spawn, same class |
    | End | START > ... > Quit the battle: stock Haven City again (blue guards, turrets), Jak's ammo as before; the mode switched off in the Mods menu during a battle: the last save loads |
+
+The smoke tests, from round 13 on, are in the test notebook,
+[`battlefront_tests.md`](battlefront_tests.md): each one is a scenario of
+[`battlefront_smoke.gc`](battlefront_smoke.gc) that boots the game retail, loads save slot 1 and
+drives the mod's real menus with the pad.
 
 ### 3.1 What the in-game runs checked
 
@@ -920,8 +1031,10 @@ code (its name cannot be printed); the object is sound.
   battles longer than ten minutes were not run.
 - **Earlier builds crashed in long battles.** Each cause found was fixed (§5): the shadow
   buffers, the avatar flood, the Spargus citizens in the traffic, the forced guard weapon, a
-  process-tree walk in a unit's init. Crashes whose cause was not identified could remain; a
-  crash ends the game with no message (exit code `0xC0000005`).
+  process-tree walk in a unit's init, the red guards' death effect (§2.4). Crashes whose cause was
+  not identified could remain; a crash ends the game with no message (exit code `0xC0000005`). A
+  temporary vectored exception handler in the runtime names the faulting GOAL function, or the
+  runtime module and offset of a native one (`smoke-tests` skill, game-control).
 - **20 per side is a ceiling, not a constant.** Each zone reached 20 per side, held for 8 to 52 of
   60 samples of 30 s (§3.1); in the eleventh round's last runs the Freedom League stayed at 19 in
   the Industrial Zone and the Slums for the 20 s watched. A unit that dies counts until it has
@@ -932,18 +1045,20 @@ code (its name cannot be printed); the object is sound.
 - **The zone minimaps are carried texels.** Generated from the user's decompiled minimap textures
   (Naughty Dog assets, like the models), 4 m a texel: soft once framed on a battlefield. A new war
   zone needs the script run again.
-- **The Mods menu opens with L1 + SELECT.** This mod sets the registry's bind (`*mods-menu-bind*`);
-  speedrunner mode's L1 + R1 + SELECT holds it too and opens the Mods menu instead.
 - **A death leaves Jak where he fell, hidden,** until the respawn: a unit can still bump into him,
   and the stock death's movies and its reset of the area do not happen during a fight.
 - **A mission already running stays open** during a battle (the `exclusive-task` setting closes the
   others); the battle does not stop it.
 - **The robotguard shield's sounds may be silent:** its stock sounds are in level banks that Haven
   City does not load.
-- **Free aim through the stock camera.** The crosshair is a fixed screen point above Jak's head;
-  Jak 3's camera, built to follow Jak, decides how far ahead it points, and the taller classes
-  (jetpacks, robotguard) can stand under it. A shot needs the line of sight to touch a unit's
-  collision: there is no aim assist, except the tazer's.
+- **No aim assist.** A shot needs the crosshair's line of sight to touch a unit's collision; only
+  the tazer aims by itself. The camera's speeds, distance and shoulder offset are the author's to
+  tune by hand (`battlefront-player.gc` BF_YAW_RATE and `bf-cam-rig-update`).
+- **Hidden Jak runs, the class walks.** Jak, hidden, turns toward where he runs; the class model
+  faces the camera's heading, turned 50 degrees at most toward its walk. The guards and robots
+  have no sideways walk clip: a sideways walk is their forward walk turned that way.
+- **The red guards die without the dissolve:** their death effects are skipped (§2.4), the
+  build-actor models have no data for the renderer path the dissolve takes.
 - **The class models over the game are lit by the place.** The preview and the health icon are
   drawn with the world, a few meters in front of the camera: the level's lights color them, and
   scenery nearer than that can cover them. With the icon, the health HUD keeps only its pips.
@@ -954,16 +1069,15 @@ code (its name cannot be printed); the object is sound.
   e.g. the master mode) can come out garbled after level loads: the kernel keeps some names in the
   top of the global heap, which DGO loading reuses. The values are right; only printing is
   affected.
-- **A red guard's weapon can differ from its model's.** The stock code picks and changes each
-  guard's weapon (taser, rifle, grenade launcher); the model shows the rifle or the other weapon.
-  Forcing the weapon of the model (`crimson-guard-method-267`) was tried and dropped: the game
-  crashed in a guard's weapon change, in a ten-minute battle.
-- **Jetpack guards fly on the flying-turret code:** they explode into KG robot debris, one shot
-  kills them (turret hit points), and the turret's aim joint mod pitches their chest.
+- **Jetpack guards fly on the flying-turret code:** they explode into KG robot debris, and the
+  turret's aim joint mod pitches their chest. A direct blow (`bf-send-attack`) on one in flight
+  took nothing in a smoke run: the close attacks reach the ground units.
 - **Classes are drawn over Jak:** hits, health and death are Jak's; the class model only follows him.
   The Robotguard's roll, the dives and the leaps are Jak's own physics with a changed speed or
   velocity, not the robots' own movement code.
-- **The stock alert system still runs:** shooting a guard of your own side can make guards hunt you.
+- **The tazer's baton is the guard's weapon drawn smaller,** not a model of its own (§2.8).
+- **Long class names overflow the class page:** "Garde rouge de la Grenagarde" runs past the left
+  frame in French.
 - **Zones are Haven City districts only.** Spargus would need the city's unit code and art in WWD
   (the battle-of-spargus mod does it for the guards).
 - **A two-section district holds its own sections only.** In the Industrial Zone and Freedom HQ

@@ -23,23 +23,24 @@ Battlefront for Jak 3: the Freedom League and the Krimzon Guard fight over a war
 ## Key Features
 - **Battles in Haven City:** pick a war zone, a whole district (Port, Industrial Zone, Slums, Freedom HQ), a side, and a class. Each side starts with 500 units; every death takes one, and the first side down to 0 loses. Up to 20 units per side fight at once, and they stay on the battlefield wherever you look.
 - **Two armies:** the Freedom League (blue guards, jetpack guards) against the Krimzon Guard (red Krimzon Guards from Jak 2, jetpack guards, robotguards, spider robots).
-- **Play any class:** each of the six classes has its own model, moves and weapons, previewed turning on the class page: switch between tazer, rifle and grenade launcher as a guard, climb, hover and come down on a fuel gauge with the jetpack, roll and raise a red shield as a robotguard, or sprint on blue eco as a spider robot.
-- **A third-person camera:** as in Star Wars Battlefront (2004), close behind your class and above its head, so the crosshair sits on the units ahead.
+- **Play any class:** each of the six classes has its own model, moves and weapons, previewed turning on the class page with what it does and its own buttons, shown as the pad's icons: switch between tazer, rifle and grenade launcher, roll and strafe as a guard, fly as long as you like and boost on dark eco with the jetpack, roll as a ball and raise a red shield as a robotguard, or leap 11 m high and sprint on blue eco as a spider robot.
+- **A third-person shooter camera:** as in Star Wars Battlefront (2004), over your class's right shoulder. The right stick turns it left and right and tilts it up and down, the crosshair stays in the middle of the screen, and your class faces where you aim while the left stick moves it forward, back and sideways.
 - **Free aim:** every class shoots where the crosshair points; only the tazer locks onto the nearest foe by itself.
-- **Health by class:** a guard takes 8 hits, a jetpack guard or a spider robot 6, a robotguard 16.
-- **Ammo and pickups:** the guns use Jak's ammo (yellow for the rifles, red for grenades, blue for the tazer). About one fallen unit in four drops something: ammo, health, or dark eco, which refills a jetpack.
-- **A soldier's HUD:** the reserves at the top, as bars in the style of Star Wars Battlefront (2004) (yours in green, the enemy's in red), the crosshair, your gun's icon, shells and ammo at the top right, as in the original game, and your class's gauge in Jak's eco gauges: jetpack fuel as dark eco, spider blue eco in blue, robotguard roll in red.
-- **Outside the campaign:** during a battle no mission can start, no vehicle can be taken, and saving is off; loading a save ends the battle.
+- **Health and damage on one 24 point scale:** guards and robotguards have 24 points, jetpack guards 18, spider robots 12. A rifle shot takes 8, a grenade 20, the tazer 24, a close attack 10 (a spider's bite 12), a jetpack's shot 6 and a robotguard's shot 4. Running into a foe does not hurt it.
+- **Friends and foes:** your side never hurts or targets you; the enemy goes for you when you come within 50 m; every unit fights the nearest foe until one of them falls.
+- **Ammo and pickups:** a guard's rifle holds 10 rounds with 20 more carried, its grenade launcher 5 grenades; the tazer needs no ammo but recharges for 20 s after each strike. The battle's guards on both sides carry rifles and grenade launchers: the tazer is yours alone. About one fallen unit in three drops something: ammo, health, or dark eco, which refills a jetpack's boost.
+- **A soldier's HUD:** the reserves at the top, as bars in the style of Star Wars Battlefront (2004) (yours in green, the enemy's in red), your kills on the left, the crosshair, your gun's icon at the top right with its rounds as shells and a count (10/20 for the rifle, the grenades left, nothing for the tazer but its recharge seconds), and your class's gauge in Jak's eco gauges: jetpack boost as dark eco, spider blue eco in blue, robotguard shield in red.
+- **Outside the campaign:** during a battle no mission can start, no vehicle can be taken, and Save, Load Game and Secrets are greyed out in the START menu.
 - **A force field** keeps you in the district and the jetpacks under its ceiling. Every street of the district is yours to fight in.
 - **Jak 2 models in Jak 3:** the red Krimzon Guard and the jetpack guard of Jak 2.
 - **Watch, then respawn:** when you fall, the camera follows one of your side's units for 4 seconds, then you are back at your spawn with your class and fresh ammo.
 - **Off by default:** nothing changes until you turn it on in the Mods menu.
 
 ## How to Play
-1. In game, open the Mods menu with **L1 + SELECT**, then switch on **battlefront > Battlefront mode**.
+1. In game, open the Mods menu with **L3 + SELECT**, then switch on **battlefront > Battlefront mode**.
 2. Open the START menu: **Options > Gamemode > Battlefront > New battle**.
-3. Choose the war zone, then your side; the whole district is shown on its minimap, with both spawns. You are taken to your side's spawn.
-4. Choose your class: the class under the cursor turns in a frame next to the list. X deploys you with fresh ammo.
+3. Choose the war zone, then your side; the whole district is shown on its minimap, with both spawns.
+4. The class page follows at once, while your side's spawn loads behind it: the class under the cursor turns in a frame next to the list as soon as the models are in, its health, what it does and its buttons under the list. Once "Loading the war zone..." gives way to "Deploy", X deploys you with fresh ammo.
 5. The reserves of both sides are shown at the top of the screen: your side's bar and count in green, the enemy's in red. A force field holds you inside the district.
 6. When you fall, you watch the battle for 4 seconds, then you come back at your spawn as the same class, with fresh ammo.
 7. During a battle, the same START page has **Change class** (the battle goes on), **Restart the battle** and **Quit the battle**.
@@ -79,12 +80,12 @@ Each war zone is a whole district of Haven City: every street of it is yours, an
 
 | Class | Controls |
 |---|---|
-| Blue Guard, Red Krimzon Guard | R1: fire, while you walk. The rifle holds 6 shots and the grenade launcher 2: the guard reloads when one is empty. Square: rifle butt. D-pad: left tazer, down rifle, up grenade launcher |
-| Jetpack guards | Hold X to climb, hold Circle to come down, let go of both to hover, while the fuel lasts; out of fuel you float down slowly. The gauge refills on the ground in 10 s, or at once with dark eco. The jetpack always floats a little above the ground. R1: two quick shots. Square: dive kick |
-| Robotguard | Slower. R1: two shots. Square: a full punch. R2: roll as a ball, fast and shot-proof, then 5 s to recharge. Hold Circle: a red shield that breaks when shot; behind it you stand still and cannot shoot |
-| Spider Robot | Faster, jumps higher. Circle: bite. Hold R2: blue eco sprint at double speed; the gauge refills in 10 s |
+| Blue Guard, Red Krimzon Guard | 24 points. R1: fire, while you walk. The rifle holds 10 rounds, with 20 more carried: the guard reloads from them when the magazine is empty. The grenade launcher throws the 5 grenades you carry. The tazer strikes once, 24 points (a whole health bar) within 12 m, then recharges for 20 s, with no reload. Square: rifle butt, one every 1.5 s. L2 + left stick: roll that way, about 4 m. Hold R2 + left stick: strafe, still facing ahead. D-pad: left tazer (the guard holds a short stun baton), down rifle, up grenade launcher |
+| Jetpack guards | 18 points. Hold X to climb, hold Circle to come down, let go of both to hover, for as long as you like. Hold R2: boost toward the left stick (ahead when it rests) while the gauge lasts, 3 s in a full one; only dark eco refills it. The jetpack always floats a little above the ground. R1: two quick shots. Square: dive kick |
+| Robotguard | 24 points. Slower. R1: two shots. Square: a full punch, one every 1.5 s. R2: roll as a ball, as far as you like; R2 again stands it up. Circle: a red shield for 5 s that stops every shot, blast and blow while you keep moving, then 25 s to recharge |
+| Spider Robot | 12 points. Faster. X: a leap 11 m high. Circle: bite, one a second. Hold R2: blue eco sprint at double speed for 10 s; the gauge refills in 10 s |
 
-Aim with the camera: shots and grenades go where the crosshair points, and it turns red on a foe. The tazer reaches 12 m and aims by itself at the nearest foe in front of you. The rifles spend yellow ammo, the grenade launcher red ammo, the tazer blue ammo; the jetpacks' and the robotguard's guns need none. No citizens walk the streets during a battle.
+Aim with the right stick: pushed right the view turns right, pushed up it looks up (switching a third-person camera inversion in the game's camera options turns that axis the other way). Shots and grenades go where the crosshair points, and it turns red on a foe. The tazer reaches 12 m and aims by itself at the nearest foe in front of you. The rifles spend yellow ammo and the grenade launcher red ammo; the tazer, the jetpacks' and the robotguard's guns need none. Every close attack lands with the sound of Jak's punch. No citizens walk the streets during a battle.
 
 <p align="center">
   <img src="docs/img/mod/hud.png" width="720" alt="Left: a blue guard's tazer with its gun icon and ammo. Middle: a jetpack's fuel in the dark eco gauge. Right: the robotguard's red shield and its roll gauge">
@@ -99,6 +100,12 @@ Aim with the camera: shots and grenades go where the crosshair points, and it tu
 | <img src="docs/img/mod/robotguard.gif" width="400" alt="Robotguard: salvos, the red shield, a roll as a ball, a punch"> | <img src="docs/img/mod/spider.gif" width="400" alt="Spider Robot: blue eco sprint, leap, bites"> |
 
 *Recorded in game, at the Port: every weapon of every class.*
+
+| Camera | Guard rolls | Jetpack hovering still |
+|---|---|---|
+| <img src="docs/img/mod/tps-camera.gif" width="260" alt="The right stick turns the view right then left while a blue guard stays over the camera's shoulder, then the guard strafes and walks forward"> | <img src="docs/img/mod/guard-roll.gif" width="260" alt="A blue guard rolls to the right, then to the left, with L2 and the left stick"> | <img src="docs/img/mod/jetpack-hover.gif" width="260" alt="A blue jetpack guard hovering 10 m up, left alone"> |
+
+*Recorded in game, at the Port.*
 
 Menus are in French when the game language is French.
 
