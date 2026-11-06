@@ -12,9 +12,12 @@
   `*bf-city-grenade*`, which this file sets at link time, and calls them only while ctywide is
   active (a fresh link of this file).
 
-  Hatred: the stock attack-controller table already makes guards and robots fight. A Krimzon Guard
-  player must not be the robots' target and must be the guards'. The changed entries are saved
-  first and written back when the battle ends.
+  Hatred: the attack controller (wascity/mission-squad-control.gc) gives each unit the target of
+  best score, its hatred times a distance factor times a crowd factor, twice for the one it has, and
+  looks again now and then. During a battle every pair of foes takes the battle's own hatreds
+  (`bf-city-apply-hatred`): the nearest foe first (the score falls to 0 at 120 m), kept until it
+  dies (no look again), the player twice as hated as a unit by the other side and not at all by his
+  own. The changed entries are saved first and written back when the battle ends.
 
   No Spargus citizen fights here: wastelanders brought into Haven City by the traffic engine froze
   or crashed the game within minutes (in the background collision query
@@ -24,18 +27,28 @@
 
 ;; DECOMP BEGINS
 
-;; attack-controller types (city-target-type) used below
+;; attack-controller types (city-target-type) of a battle: the player (the controller's
+;; target-attacker), the Freedom League's guards (3 to 5: tazer, rifle, grenade; the blue jetpacks
+;; register as rifle guards), the Krimzon Guard's units (9 to 12: roboguard, turret, spydroid, giant;
+;; the red guards register as roboguards)
 (defconstant BF_CTT_JAK 0)
-(defconstant BF_CTT_GUARD_TAZER 3)
-(defconstant BF_CTT_ROBOGUARD 9)
+(define *bf-ctt* (new 'static 'array int32 8 0 3 4 5 9 10 11 12))
+
+(defconstant BF_HATE_REACH (meters 120))   ;; a foe beyond this scores 0: never chosen
+(defconstant BF_HATE_LOST (meters 150))    ;; a unit whose foe got this far looks again
+(defconstant BF_HATE_PLAYER (meters 50))   ;; the other side turns onto the player this close
 
 (deftype bf-city-saved (structure)
-  "Stock hatred indices overwritten during a battle, to write back at its end."
-  ((saved?        symbol)
-   (robot-to-jak  uint8 4)   ;; rows 9-12 (roboguard, turret, spydroid, giant), column Jak
-   (guard-to-jak  uint8 3)   ;; rows 3-5 (tazer, rifle, grenade guards), column Jak
-   (faction-time  time-frame) ;; last re-application of the battle's faction commands
+  "Stock hatred indices overwritten during a battle, to write back at its end, and the battle's
+   two hatreds pushed into the controller's list."
+  ((saved?         symbol)
+   (hatred         uint8 64)   ;; entry (row i, column j) of *bf-ctt* at 8 i + j
+   (unit-info      int32)      ;; index of the battle's hatred between units
+   (player-info    int32)      ;; index of the battle's hatred of the player
+   (vals-length    int32)      ;; the list's length once they were pushed, 0 none
+   (faction-time   time-frame) ;; last re-application of the battle's faction commands
    (reinforce-time time-frame) ;; last reinforcement (`bf-city-reinforce`)
+   (retarget-time  time-frame) ;; last look at the units near the player (`bf-city-retarget`)
    )
   )
 
@@ -51,32 +64,142 @@
   (and *cty-attack-controller* (nonzero? *cty-attack-controller*))
   )
 
-(defun bf-city-apply-hatred ((kg-player symbol))
-  "With KG-PLAYER, robots ignore the player and guards hate him as robots do. The stock entries
-   are saved the first time. The battle's are written on every call: a death reset rebuilds the
-   stock table (ctywide-activate -> cty-attack-reset -> init-attack-controller), and the writes are
-   idempotent."
+(defun bf-ctt-team ((ctt int))
+  "Side of attack-controller type CTT in a battle: BF_TEAM_FF, BF_TEAM_KG, the player's for 0,
+   BF_TEAM_NONE for any other."
+  (cond
+    ((= ctt BF_CTT_JAK) (-> *bf* team))
+    ((and (>= ctt 3) (<= ctt 5)) BF_TEAM_FF)
+    ((and (>= ctt 9) (<= ctt 12)) BF_TEAM_KG)
+    (else BF_TEAM_NONE)
+    )
+  )
+
+(defun bf-city-push-hatreds ()
+  "Push the battle's two hatreds into the controller's list when they are not there: at the first
+   call, and after a death reset rebuilt the list (cty-attack-reset -> reset-hatred, then the stock
+   init-attack-controller pushes its own again, 12 of 22). Both score the nearest foe first: 1 near,
+   falling to 0 at BF_HATE_REACH (dist-scale 0), with no penalty for a crowd on it (attacker-scale 1),
+   and keep it until it dies (chi1: no look again on the controller's timer). The player is twice
+   as hated as a unit."
+  (let ((ctrl *cty-attack-controller*)
+        (saved *bf-city-saved*)
+        )
+    (when (or (zero? (-> saved vals-length)) (!= (-> ctrl hatred-vals length) (-> saved vals-length)))
+      (when (>= (- (-> ctrl hatred-vals allocated-length) (-> ctrl hatred-vals length)) 2)
+        (dotimes (i 2)
+          (let ((info (push-back-hatred ctrl)))
+            (set! (-> info hatred) (if (zero? i) 0.5 1.0))
+            (set! (-> info hatred-dist) BF_HATE_REACH)
+            (set! (-> info max-consider-dist) BF_HATE_REACH)
+            (set! (-> info dist-scale) 0.0)
+            (set! (-> info attacker-scale) 1.0)
+            (set! (-> info flags) (city-hatred-info-flag chi1))
+            (if (zero? i)
+                (set! (-> saved unit-info) (the-as int (-> info index)))
+                (set! (-> saved player-info) (the-as int (-> info index)))
+                )
+            )
+          )
+        (set! (-> saved vals-length) (-> ctrl hatred-vals length))
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-city-apply-hatred ()
+  "The battle's hatreds between every attacker and target type of *bf-ctt*: none between a side's
+   own (the player's included), the battle's unit hatred between foes, its player hatred from the
+   other side's units onto the player. The stock entries are saved the first time. Written on every
+   call: a death reset rebuilds the stock table, and the writes are idempotent. Then no unit keeps
+   the guards' anger at the player (a 'member-attacked from the player's shots gives a guard a
+   hatred-map-callback onto him, guard.gc), so his own side never turns on him."
   (when (bf-city-controller?)
-    (let ((saved *bf-city-saved*)
-          (table (-> *cty-attack-controller* hatred-indices))
-          )
+    (bf-city-push-hatreds)
+    (let* ((ctrl *cty-attack-controller*)
+           (saved *bf-city-saved*)
+           (table (-> ctrl hatred-indices))
+           )
       (when (not (-> saved saved?))
-        (dotimes (i 4)
-          (set! (-> saved robot-to-jak i) (-> table (bf-city-hatred-slot (+ BF_CTT_ROBOGUARD i) BF_CTT_JAK)))
-          )
-        (dotimes (i 3)
-          (set! (-> saved guard-to-jak i) (-> table (bf-city-hatred-slot (+ BF_CTT_GUARD_TAZER i) BF_CTT_JAK)))
+        (dotimes (i 8)
+          (dotimes (j 8)
+            (set! (-> saved hatred (+ (* 8 i) j)) (-> table (bf-city-hatred-slot (-> *bf-ctt* i) (-> *bf-ctt* j))))
+            )
           )
         (set! (-> saved saved?) #t)
         )
-      (when kg-player
-        (let ((robot-vs-jak (-> saved robot-to-jak 0)))
-          ;; entry 0 is the controller's empty hatred: no attack
-          (dotimes (i 4)
-            (set! (-> table (bf-city-hatred-slot (+ BF_CTT_ROBOGUARD i) BF_CTT_JAK)) 0)
+      (when (nonzero? (-> saved vals-length))
+        (dotimes (i 8)
+          (dotimes (j 8)
+            (let ((row (-> *bf-ctt* i))
+                  (col (-> *bf-ctt* j))
+                  )
+              (when (!= row BF_CTT_JAK)
+                (set! (-> table (bf-city-hatred-slot row col))
+                      (cond
+                        ((= (bf-ctt-team row) (bf-ctt-team col)) 0)
+                        ((= col BF_CTT_JAK) (-> saved player-info))
+                        (else (-> saved unit-info))
+                        )
+                      )
+                )
+              )
             )
-          (dotimes (i 3)
-            (set! (-> table (bf-city-hatred-slot (+ BF_CTT_GUARD_TAZER i) BF_CTT_JAK)) robot-vs-jak)
+          )
+        )
+      (dotimes (i (-> ctrl attackers length))
+        (let ((info (-> ctrl attackers data i)))
+          (if (>= (bf-ctt-team (-> info self-type)) 0)
+              (set! (-> info hatred-map-callback) #f)
+              )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-city-retarget ()
+  "Twice a second: a unit of the other side within BF_HATE_PLAYER of the player, its foe farther
+   than him, a unit whose foe got beyond BF_HATE_LOST, and a unit of the player's side that has him
+   as its foe look again for a target now (mission-squad-control-method-13, the controller's own
+   choice): the player's hatred makes the first turn onto him, the second takes the nearest foe
+   again, the third any foe but him. Otherwise a unit keeps its foe until it dies."
+  (when (and (bf-city-controller?) *target* (not (focus-test? *target* dead)))
+    (let* ((ctrl *cty-attack-controller*)
+           (jak (-> ctrl target-attacker self-index))
+           (here (-> *target* control trans))
+           )
+      (dotimes (i (-> ctrl attackers length))
+        (let ((info (-> ctrl attackers data i)))
+          (when (and (logtest? (-> info flags) (city-attacker-info-flag cai0))
+                     (!= i jak)
+                     (>= (bf-ctt-team (-> info self-type)) 0)
+                     )
+            (let* ((pos (-> ctrl attacker-cache data i pos))
+                   (foe (-> info enemy-index))
+                   (foe-dist (if (>= foe 0)
+                                 (vector-vector-xz-distance pos (-> ctrl attacker-cache data foe pos))
+                                 BF_HATE_LOST
+                                 )
+                             )
+                   (jak-dist (vector-vector-xz-distance pos here))
+                   )
+              (if (or (and (!= (bf-ctt-team (-> info self-type)) (-> *bf* team))
+                           (!= foe jak)
+                           (< jak-dist BF_HATE_PLAYER)
+                           (< jak-dist foe-dist)
+                           )
+                      (and (>= foe 0) (< BF_HATE_LOST foe-dist))
+                      ;; a unit of his own side on the player: a target taken before the battle's
+                      ;; hatreds (the stock ones, while the zone loaded) is kept until it dies (seen in
+                      ;; game: a red guard and a red jetpack aiming at a Krimzon Guard player)
+                      (and (= foe jak) (= (bf-ctt-team (-> info self-type)) (-> *bf* team)))
+                      )
+                  (mission-squad-control-method-13 ctrl info)
+                  )
+              )
             )
           )
         )
@@ -86,19 +209,26 @@
   )
 
 (defun bf-city-restore-hatred ()
-  "Write back the entries `bf-city-apply-hatred` changed."
+  "Write back the entries `bf-city-apply-hatred` changed, and take the battle's two hatreds off the
+   list when they are still its last."
   (when (and (bf-city-controller?) (-> *bf-city-saved* saved?))
     (let ((saved *bf-city-saved*)
           (table (-> *cty-attack-controller* hatred-indices))
           )
-      (dotimes (i 4)
-        (set! (-> table (bf-city-hatred-slot (+ BF_CTT_ROBOGUARD i) BF_CTT_JAK)) (-> saved robot-to-jak i))
-        )
-      (dotimes (i 3)
-        (set! (-> table (bf-city-hatred-slot (+ BF_CTT_GUARD_TAZER i) BF_CTT_JAK)) (-> saved guard-to-jak i))
+      (dotimes (i 8)
+        (dotimes (j 8)
+          (set! (-> table (bf-city-hatred-slot (-> *bf-ctt* i) (-> *bf-ctt* j))) (-> saved hatred (+ (* 8 i) j)))
+          )
         )
       )
     )
+  (when (and (bf-city-controller?)
+             (nonzero? (-> *bf-city-saved* vals-length))
+             (= (-> *cty-attack-controller* hatred-vals length) (-> *bf-city-saved* vals-length))
+             )
+    (+! (-> *cty-attack-controller* hatred-vals length) -2)
+    )
+  (set! (-> *bf-city-saved* vals-length) 0)
   (set! (-> *bf-city-saved* saved?) #f)
   (none)
   )
@@ -245,7 +375,11 @@
      (bf-city-restore-hatred)
      )
     ((= cmd BF_CITY_UPDATE)
-     (bf-city-apply-hatred (= (-> *bf* team) BF_TEAM_KG))
+     (bf-city-apply-hatred)
+     (when (time-elapsed? (-> *bf-city-saved* retarget-time) (seconds 0.5))
+       (set-time! (-> *bf-city-saved* retarget-time))
+       (bf-city-retarget)
+       )
      ;; a death reset (ctywide activates again) or a task change restores the stock faction
      ;; state: apply the battle's every 2 seconds
      (when (and *cty-faction-manager*

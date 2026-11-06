@@ -9,6 +9,7 @@
 (define-extern bf-guard-skel-name (function string))
 (define-extern bf-attacker-type (function process int int))
 (define-extern bf-guard-activated (function process none))
+(define-extern bf-guard-weapon (function process int int))
 (define-extern bf-guard-clips (function process-drawable none))
 
 ;; DECOMP BEGINS
@@ -1614,6 +1615,8 @@
 
 ;; WARN: Function (method 267 crimson-guard) has a return type of none, but the expression builder found a return statement.
 (defmethod crimson-guard-method-267 ((this crimson-guard) (arg0 guard-type) (arg1 symbol))
+  ;; MOD battlefront -- no tazer for the battle's guards: the weapon of their model (no-op otherwise)
+  (set! arg0 (the-as guard-type (bf-guard-weapon this (the-as int arg0))))
   (if (= arg0 (-> this guard-type))
       (return 0)
       )
@@ -1850,7 +1853,8 @@
                     )
                   )
             )
-        (when (!= a1-3 (-> this guard-type))
+        ;; MOD battlefront -- compare the weapon the battle gives (Lisp wiki jak3 4.37)
+        (when (!= (bf-guard-weapon this (the-as int a1-3)) (the-as int (-> this guard-type)))
           (crimson-guard-method-267 this (the-as guard-type a1-3) #f)
           (return #t)
           )
