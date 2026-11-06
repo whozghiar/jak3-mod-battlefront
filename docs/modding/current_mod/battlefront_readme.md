@@ -98,8 +98,9 @@ get into a vehicle during a battle.
   sound ("punch-hit").
 - **Targeting:** each unit fights the nearest foe and keeps it until one of them dies; the other
   side turns onto the player within 50 m of him; his own side never takes him as a target (§2.8).
-  No guard of the battle carries the tazer: the blue guards get the grenade launcher in its place,
-  the red guards the weapon their model holds.
+  No guard of the battle carries the tazer: a blue guard the squad gives it gets the rifle or the
+  grenade launcher instead (by its process id, for good), the red guards the weapon their model
+  holds.
 - **Outside the campaign:** while a battle runs, no mission or activity can start, no vehicle can
   be taken, and the START menu's Save, Load Game and Secrets are grey and refused (the stock
   refusal beep); a load from elsewhere (or a new game) ends the battle and loads the save normally.
@@ -718,7 +719,9 @@ Twice a second `bf-city-retarget` makes three kinds of unit look again: the othe
 player's side that has him as its foe (a target taken with the stock table while the zone loaded
 was kept for good: a red guard and a red jetpack aiming at a Krimzon Guard player, seen in a smoke
 run). The units' weapon goes through `bf-guard-weapon` in `crimson-guard-method-267`, and method
-270 compares the weapon it would give (Lisp wiki jak3 4.37): no tazer in a battle.
+270 compares the weapon it would give (Lisp wiki jak3 4.37): no tazer in a battle. The squads
+give the blue guards the tazer mostly: turned into the launcher alone, it left no rifle among them
+(13 launchers, 0 rifles near the player); split by the guard's pid, 7 and 3.
 
 **Guard ammo and the gun HUD.** The rifle's magazine is `*bf*` mag (10), its reserve Jak's
 yellow ammo (capped at 20 every frame), the grenades Jak's red ammo (capped at 5). The `hud-gun`
@@ -737,7 +740,9 @@ wiki jak3, process heaps move).
 **Class help.** Each class's lines (`*bf-guard-help*`, the robot's and spider's inline) are drawn
 under the list by `bf-draw-class-help`; their `<PAD_...>` tags become the font's button icons, and
 the D-pad's left arrow is drawn from the font's D-pad parts (`~3L`, `~22L` colors and `~+nH`,
-`~-nV` offsets). A line holds about 30 characters in the left frame.
+`~-nV` offsets). A line holds about 30 characters in the left frame. The preview fits each class's
+height in the frame, the spider robot its 4.4 m leg span (`bf-icon-size`): at its 2 m height it
+spilled out of the frame.
 
 ---
 
@@ -1076,8 +1081,6 @@ code (its name cannot be printed); the object is sound.
   The Robotguard's roll, the dives and the leaps are Jak's own physics with a changed speed or
   velocity, not the robots' own movement code.
 - **The tazer's baton is the guard's weapon drawn smaller,** not a model of its own (§2.8).
-- **Long class names overflow the class page:** "Garde rouge de la Grenagarde" runs past the left
-  frame in French.
 - **Zones are Haven City districts only.** Spargus would need the city's unit code and art in WWD
   (the battle-of-spargus mod does it for the guards).
 - **A two-section district holds its own sections only.** In the Industrial Zone and Freedom HQ

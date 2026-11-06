@@ -639,6 +639,24 @@
   0
   )
 
+(defbehavior smoke-weapon-shots process ()
+  "The weapon in the guard's hands seen from above (the view tilted down 40 degrees): the rifle, the
+   tazer and the grenade launcher in turn (smoke-hand-rifle, -tazer, -grenade), then the rifle."
+  (smoke-step "weapons in hand")
+  (smoke-neutral)
+  (set! (-> *bf* view-pitch) (degrees -40))
+  (smoke-press (pad-buttons down) 1.2)
+  (smoke-shot "hand-rifle")
+  (smoke-press (pad-buttons left) 1.2)
+  (smoke-shot "hand-tazer")
+  (smoke-press (pad-buttons up) 1.2)
+  (smoke-shot "hand-grenade")
+  (smoke-press (pad-buttons down) 1.0)
+  (set! (-> *bf* view-pitch) 0.0)
+  (smoke-wait 0.5)
+  0
+  )
+
 (defbehavior smoke-tazer process ()
   "The tazer: the weapon joint shrunk to a baton in the guard's hands (screenshot) and the HUD
    without ammo (screenshot); R1 strikes once, with no reload clip; R1 again 1.5 s later does
@@ -671,8 +689,10 @@
   )
 
 (defbehavior smoke-roll process ((lx int) (ly int))
-  "L2 with the left stick at LX, LY (pushed on the same frame). Returns Jak's move in `*smoke-v0*`:
-   x along the camera's right, y ahead, in meters."
+  "L2 with the left stick at LX, LY (pushed on the same frame). Returns in `*smoke-v0*` Jak's move
+   (x along the camera's right, y ahead, in meters) and the roll's velocity across (z along the
+   right, w ahead, in meters a second): a unit or a wall in the way cuts the move short, not the
+   velocity."
   (let ((right (bf-view-right (new 'stack-no-clear 'vector)))
         (fwd (bf-view-forward (new 'stack-no-clear 'vector)))
         (from (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
@@ -681,11 +701,20 @@
     (smoke-tap (pad-buttons l2) 4)
     (smoke-wait 0.15)
     (smoke-stick 128 128 128 128)
-    (smoke-wait 1.2)
-    (let ((d (vector-! (new 'stack-no-clear 'vector) (-> *target* control trans) from)))
-      (set-vector! *smoke-v0* (/ (vector-dot d right) (meters 1)) (/ (vector-dot d fwd) (meters 1)) 0.0 1.0)
+    (let ((vr 0.0)
+          (vf 0.0)
+          )
+      (when (smoke-av)
+        (set! vr (/ (vector-dot (-> (smoke-av) roll-vel) right) (meters 1)))
+        (set! vf (/ (vector-dot (-> (smoke-av) roll-vel) fwd) (meters 1)))
+        )
+      (smoke-wait 1.2)
+      (let ((d (vector-! (new 'stack-no-clear 'vector) (-> *target* control trans) from)))
+        (set-vector! *smoke-v0* (/ (vector-dot d right) (meters 1)) (/ (vector-dot d fwd) (meters 1)) vr vf)
+        )
       )
-    (format 0 "SMOKE roll stick ~D ~D: ~f m right, ~f m ahead~%" lx ly (-> *smoke-v0* x) (-> *smoke-v0* y))
+    (format 0 "SMOKE roll stick ~D ~D: ~f m right, ~f m ahead; velocity ~f right, ~f ahead~%" lx ly (-> *smoke-v0* x)
+            (-> *smoke-v0* y) (-> *smoke-v0* z) (-> *smoke-v0* w))
     *smoke-v0*
     )
   )
@@ -723,12 +752,17 @@
 (defbehavior smoke-guard-moves process ()
   "A guard's roll (L2 + the stick: right, left, ahead) and strafe (R2 + the stick: right, left)."
   (smoke-step "rolls")
-  (let ((r (-> (smoke-roll 255 128) x)))
+  ;; each roll: its velocity at the guards' roll speed toward the stick, and a move that way
+  (let ((r (vector-copy! (new 'stack-no-clear 'vector) (smoke-roll 255 128))))
     (smoke-wait 0.6)
-    (let ((l (-> (smoke-roll 0 128) x)))
+    (let ((l (vector-copy! (new 'stack-no-clear 'vector) (smoke-roll 0 128))))
       (smoke-wait 0.6)
-      (let ((f (-> (smoke-roll 128 0) y)))
-        (smoke-check "L2 rolls toward the stick: right, left and ahead" (and (< 2.0 r) (< l -2.0) (< 2.0 f)))
+      (let ((f (vector-copy! (new 'stack-no-clear 'vector) (smoke-roll 128 0))))
+        (smoke-check "L2 rolls toward the stick: right, left and ahead"
+                     (and (< 10.0 (-> r z)) (< (-> l z) -10.0) (< 10.0 (-> f w))
+                          (< 1.0 (-> r x)) (< (-> l x) -1.0) (< 1.0 (-> f y))
+                          )
+                     )
         )
       )
     )
@@ -870,14 +904,18 @@
       (smoke-check "a foe within 150 m to hit" #f)
       )
     (when foe
+      ;; hits until one of them takes a foe's last points; a foe killed by another unit meanwhile is
+      ;; replaced by the nearest one
       (let ((h (process->handle foe)))
-        (dotimes (i 8)
+        (dotimes (i 16)
           (let ((p (handle->process h)))
-            (when (and p
-                       (not killed?)
-                       (not (focus-test? (the-as process-focusable p) dead))
-                       (< 0.0 (-> (the-as enemy p) hit-points))
+            (when (and (not killed?)
+                       (or (not p) (focus-test? (the-as process-focusable p) dead) (>= 0.0 (-> (the-as enemy p) hit-points)))
                        )
+              (set! p (smoke-near-unit (bf-other-team (-> *bf* team)) (the-as process #f) 'crimson-guard))
+              (set! h (process->handle p))
+              )
+            (when (and p (not killed?))
               (let* ((max-hp (-> (the-as enemy p) enemy-info default-hit-points))
                      (h0 (fmin (-> (the-as enemy p) hit-points) max-hp))
                      (want (fmin h0 (* max-hp (/ BF_DMG_RIFLE (bf-unit-hp p)))))
@@ -897,7 +935,7 @@
                   (set! counted? (= (-> *bf* kills) (+ k0 1)))
                   )
                 )
-              (smoke-wait 1.2)
+              (smoke-wait 0.5)
               )
             )
           )
@@ -1111,12 +1149,12 @@
   )
 
 (defun smoke-bot-weapons ()
-  "The guards of the battle near the player and their weapons: none has the tazer."
+  "The guards of the battle near the player and their weapons, by side: none has the tazer."
   (let ((probe (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
         (shapes (new 'stack-no-clear 'array 'collide-shape 64))
-        (counts (new 'stack-no-clear 'array 'int32 4))
+        (counts (new 'stack-no-clear 'array 'int32 8))
         )
-    (dotimes (i 4)
+    (dotimes (i 8)
       (set! (-> counts i) 0)
       )
     (set! (-> probe w) (meters 200))
@@ -1124,28 +1162,62 @@
       (let ((shape (as-type (-> shapes i) collide-shape)))
         (when shape
           (let ((proc (-> shape process)))
-            (when (and (= (-> proc type symbol) 'crimson-guard) (>= (bf-unit-team proc) 0))
+            (when (and (= (handle->process (process->handle proc)) proc)
+                       (= (-> proc type symbol) 'crimson-guard)
+                       (>= (bf-unit-team proc) 0)
+                       )
               ;; crimson-guard is a level type GAME code does not know: its guard-type, a uint32 at offset
               ;; 1052 (decompiler/config/jak3/all-types.gc), 4 bytes before it from a basic's pointer
               (let ((k (the-as int (-> (the-as (pointer uint32) (+ (the-as int proc) 1048)) 0))))
-                (+! (-> counts (min 3 k)) 1)
+                (+! (-> counts (+ (* 4 (bf-unit-team proc)) (min 3 k))) 1)
                 )
               )
             )
           )
         )
       )
-    (format 0 "SMOKE battle guards: tazer ~D rifle ~D grenade ~D other ~D~%" (-> counts 0) (-> counts 1) (-> counts 2)
-            (-> counts 3))
-    (smoke-check "no guard of the battle carries the tazer"
-                 (and (zero? (-> counts 0)) (< 0 (+ (-> counts 1) (-> counts 2))))
+    (format 0 "SMOKE battle guards, Freedom League: tazer ~D rifle ~D grenade ~D other ~D~%" (-> counts 0) (-> counts 1)
+            (-> counts 2) (-> counts 3))
+    (format 0 "SMOKE battle guards, Krimzon Guard: tazer ~D rifle ~D grenade ~D other ~D~%" (-> counts 4) (-> counts 5)
+            (-> counts 6) (-> counts 7))
+    (smoke-check "no guard of the battle carries the tazer, both sides with rifles or grenade launchers"
+                 (and (zero? (+ (-> counts 0) (-> counts 4) (-> counts 3) (-> counts 7)))
+                      (< 0 (+ (-> counts 1) (-> counts 2)))
+                      (< 0 (+ (-> counts 5) (-> counts 6)))
+                      )
                  )
     )
   )
 
-;; ----------------------------------------------------------------------------
-;; Playing each class
-;; ----------------------------------------------------------------------------
+(defun smoke-drop-roll ()
+  "20000 draws of `rand-vu-int-count` 100, the roll of `bf-queue-drop` (battlefront-h.gc): the share
+   that leaves a pickup (under 30) and each kind's (yellow under 12, red 12 to 18, health 19 to 24,
+   dark eco 25 to 29)."
+  (let ((n (new 'stack-no-clear 'array 'int32 5)))
+    (dotimes (i 5)
+      (set! (-> n i) 0)
+      )
+    (dotimes (i 20000)
+      (let ((roll (rand-vu-int-count 100)))
+        (+! (-> n (cond
+                    ((< roll 12) 0)
+                    ((< roll 19) 1)
+                    ((< roll 25) 2)
+                    ((< roll 30) 3)
+                    (else 4)
+                    )
+                  )
+            1
+            )
+        )
+      )
+    (let ((drop (/ (the float (- 20000 (-> n 4))) 20000.0)))
+      (format 0 "SMOKE pickup roll: ~f leave one (yellow ~D, red ~D, health ~D, dark eco ~D of 20000)~%" drop
+              (-> n 0) (-> n 1) (-> n 2) (-> n 3))
+      (smoke-check "the pickup roll leaves one 30 % of the time" (and (< 0.29 drop) (< drop 0.31)))
+      )
+    )
+  )
 
 (defbehavior smoke-moves process ()
   "Moves every class shares: walk turning, strafe both ways, back, look up and down, jump, R1 held,
@@ -1822,9 +1894,11 @@
      (smoke-help-shots 2)
      (smoke-deploy 0 "deploy blue guard")
      (smoke-hp-check BF_CLASS_BLUE_GUARD)
+     (smoke-drop-roll)
      (smoke-start-locks)
      (smoke-invulnerable #t)
      (smoke-guard-ammo)
+     (smoke-weapon-shots)
      (smoke-tazer)
      (smoke-guard-moves)
      (smoke-melee-delay (pad-buttons square) 1.5)
@@ -1860,7 +1934,9 @@
      (smoke-melee-delay (pad-buttons square) 1.5)
      (smoke-change-class 0 "red guard")
      (smoke-hp-check BF_CLASS_RED_GUARD)
+     (smoke-weapon-shots)
      (smoke-tazer)
+     (smoke-melee-delay (pad-buttons square) 1.5)
      (smoke-bot-weapons)
      (smoke-hatred-check)
      (smoke-invulnerable #f)
