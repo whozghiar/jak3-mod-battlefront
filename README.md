@@ -80,7 +80,7 @@ Each war zone is a whole district of Haven City: every street of it is yours, an
 
 | Class | Controls |
 |---|---|
-| Blue Guard, Red Krimzon Guard | 24 points. R1: fire, while you walk. The rifle holds 10 rounds, with 20 more carried: the guard reloads from them when the magazine is empty. The grenade launcher throws the 5 grenades you carry. The tazer strikes once, 24 points (a whole health bar) within 12 m, then recharges for 20 s, with no reload. Square: rifle butt, one every 1.5 s. L2 + left stick: roll that way, about 4 m. Hold R2 + left stick: strafe, still facing ahead. D-pad: left tazer (the guard holds a short stun baton), down rifle, up grenade launcher |
+| Blue Guard, Red Krimzon Guard | 24 points. R1: fire, while you walk. The rifle holds 10 rounds, with 20 more carried: the guard reloads from them when the magazine is empty. The grenade launcher throws the 5 grenades you carry. The tazer strikes once, 24 points (a whole health bar) within 12 m, then recharges for 20 s, with no reload. Square: rifle butt, one every 1.5 s. L2 + left stick: a roll that way, head over heels, about 4 m. Hold R2 + left stick: strafe, still facing ahead. The tazer's strike is a stab, and you keep walking while you strike. D-pad: left tazer (the guard holds a short stun baton), down rifle, up grenade launcher |
 | Jetpack guards | 18 points. Hold X to climb, hold Circle to come down, let go of both to hover, for as long as you like. Hold R2: boost toward the left stick (ahead when it rests) while the gauge lasts, 3 s in a full one; only dark eco refills it. The jetpack always floats a little above the ground. R1: two quick shots. Square: dive kick |
 | Robotguard | 24 points. Slower. R1: two shots. Square: a full punch, one every 1.5 s. R2: roll as a ball, as far as you like; R2 again stands it up. Circle: a red shield for 5 s that stops every shot, blast and blow while you keep moving, then 25 s to recharge |
 | Spider Robot | 12 points. Faster. X: a leap 11 m high. Circle: bite, one a second. Hold R2: blue eco sprint at double speed for 10 s; the gauge refills in 10 s |
@@ -103,7 +103,7 @@ Aim with the right stick: pushed right the view turns right, pushed up it looks 
 
 | Camera | Guard rolls | Jetpack hovering still |
 |---|---|---|
-| <img src="docs/img/mod/tps-camera.gif" width="260" alt="The right stick turns the view right then left while a blue guard stays over the camera's shoulder, then the guard strafes and walks forward"> | <img src="docs/img/mod/guard-roll.gif" width="260" alt="A blue guard rolls to the right, then to the left, with L2 and the left stick"> | <img src="docs/img/mod/jetpack-hover.gif" width="260" alt="A blue jetpack guard hovering 10 m up, left alone"> |
+| <img src="docs/img/mod/tps-camera.gif" width="260" alt="The right stick turns the view right then left while a blue guard stays over the camera's shoulder, then the guard strafes and walks forward"> | <img src="docs/img/mod/guard-roll.gif" width="260" alt="A blue guard rolls head over heels to the right, then ahead, with L2 and the left stick"> | <img src="docs/img/mod/jetpack-hover.gif" width="260" alt="A blue jetpack guard hovering 10 m up, left alone"> |
 
 *Recorded in game, at the Port.*
 
