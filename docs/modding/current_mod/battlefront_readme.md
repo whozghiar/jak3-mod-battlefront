@@ -104,9 +104,10 @@ get into a vehicle during a battle.
 - **Outside the campaign:** while a battle runs, no mission or activity can start, no vehicle can
   be taken, and the START menu's Save, Load Game and Secrets are grey and refused (the stock
   refusal beep); a load from elsewhere (or a new game) ends the battle and loads the save normally.
-- **Pickups:** a dead unit may leave a stock pickup: yellow ammo (12 %), red ammo (7 %), health
-  (6 %) or dark eco (5 %, three pills); 30 % in all, a little more than the 27 % of rounds 12 and
-  13. Dark eco is the jetpack's boost: one drop fills its gauge. Jak's light and dark eco are set aside for the battle and given back at its end, and the
+- **Pickups:** 3 of every 10 dead units leave a stock pickup, in a random order (a bag of 10
+  deaths holding 3, `bf-queue-drop`: a 30 % chance at each death gave 26 % in two long battles):
+  yellow ammo (12 in 30), red ammo (7), health (6) or dark eco (5, three pills); a little more
+  than the 27 % of rounds 12 and 13. Dark eco is the jetpack's boost: one drop fills its gauge. Jak's light and dark eco are set aside for the battle and given back at its end, and the
   "endless dark eco" and "endless light eco" secrets are off during a battle (they would keep every
   jetpack full and the light eco gauge lit).
 - **Death:** the player's side loses a unit; for 4 seconds the camera follows a living unit of his

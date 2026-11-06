@@ -1189,36 +1189,6 @@
     )
   )
 
-(defun smoke-drop-roll ()
-  "20000 draws of `rand-vu-int-count` 100, the roll of `bf-queue-drop` (battlefront-h.gc): the share
-   that leaves a pickup (under 30) and each kind's (yellow under 12, red 12 to 18, health 19 to 24,
-   dark eco 25 to 29)."
-  (let ((n (new 'stack-no-clear 'array 'int32 5)))
-    (dotimes (i 5)
-      (set! (-> n i) 0)
-      )
-    (dotimes (i 20000)
-      (let ((roll (rand-vu-int-count 100)))
-        (+! (-> n (cond
-                    ((< roll 12) 0)
-                    ((< roll 19) 1)
-                    ((< roll 25) 2)
-                    ((< roll 30) 3)
-                    (else 4)
-                    )
-                  )
-            1
-            )
-        )
-      )
-    (let ((drop (/ (the float (- 20000 (-> n 4))) 20000.0)))
-      (format 0 "SMOKE pickup roll: ~f leave one (yellow ~D, red ~D, health ~D, dark eco ~D of 20000)~%" drop
-              (-> n 0) (-> n 1) (-> n 2) (-> n 3))
-      (smoke-check "the pickup roll leaves one 30 % of the time" (and (< 0.29 drop) (< drop 0.31)))
-      )
-    )
-  )
-
 (defbehavior smoke-moves process ()
   "Moves every class shares: walk turning, strafe both ways, back, look up and down, jump, R1 held,
    Square twice."
@@ -1746,7 +1716,7 @@
   (smoke-free-fight (-> *bf* class) 10.0)
   (let ((rate (/ (the float *smoke-drops*) (the float (max 1 *smoke-deaths*)))))
     (format 0 "SMOKE pickups: ~D of ~D unit deaths left one (~f)~%" *smoke-drops* *smoke-deaths* rate)
-    (smoke-check "about 30 % of the fallen units leave a pickup" (and (< 100 *smoke-deaths*) (< 0.22 rate) (< rate 0.38)))
+    (smoke-check "3 of every 10 fallen units leave a pickup" (and (< 100 *smoke-deaths*) (< 0.28 rate) (< rate 0.32)))
     )
   (smoke-quit)
   0
@@ -1894,7 +1864,6 @@
      (smoke-help-shots 2)
      (smoke-deploy 0 "deploy blue guard")
      (smoke-hp-check BF_CLASS_BLUE_GUARD)
-     (smoke-drop-roll)
      (smoke-start-locks)
      (smoke-invulnerable #t)
      (smoke-guard-ammo)
