@@ -109,11 +109,14 @@
   )
 
 (deftype bf-class-info (basic)
-  "One playable class: label, description (English, French) and side."
+  "One playable class: label, description (English, French) and side. The description is lines of
+   the class page, each drawn as it is: a button is its icon tag (<PAD_R1>, <PAD_L2>...: the PC
+   font's button icons, common/util/font/dbs/font_db_jak3.cpp), the first line the class's
+   features."
   ((name     string)
-   (desc     string)
+   (desc     (array string))
    (name-fr  string)
-   (desc-fr  string)
+   (desc-fr  (array string))
    (team     int32)
    )
   )
@@ -157,6 +160,15 @@
    (drop-count    int32)          ;; pickups of dead units waiting for the director
    (drop-kind     int32 8)        ;; their pickup-type
    (drop-pos      vector 8 :inline)
+   ;; The battle's third-person camera (battlefront-player.gc `bf-cam-rig`): where it looks, turned
+   ;; by the right stick. Kept here, not in the rig, so a class change or a respawn keeps the view.
+   (view-yaw      float)          ;; heading, rotation units (0 looks along +z)
+   (view-pitch    float)          ;; up positive, rotation units
+   (view-set?     symbol)         ;; the view was set for this battle (else taken from Jak's facing)
+   (rig           handle)         ;; the camera rig, #f for none
+   (kills         int32)          ;; units the player killed in this battle (the HUD's counter)
+   (tazer-time    time-frame)     ;; guard: the last tazer strike (BF_TAZER_RECHARGE before the next)
+   (own-attack    float)          ;; damage (24 scale) of the player's attack being sent, -1.0 none
    )
   )
 
@@ -166,6 +178,16 @@
 (set! (-> *bf* director) (the-as handle #f))
 (set! (-> *bf* aim-foe) (the-as handle #f))
 (set! (-> *bf* spectate) (the-as handle #f))
+(set! (-> *bf* rig) (the-as handle #f))
+(set! (-> *bf* own-attack) -1.0)
+;; a symbol field of a static structure starts as 0, which is not #f (it tests true): the robotguard's
+;; shield flag left at 0 kept Jak's shield level up in every battle, so no attack ever hurt the player
+(set! (-> *bf* safe-level) #f)
+(set! (-> *bf* redraw?) #f)
+(set! (-> *bf* shield?) #f)
+(set! (-> *bf* endless-dark?) #f)
+(set! (-> *bf* endless-light?) #f)
+(set! (-> *bf* view-set?) #f)
 
 ;; Set by the Mods menu. While it is on, START > Options shows Gamemode (the battle's pages);
 ;; turning it off during a battle loads the last save (battlefront.gc `bf-leave-to-save!`).
@@ -261,34 +283,109 @@
 (define *bf-team-names* (new 'static 'boxed-array :type string "Freedom League" "Krimzon Guard"))
 (define *bf-team-names-fr* (new 'static 'boxed-array :type string "Ligue de la liberté" "Grenagarde"))
 
-(define *bf-classes*
-  (new 'static 'boxed-array :type bf-class-info
-    (new 'static 'bf-class-info :name "Blue Guard" :team BF_TEAM_FF
-         :desc "Freedom League guard. R1: fire. Square: rifle butt. D-pad: left tazer, down rifle, up grenade launcher."
-         :name-fr "Garde bleu" :desc-fr "Garde de la Ligue. R1 : tir. Carré : crosse. Croix : gauche tazer, bas fusil, haut lance-grenades.")
-    (new 'static 'bf-class-info :name "Blue Guard (Jetpack)" :team BF_TEAM_FF
-         :desc "X: up, Circle: down, else hover while the fuel lasts (dark eco gauge). R1: two quick shots. Square: dive kick."
-         :name-fr "Garde bleu (jetpack)" :desc-fr "X : monter, Rond : descendre, sinon sur place selon le carburant (jauge noire). R1 : deux tirs. Carré : piqué.")
-    ;; Spargus Citizen: no longer playable (kept for the indices)
-    (new 'static 'bf-class-info :name "Spargus Citizen" :team BF_TEAM_FF
-         :desc "Wasteland militia. Fast and light. R1: rifle. Square: rifle butt."
-         :name-fr "Citoyen de Spargus" :desc-fr "Milice du désert. Rapide et léger. R1 : fusil. Carré : crosse.")
-    ;; Jak: no longer playable (kept for the indices)
-    (new 'static 'bf-class-info :name "Jak" :team BF_TEAM_FF :desc "" :name-fr "Jak" :desc-fr "")
-    (new 'static 'bf-class-info :name "Red Krimzon Guard" :team BF_TEAM_KG
-         :desc "Krimzon Guard from the past of Haven City. R1: fire. Square: rifle butt. D-pad: left tazer, down rifle, up grenade launcher."
-         :name-fr "Garde rouge de la Grenagarde" :desc-fr "Garde de la Grenagarde du passé. R1 : tir. Carré : crosse. Croix : gauche tazer, bas fusil, haut lance-grenades.")
-    (new 'static 'bf-class-info :name "Red Krimzon Guard (Jetpack)" :team BF_TEAM_KG
-         :desc "X: up, Circle: down, else hover while the fuel lasts (dark eco gauge). R1: two quick shots. Square: dive kick."
-         :name-fr "Garde rouge (jetpack)" :desc-fr "X : monter, Rond : descendre, sinon sur place selon le carburant (jauge noire). R1 : deux tirs. Carré : piqué.")
-    (new 'static 'bf-class-info :name "Robotguard" :team BF_TEAM_KG
-         :desc "Heavy KG robot. Slow. R1: two shots. Square: punch. R2: roll into a ball, fast and tougher (red gauge, 5 s). Circle: red aura shield, breaks when shot."
-         :name-fr "Robotgarde" :desc-fr "Robot lourd de la KG. Lent. R1 : deux tirs. Carré : poing. R2 : boule rapide et plus résistante (jauge rouge, 5 s). Rond : aura rouge, se brise sous les tirs.")
-    (new 'static 'bf-class-info :name "Spider Robot" :team BF_TEAM_KG
-         :desc "KG spider. Fast, jumps high. Circle: bite. R2: blue eco sprint, twice as fast (blue gauge, refills in 10 s)."
-         :name-fr "Araignée robot" :desc-fr "Araignée de la KG. Rapide, saute haut. Rond : morsure. R2 : sprint éco bleue, deux fois plus vite (jauge bleue, recharge en 10 s).")
+;; The guards' help, the same for both colors. The font has no icon for the left D-pad button, only
+;; for its up and down ones and all four: the tazer's line builds it from the icon's parts the way
+;; font_db_jak3.cpp builds <PAD_DPAD_UP>, its left part lit (~3L) instead of its up part.
+(define *bf-guard-help*
+  (new 'static 'boxed-array :type string
+    "24 HP. Rifle 10/20, 5 grenades"
+    "<PAD_R1> Fire    <PAD_SQUARE> Rifle butt"
+    "<PAD_L2> + <PAD_ANALOG_ANY> Roll"
+    "<PAD_R2> + <PAD_ANALOG_ANY> Strafe"
+    "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Tazer (every 20 s)"
+    "<PAD_DPAD_DOWN> Rifle    <PAD_DPAD_UP> Grenades"
     )
   )
+
+(define *bf-guard-help-fr*
+  (new 'static 'boxed-array :type string
+    "24 PV. Fusil 10/20, 5 grenades"
+    "<PAD_R1> Tir    <PAD_SQUARE> Crosse"
+    "<PAD_L2> + <PAD_ANALOG_ANY> Roulade"
+    "<PAD_R2> + <PAD_ANALOG_ANY> Pas chassé"
+    "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Tazer (toutes les 20 s)"
+    "<PAD_DPAD_DOWN> Fusil    <PAD_DPAD_UP> Grenades"
+    )
+  )
+
+(define *bf-jetpack-help*
+  (new 'static 'boxed-array :type string
+    "18 HP. Flies without limit."
+    "<PAD_X> Up    <PAD_CIRCLE> Down"
+    "<PAD_R2> + <PAD_ANALOG_ANY> Boost"
+    "Dark eco refills the boost."
+    "<PAD_R1> 2 shots    <PAD_SQUARE> Dive kick"
+    )
+  )
+
+(define *bf-jetpack-help-fr*
+  (new 'static 'boxed-array :type string
+    "18 PV. Vol sans limite."
+    "<PAD_X> Monter    <PAD_CIRCLE> Descendre"
+    "<PAD_R2> + <PAD_ANALOG_ANY> Accélérer"
+    "L'éco noire recharge la jauge."
+    "<PAD_R1> Deux tirs    <PAD_SQUARE> Piqué"
+    )
+  )
+
+(define *bf-no-help* (new 'static 'boxed-array :type string ""))
+
+(define *bf-classes*
+  (new 'static 'boxed-array :type bf-class-info
+    (new 'static 'bf-class-info :name "Blue Guard" :team BF_TEAM_FF :name-fr "Garde bleu")
+    (new 'static 'bf-class-info :name "Blue Guard (Jetpack)" :team BF_TEAM_FF :name-fr "Garde bleu (jetpack)")
+    ;; Spargus Citizen: no longer playable (kept for the indices)
+    (new 'static 'bf-class-info :name "Spargus Citizen" :team BF_TEAM_FF :name-fr "Citoyen de Spargus")
+    ;; Jak: no longer playable (kept for the indices)
+    (new 'static 'bf-class-info :name "Jak" :team BF_TEAM_FF :name-fr "Jak")
+    (new 'static 'bf-class-info :name "Red Krimzon Guard" :team BF_TEAM_KG :name-fr "Garde rouge de la Grenagarde")
+    (new 'static 'bf-class-info :name "Red Krimzon Guard (Jetpack)" :team BF_TEAM_KG :name-fr "Garde rouge (jetpack)")
+    (new 'static 'bf-class-info :name "Robotguard" :team BF_TEAM_KG
+         :desc (new 'static 'boxed-array :type string
+                 "24 HP. Slow and heavy."
+                 "<PAD_R1> Two shots    <PAD_SQUARE> Punch"
+                 "<PAD_CIRCLE> Shield for 5 s"
+                 "Shield recharge: 25 s"
+                 "<PAD_R2> Ball / stand up"
+                 )
+         :name-fr "Robotgarde"
+         :desc-fr (new 'static 'boxed-array :type string
+                    "24 PV. Lent et lourd."
+                    "<PAD_R1> Deux tirs    <PAD_SQUARE> Poing"
+                    "<PAD_CIRCLE> Bouclier pendant 5 s"
+                    "Recharge du bouclier : 25 s"
+                    "<PAD_R2> Boule / redéploiement"
+                    )
+         )
+    (new 'static 'bf-class-info :name "Spider Robot" :team BF_TEAM_KG
+         :desc (new 'static 'boxed-array :type string
+                 "12 HP. Fast."
+                 "<PAD_X> 11 m leap    <PAD_CIRCLE> Bite"
+                 "<PAD_R2> Sprint, 10 s gauge"
+                 )
+         :name-fr "Araignée robot"
+         :desc-fr (new 'static 'boxed-array :type string
+                    "12 PV. Rapide."
+                    "<PAD_X> Bond de 11 m    <PAD_CIRCLE> Morsure"
+                    "<PAD_R2> Sprint, jauge de 10 s"
+                    )
+         )
+    )
+  )
+
+;; The help lines shared by two classes, linked in here (static data cannot name another symbol).
+(set! (-> *bf-classes* BF_CLASS_BLUE_GUARD desc) *bf-guard-help*)
+(set! (-> *bf-classes* BF_CLASS_BLUE_GUARD desc-fr) *bf-guard-help-fr*)
+(set! (-> *bf-classes* BF_CLASS_RED_GUARD desc) *bf-guard-help*)
+(set! (-> *bf-classes* BF_CLASS_RED_GUARD desc-fr) *bf-guard-help-fr*)
+(set! (-> *bf-classes* BF_CLASS_BLUE_JETPACK desc) *bf-jetpack-help*)
+(set! (-> *bf-classes* BF_CLASS_BLUE_JETPACK desc-fr) *bf-jetpack-help-fr*)
+(set! (-> *bf-classes* BF_CLASS_RED_JETPACK desc) *bf-jetpack-help*)
+(set! (-> *bf-classes* BF_CLASS_RED_JETPACK desc-fr) *bf-jetpack-help-fr*)
+(set! (-> *bf-classes* BF_CLASS_WASTELANDER desc) *bf-no-help*)
+(set! (-> *bf-classes* BF_CLASS_WASTELANDER desc-fr) *bf-no-help*)
+(set! (-> *bf-classes* BF_CLASS_JAK desc) *bf-no-help*)
+(set! (-> *bf-classes* BF_CLASS_JAK desc-fr) *bf-no-help*)
 
 ;; ---------------------------------------------------------------------------------------------
 ;; Text (English, or French when the game runs in French)
@@ -368,6 +465,13 @@
               :bounds (static-spherem 0 0 0 4)
               :origin-joint-index 3
               )
+
+;; Pace of the jetpack guards' clips, in clip frames per 60th of a second. They are the Jak 2 rip's
+;; frames, 15 a second (game.gp build-actor :framerate 15.0), which build-actor stores with a speed
+;; of one frame per 60th (seen in game: speed 1.0). Played at that speed, the player's jetpack
+;; looped its 16-frame hover clip four times a second and its legs shook; the units' own, at 0.5,
+;; twice too fast.
+(defconstant BF_HOVER_RATE 0.25)
 
 ;; Clip indices of the jetpack guard art groups (both share the order).
 (defconstant BF_HOVER_IDLE 2)
@@ -461,6 +565,47 @@
   (none)
   )
 
+(defun bf-custom-model? ((proc process))
+  "#t when PROC draws one of the mod's build-actor models (the red guards, the jetpack guards)."
+  (let ((name (bf-art-name proc)))
+    (or (string= name "bf-red-guard-lod0")
+        (string= name "bf-red-guard-gl-lod0")
+        (string= name "bf-hover-red-lod0")
+        (string= name "bf-hover-blue-lod0")
+        )
+    )
+  )
+
+;; Stock effect step, kept across REPL reloads of this file (Lisp wiki jak3 4.10).
+(define-perm *bf-stock-do-effect* (function effect-control string float int none)
+             (method-of-type effect-control do-effect)
+             )
+
+(defmethod do-effect ((this effect-control) (arg0 string) (arg1 float) (arg2 int))
+  "Every effect of a clip goes through here (effect-control.gc). A death effect (death-default and
+   the other death-* effects) is skipped for the mod's build-actor models (`bf-custom-model?`): it
+   sets the draw-control's death-timer, which makes the PC renderer draw the model through generic
+   merc (foreground.gc, the PC reassign), and a build-actor model has only a dummy merc-ctrl there
+   (goalc/build_actor/jak3/build_actor.cpp): mercneric_convert reads its dummy fragments (seen in
+   game: crashes in mercneric_convert, mips2c generic_merc.cpp, seconds into battles, as units
+   died). The red guards play the blue guard's clips, effects included
+   (`bf-guard-clips`): their 'event-death runs death-default (guard.gc). The body then goes with
+   its death clip, without the dissolve (Lisp wiki jak3 4.35). Every other effect: the stock step."
+  (let ((name (cond
+                ((= (rtype-of arg0) symbol) (symbol->string (the-as symbol arg0)))
+                ((= (rtype-of arg0) string) arg0)
+                (else (the-as string #f))
+                )
+              )
+        )
+    (if (and name (string-prefix= "death-" name) (-> this process) (bf-custom-model? (-> this process)))
+        (none)
+        (*bf-stock-do-effect* this arg0 arg1 arg2)
+        )
+    )
+  (none)
+  )
+
 (defun bf-reload-break-ok? ((this process-drawable))
   "Called by guard-grenade.gc grenade-throw-post-reloading's trans before a grenade guard breaks off
    its reload because its target came close. During a battle it breaks it off only for the player:
@@ -487,6 +632,142 @@
       ((= sym 'flying-turret) (if (string= (bf-art-name proc) "bf-hover-blue-lod0") BF_TEAM_FF BF_TEAM_KG))
       ((or (= sym 'roboguard-city) (= sym 'spydroid)) BF_TEAM_KG)
       (else BF_TEAM_NONE)
+      )
+    )
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Health and damage on one 24 point scale
+;; ---------------------------------------------------------------------------------------------
+
+;; During a fight every unit and every class has its health on one scale, 24 points for a guard, and
+;; every weapon takes the same points from any of them: the stock hit points of each unit type and
+;; the stock damage of each weapon differ (a guard 4, a flying turret 1, a shot 1, a grenade 6).
+(defconstant BF_DMG_RIFLE 8.0)        ;; a rifle shot (the guards', the player guard's)
+(defconstant BF_DMG_GRENADE 20.0)     ;; a guard grenade's blast
+(defconstant BF_DMG_TAZER 24.0)       ;; the player guard's tazer strike
+(defconstant BF_DMG_MELEE 10.0)       ;; a rifle butt, a robotguard's punch, a jetpack's dive kick
+(defconstant BF_DMG_BITE 12.0)        ;; a spider robot's bite
+(defconstant BF_DMG_ROBOT_SHOT 4.0)   ;; a robotguard's shot
+(defconstant BF_DMG_JET_SHOT 6.0)     ;; a jetpack guard's shot
+
+;; Full health of each class, indexed by BF_CLASS_*: guards and robotguard 24, jetpacks 18, spider 12.
+(define *bf-class-hp* (new 'static 'array float 8 24.0 18.0 24.0 24.0 24.0 18.0 24.0 12.0))
+
+(defun bf-class-health ((class int))
+  "Jak's health for CLASS's full health: his whole health bar (fact health-max, the health ring's
+   segments) stands for 24 points, so the spider robot starts half full. Needs *target*."
+  (* (-> *target* fact health-max) (/ (-> *bf-class-hp* class) 24.0))
+  )
+
+(defun bf-unit-hp ((proc process))
+  "Full health of PROC on the 24 point scale: guards and robotguards 24, jetpack guards 18, spider
+   robots 12 (the classes' own), the player's class for Jak, 0.0 for anything else."
+  (let ((sym (-> proc type symbol)))
+    (cond
+      ((= proc *target*) (-> *bf-class-hp* (-> *bf* class)))
+      ((or (= sym 'crimson-guard) (= sym 'roboguard-city)) 24.0)
+      ((= sym 'flying-turret) 18.0)
+      ((= sym 'spydroid) 12.0)
+      (else 0.0)
+      )
+    )
+  )
+
+(defun bf-shot-damage ((owner process))
+  "Damage of a guard-shot fired for OWNER: the player's class's gun (rifle, robotguard, jetpack:
+   the avatar fires guard-shots for all three), a guard's rifle for any unit."
+  (if (= owner *target*)
+      (case (-> *bf* class)
+        ((BF_CLASS_ROBOGUARD) BF_DMG_ROBOT_SHOT)
+        ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK) BF_DMG_JET_SHOT)
+        (else BF_DMG_RIFLE)
+        )
+      BF_DMG_RIFLE
+      )
+  )
+
+(defun bf-attack-damage ((sender process) (owner process))
+  "Damage, on the 24 point scale, of an attack that SENDER sent for OWNER (the attacker: a shot's or
+   a blast's owner), -1.0 to leave it to the stock rules. Told by the sender's type. The player's own
+   attacks carry theirs (`*bf*` own-attack, set while `bf-send-attack` sends them); any other blow
+   of Jak's body (running or jumping into a unit) deals none."
+  (let ((sym (if sender (-> sender type symbol) #f)))
+    (cond
+      ((not sender) -1.0)
+      ((= sender *target*) (fmax 0.0 (-> *bf* own-attack)))
+      ((or (= sym 'guard-shot) (= sym 'guard-lazer-shot)) (bf-shot-damage owner))
+      ((= sym 'roboguard-shot) BF_DMG_ROBOT_SHOT)
+      ((= sym 'flying-turret-shot) BF_DMG_JET_SHOT)
+      ((or (= sym 'explosion) (= sym 'vehicle-grenade) (= sym 'vehicle-grenade-deflect)) BF_DMG_GRENADE)
+      ((= sym 'spydroid) BF_DMG_BITE)
+      ((or (= sym 'crimson-guard) (= sym 'roboguard-city) (= sym 'flying-turret)) BF_DMG_MELEE)
+      (else -1.0)
+      )
+    )
+  )
+
+;; Stock damage step of the city's units, kept across REPL reloads of this file (Lisp wiki jak3 4.10).
+(define-perm *bf-stock-damage-enemy* (function nav-enemy object event-message-block float)
+             (method-of-type nav-enemy damage-enemy-from-attack!)
+             )
+
+(defmethod damage-enemy-from-attack! ((this nav-enemy) (arg0 object) (arg1 event-message-block))
+  "Every attack on a nav-enemy takes its hit points here (enemy.gc enemy-event-handler; the guards'
+   own step calls it after its alert). During a fight, for a unit of the battle (`bf-unit-hp`), the
+   attack's points on the 24 point scale (`bf-attack-damage`) become the same share of the unit's
+   stock hit points (enemy-info default-hit-points, which caps them first: a guard's 'victory
+   raises them); its own side's fire takes none; a kill of the player's counts in `*bf*` kills.
+   Anything else: the stock step. Defined on nav-enemy, the parent of every unit of the battle
+   (citizen and its children, in level code linked after GAME, which copy it at their creation);
+   GAME links with method-set propagation on (kmachine.cpp), so nav-enemy's own children in GAME
+   take it too (Lisp wiki jak3 4.10). Returns the hit points taken."
+  (let* ((sender (the-as process arg0))
+         (owner (handle->process (-> this incoming attacker-handle)))
+         (full (if (bf-fighting?) (bf-unit-hp this) 0.0))
+         (dmg (if (< 0.0 full) (bf-attack-damage sender owner) -1.0))
+         )
+    (cond
+      ((< dmg 0.0)
+       (*bf-stock-damage-enemy* this arg0 arg1)
+       )
+      (else
+        (if (and owner (>= (bf-unit-team owner) 0) (= (bf-unit-team owner) (bf-unit-team this)))
+            (set! dmg 0.0)
+            )
+        (let ((max-hp (-> this enemy-info default-hit-points)))
+          (set! (-> this hit-points) (fmin (-> this hit-points) max-hp))
+          (let ((taken (apply-incoming-hitpoint-mods this (* max-hp (/ dmg full)))))
+            (set! (-> this hit-points) (- (-> this hit-points) taken))
+            (if (not (logtest? (-> this enemy-flags) (enemy-flag auto-reset-penetrate)))
+                (set! (-> this root penetrated-by) (get-penetrated-by this))
+                )
+            (if (and (< 0.0 taken) (>= 0.0 (-> this hit-points)) (= owner *target*))
+                (+! (-> *bf* kills) 1)
+                )
+            taken
+            )
+          )
+        )
+      )
+    )
+  )
+
+(defun bf-guard-weapon ((proc process) (want int))
+  "Called by guard.gc crimson-guard-method-267 (every weapon change of a guard) and -270 (its
+   off-screen change): the guard-type a guard of a battle gets for WANT. No unit of the battle has
+   the tazer: a red guard carries its model's weapon (the rifle, or the launcher of
+   bf-red-guard-gl), a blue guard the rifle or the launcher it was given, the launcher in place of
+   the tazer and the rifle in place of a vehicle gunner's type (Lisp wiki jak3 4.37: a guard on foot
+   with another type deactivates itself). WANT out of a battle."
+  (let ((name (bf-art-name proc)))
+    (cond
+      ((not (bf-active?)) want)
+      ((string= name "bf-red-guard-lod0") (the-as int (guard-type rifle)))
+      ((string= name "bf-red-guard-gl-lod0") (the-as int (guard-type grenade)))
+      ((= want (the-as int (guard-type tazer))) (the-as int (guard-type grenade)))
+      ((or (= want (the-as int (guard-type rifle))) (= want (the-as int (guard-type grenade)))) want)
+      (else (the-as int (guard-type rifle)))
       )
     )
   )
@@ -677,19 +958,17 @@
   )
 
 (defun bf-queue-drop ((proc process))
-  "Maybe leave a pickup where PROC died: 10 % yellow ammo (rifles, guns), 5 % red (grenades), 4 %
-   blue (tazer), 5 % health, 3 % dark eco (jetpack fuel), else nothing (27 % in all, 67 % before:
-   the ground was covered with them). Queued for the director,
-   which spawns it in its own process (`bf-spawn-drops`): this runs on the traffic manager's small
-   stack."
+  "Maybe leave a pickup where PROC died: 12 % yellow ammo (the rifle's reserve), 7 % red (grenades),
+   6 % health, 5 % dark eco (the jetpack's boost), else nothing (30 % in all; 67 % covered the
+   ground; no blue ammo: the tazer needs none). Queued for the director, which spawns it in its own
+   process (`bf-spawn-drops`): this runs on the traffic manager's small stack."
   (when (and (type? proc process-drawable) (< (-> *bf* drop-count) BF_DROP_MAX))
     (let* ((roll (rand-vu-int-count 100))
            (kind (cond
-                   ((< roll 10) (pickup-type ammo-yellow))
-                   ((< roll 15) (pickup-type ammo-red))
-                   ((< roll 19) (pickup-type ammo-blue))
-                   ((< roll 24) (pickup-type health))
-                   ((< roll 27) (pickup-type eco-pill-dark))
+                   ((< roll 12) (pickup-type ammo-yellow))
+                   ((< roll 19) (pickup-type ammo-red))
+                   ((< roll 25) (pickup-type health))
+                   ((< roll 30) (pickup-type eco-pill-dark))
                    (else (pickup-type none))
                    )
                  )
@@ -731,7 +1010,7 @@
 (defun bf-hover-animate ((this process-drawable) (speed float))
   "Post of a flying-turret drawn as a jetpack guard (flying-turret.gc enemy-common-post). The
    turret code holds its idle pose; this loops the jetpack guard's idle or forward clip by SPEED
-   (units per second) unless the turret code is playing the firing clip."
+   (units per second) at BF_HOVER_RATE unless the turret code is playing the firing clip."
   (when (and (bf-hover-art? this) (nonzero? (-> this skel)) (> (-> this skel active-channels) 0))
     (let* ((chan (-> this skel root-channel 0))
            (fire (-> this draw art-group data BF_HOVER_SHOOT))
@@ -750,7 +1029,7 @@
             (set! (-> chan frame-num) 0.0)
             )
           (let ((last (the float (+ (-> want frames num-frames) -1))))
-            (set! (-> chan frame-num) (+ (-> chan frame-num) (* 0.5 (-> this clock time-adjust-ratio))))
+            (set! (-> chan frame-num) (+ (-> chan frame-num) (* BF_HOVER_RATE (-> this clock time-adjust-ratio))))
             (if (>= (-> chan frame-num) last)
                 (set! (-> chan frame-num) 0.0)
                 )
