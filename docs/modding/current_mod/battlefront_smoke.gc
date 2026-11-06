@@ -1,0 +1,1893 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; SMOKE TEST SCENARIOS of Battlefront (Jak 3), one numbered scenario per test of the mod's test
+;; notebook (docs/modding/current_mod/battlefront_tests.md). Never list it in game.gd yourself:
+;;   python scripts/modding/smoke_test.py install jak3 docs/modding/current_mod/battlefront_smoke.gc --scenario <n>
+;;   task compile-check
+;;   python scripts/modding/smoke_test.py run jak3 <test name> --retail --timeout 540   (with the user's go-ahead)
+;;   python scripts/modding/smoke_test.py remove jak3
+;; Every scenario boots retail (the launcher's boot: no debug segment), loads save slot 1 from the
+;; title screen and drives the game with the pad alone, through the mod's real menus: the Mods menu
+;; (L3 + SELECT) and START > Options > Gamemode > Battlefront. It saves nothing.
+;; "SMOKE PASS ..." and "SMOKE FAIL ..." are the results, "SMOKE step ..." marks each action (the last
+;; one printed before a crash names it), "SMOKE DONE" ends the run.
+;;
+;; This file is compiled last into GAME: the mod's GAME code (battlefront-h, -player, battlefront.gc)
+;; is visible to it.
+
+(defconstant SMOKE_SCENARIO 1) ;; set by `smoke_test.py install --scenario`
+
+;; ----------------------------------------------------------------------------
+;; Clock, results, screenshots
+;; ----------------------------------------------------------------------------
+
+(defun smoke-now ()
+  "Real time in 1/300 s: menus and pauses do not stop it."
+  (-> *display* real-clock frame-counter)
+  )
+
+(defbehavior smoke-wait process ((secs float))
+  "Suspend for SECS seconds of real time."
+  (let ((t0 (smoke-now)))
+    (while (< (- (smoke-now) t0) (the int (* secs 300.0)))
+      (suspend)
+      )
+    )
+  0
+  )
+
+(defun smoke-check ((what string) (ok object))
+  "Print one result: SMOKE PASS <what> when OK is anything but #f, else SMOKE FAIL <what>. Returns
+   #t or #f."
+  ;; ~S prints a string without its quotes (~A keeps them)
+  (format 0 "SMOKE ~S ~S~%" (if ok "PASS" "FAIL") what)
+  (if ok #t #f)
+  )
+
+(defun smoke-step ((what string))
+  "Mark the action about to run: after a crash, the last step printed names it."
+  (format 0 "SMOKE step ~S~%" what)
+  0
+  )
+
+;; Screenshot settings of our own, laid out as the kernel's: capture-pc.gc's are debug-only, so a
+;; retail boot has none.
+(deftype smoke-shot-settings (structure)
+  ((width   int32)
+   (height  int32)
+   (msaa    int32)
+   (name    uint8  244)
+   )
+  )
+
+(define *smoke-shot* (new 'static 'smoke-shot-settings :width 1280 :height 720 :msaa 4))
+
+(defun smoke-shot ((tag string))
+  "Save <config>/OpenGOAL/jak3/screenshots/smoke-<tag>.png (written about 0.5 s later). The runner
+   copies it to out/smoke/<test>/."
+  (set! (-> *smoke-shot* width) 1280)
+  (set! (-> *smoke-shot* height) 720)
+  (format (clear *temp-string*) "smoke-~S" tag)
+  (copyn-charp<-string (-> *smoke-shot* name) *temp-string* 244)
+  (pc-register-screen-shot-settings (the-as screen-shot-settings *smoke-shot*))
+  (pc-screen-shot)
+  (format 0 "SMOKE shot smoke-~S~%" tag)
+  0
+  )
+
+;; Frame recording: a screenshot every few frames, 640 x 360, smoke-rec-<clip>-<n>.png, for a GIF of
+;; a motion (scratch tool: ffmpeg over the sequence; the "SMOKE clip" line gives its frame rate).
+(define *smoke-rec* #f)
+(define *smoke-rec-every* 2)
+(define *smoke-rec-tick* 0)
+(define *smoke-rec-n* 0)
+(define *smoke-rec-clip* (new 'global 'string 32 (the-as string #f)))
+(define *smoke-rec-name* (new 'global 'string 64 (the-as string #f)))
+
+(defun smoke-rec-start ((clip string) (every int))
+  "Record a frame every EVERY game frames as smoke-rec-CLIP-<n>.png until `smoke-rec-stop`."
+  (clear *smoke-rec-clip*)
+  (format *smoke-rec-clip* "~S" clip)
+  (set! *smoke-rec-every* every)
+  (set! *smoke-rec-tick* 0)
+  (set! *smoke-rec-n* 0)
+  (set! (-> *smoke-shot* width) 640)
+  (set! (-> *smoke-shot* height) 360)
+  (pc-register-screen-shot-settings (the-as screen-shot-settings *smoke-shot*))
+  (set! *smoke-rec* #t)
+  0
+  )
+
+(defun smoke-rec-stop ()
+  "Stop the recording; print its frame count and the game frames it took."
+  (set! *smoke-rec* #f)
+  (format 0 "SMOKE clip ~S frames ~D ticks ~D~%" *smoke-rec-clip* *smoke-rec-n* *smoke-rec-tick*)
+  0
+  )
+
+(defun smoke-rec-frame ()
+  "Once a game frame (from the pad hook): the recording's screenshot when one is due."
+  (when *smoke-rec*
+    (when (zero? (mod *smoke-rec-tick* *smoke-rec-every*))
+      (clear *smoke-rec-name*)
+      (format *smoke-rec-name* "smoke-rec-~S-~D" *smoke-rec-clip* (+ 1000 *smoke-rec-n*))
+      (copyn-charp<-string (-> *smoke-shot* name) *smoke-rec-name* 244)
+      (pc-screen-shot)
+      (+! *smoke-rec-n* 1)
+      )
+    (+! *smoke-rec-tick* 1)
+    )
+  0
+  )
+
+;; ----------------------------------------------------------------------------
+;; Pad: buttons and sticks of the test ORed into pad 0 after the hardware read
+;; ----------------------------------------------------------------------------
+
+(define-perm *smoke-cpad-stock* (function cpad-info cpad-info) cpad-get-data)
+(define *smoke-started* #f)
+(define *smoke-hold* 0)
+(define *smoke-tap* 0)
+(define *smoke-tap-left* 0)
+(define *smoke-lx* 128)
+(define *smoke-ly* 128)
+(define *smoke-rx* 128)
+(define *smoke-ry* 128)
+
+(define-extern smoke-start (function int))
+
+(defun smoke-cpad-get-data ((pad cpad-info))
+  "Stock read, then pad 0 gets the held and tapped buttons and the sticks of the test. The scenario
+   starts on the first call (spawned at link time it came too early)."
+  (*smoke-cpad-stock* pad)
+  (when (and (not *smoke-started*) *pc-dead-pool*)
+    (set! *smoke-started* #t)
+    (smoke-start)
+    )
+  (when (zero? (-> pad number))
+    (let ((b *smoke-hold*))
+      (when (> *smoke-tap-left* 0)
+        (set! b (logior b *smoke-tap*))
+        (+! *smoke-tap-left* -1)
+        )
+      (set! (-> pad valid) (the-as uint 0))
+      (set! (-> pad status) (the-as uint #x73))
+      (set! (-> pad button0) (the-as uint (logior (the-as int (-> pad button0)) b)))
+      (set! (-> pad leftx) (the-as uint *smoke-lx*))
+      (set! (-> pad lefty) (the-as uint *smoke-ly*))
+      (set! (-> pad rightx) (the-as uint *smoke-rx*))
+      (set! (-> pad righty) (the-as uint *smoke-ry*))
+      )
+    (smoke-rec-frame)
+    )
+  pad
+  )
+
+(set! cpad-get-data smoke-cpad-get-data)
+
+(defun smoke-tap ((b pad-buttons) (frames int))
+  "Press B for FRAMES frames."
+  (set! *smoke-tap* (the-as int b))
+  (set! *smoke-tap-left* frames)
+  0
+  )
+
+(defun smoke-hold ((b pad-buttons))
+  "Keep B down until the next smoke-hold (0 releases)."
+  (set! *smoke-hold* (the-as int b))
+  0
+  )
+
+(defun smoke-stick ((lx int) (ly int) (rx int) (ry int))
+  "Both sticks, 0 to 255, 128 at rest. Left stick y 0 is forward; right stick x 255 is right."
+  (set! *smoke-lx* lx)
+  (set! *smoke-ly* ly)
+  (set! *smoke-rx* rx)
+  (set! *smoke-ry* ry)
+  0
+  )
+
+(defun smoke-neutral ()
+  "Release everything."
+  (set! *smoke-hold* 0)
+  (set! *smoke-tap-left* 0)
+  (smoke-stick 128 128 128 128)
+  )
+
+(defbehavior smoke-press process ((b pad-buttons) (secs float))
+  "Tap B (4 frames), then wait SECS."
+  (smoke-tap b 4)
+  (smoke-wait secs)
+  )
+
+;; ----------------------------------------------------------------------------
+;; Getting into the game and into a battle
+;; ----------------------------------------------------------------------------
+
+(defbehavior smoke-wait-stand process ((timeout float))
+  "Wait until Jak stands, alive, after any blackout, or TIMEOUT seconds."
+  (let ((t0 (smoke-now)))
+    (until (or (> (- (smoke-now) t0) (the int (* timeout 300.0)))
+               (and *target*
+                    (not (focus-test? *target* dead))
+                    (logtest? (-> *target* control status) (collide-status on-surface))
+                    (< (-> *game-info* blackout-time) (current-time))
+                    )
+               )
+      (suspend)
+      )
+    )
+  0
+  )
+
+(defbehavior smoke-boot process ()
+  "Retail boot: the opening scenes skipped (triangle twice), START on the title, X on Load Game, X on
+   slot 1; then Jak standing."
+  (smoke-step "boot")
+  (smoke-wait 4.0)
+  (smoke-press (pad-buttons triangle) 6.0)
+  (smoke-press (pad-buttons triangle) 8.0)
+  (smoke-press (pad-buttons start) 4.0)
+  (smoke-press (pad-buttons x) 3.0)
+  (smoke-press (pad-buttons x) 3.0)
+  (smoke-wait-stand 90.0)
+  (smoke-wait 3.0)
+  (smoke-check "save slot 1 loaded, Jak standing" (and *target* (not (focus-test? *target* dead))))
+  0
+  )
+
+(defbehavior smoke-mods-toggle process ((tag string))
+  "L3 + SELECT, X on the battlefront entry (the first; Misc options is last), X on Battlefront mode,
+   L3 + SELECT again to close. Screenshot TAG with the menu open."
+  (smoke-tap (pad-buttons l3 select) 6)
+  (smoke-wait 1.5)
+  (smoke-check "L3 + SELECT opens the Mods menu" *popup-menu-open*)
+  (smoke-press (pad-buttons x) 1.2)
+  (smoke-press (pad-buttons x) 1.2)
+  (smoke-shot tag)
+  (smoke-wait 0.8)
+  (smoke-tap (pad-buttons l3 select) 6)
+  (smoke-wait 1.5)
+  (smoke-check "the Mods menu closes" (not *popup-menu-open*))
+  0
+  )
+
+(defun smoke-dir ()
+  "The battle's director, #f for none."
+  (the-as bf-director (handle->process (-> *bf* director)))
+  )
+
+(defun smoke-av ()
+  "The class model the player plays, #f for none."
+  (the-as bf-avatar (handle->process (-> *bf* avatar)))
+  )
+
+(defbehavior smoke-start-page process ((page symbol))
+  "Open the START menu on PAGE once nothing else is up."
+  (let ((t0 (smoke-now)))
+    (until (or (and (not *progress-process*) (= *master-mode* 'game) (progress-allowed?))
+               (< (seconds 8) (- (smoke-now) t0))
+               )
+      (suspend)
+      )
+    )
+  (activate-progress *dproc* page)
+  (smoke-wait 2.5)
+  0
+  )
+
+(defbehavior smoke-menu-goto process ((idx int))
+  "On a generic page of the START menu, press down until line IDX is under the cursor."
+  (let ((t0 (smoke-now)))
+    (until (or (not *progress-process*)
+               (and (= (-> *progress-process* 0 menu-transition) 0.0) (< (seconds 0.5) (- (smoke-now) t0)))
+               (< (seconds 6) (- (smoke-now) t0))
+               )
+      (suspend)
+      )
+    )
+  (dotimes (i 8)
+    (if (and *progress-process* (!= idx (-> *progress-pc-generic-store* current-menu-hover-index)))
+        (smoke-press (pad-buttons down) 0.4)
+        )
+    )
+  0
+  )
+
+(defbehavior smoke-wait-for process ((secs float) (what (function object)))
+  "Wait until WHAT answers true, SECS seconds at most. Returns its last answer."
+  (let ((t0 (smoke-now)))
+    (until (or (what) (> (- (smoke-now) t0) (the int (* secs 300.0))))
+      (suspend)
+      )
+    )
+  (what)
+  )
+
+(defbehavior smoke-battle-start process ((zone int) (team int))
+  "START > Gamemode > Battlefront > New battle, war zone ZONE, side TEAM. Checks the page order: the
+   class page right after the side page, the zone loading under it; then the game paused under it
+   once Jak stands at his spawn."
+  (smoke-step "new battle")
+  (smoke-start-page 'bf-battlefront)
+  (smoke-menu-goto 0)
+  (smoke-press (pad-buttons x) 3.0)
+  (smoke-check "New battle opens the war zone page" (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_ZONE)))
+  (set! (-> (smoke-dir) cursor) zone)
+  (smoke-wait 0.5)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-check "X on the zone opens the side page" (= (-> (smoke-dir) page) BF_PAGE_TEAM))
+  (set! (-> (smoke-dir) cursor) team)
+  (smoke-step "side chosen")
+  (smoke-tap (pad-buttons x) 4)
+  (smoke-wait 0.3)
+  (format 0 "SMOKE after side: page ~D phase ~D mode ~A~%" (-> (smoke-dir) page) (-> *bf* phase) *master-mode*)
+  (smoke-check "the class page follows the side page at once, the zone loading under it"
+               (and (= (-> (smoke-dir) page) BF_PAGE_CLASS) (= (-> *bf* phase) BF_PHASE_DEPLOY))
+               )
+  (smoke-wait 1.0)
+  (smoke-shot "class-page-loading")
+  (smoke-wait-for 90.0 (lambda () (= (-> *bf* phase) BF_PHASE_FIGHT)))
+  (smoke-wait 2.0)
+  (format 0 "SMOKE zone ready: page ~D phase ~D mode ~A preview ~A~%" (-> (smoke-dir) page) (-> *bf* phase)
+          *master-mode* (if (handle->process (-> (smoke-dir) preview)) #t #f))
+  (smoke-check "the zone loaded under the class page, the game paused, the preview shown"
+               (and (= (-> (smoke-dir) page) BF_PAGE_CLASS)
+                    (= *master-mode* 'menu)
+                    (if (handle->process (-> (smoke-dir) preview)) #t #f)
+                    )
+               )
+  (smoke-shot "class-page-ready")
+  0
+  )
+
+(defbehavior smoke-deploy process ((idx int) (tag string))
+  "On the open class page: class IDX of the side, X. Checks that the class model is in play."
+  (smoke-step tag)
+  (set! (-> (smoke-dir) cursor) idx)
+  (smoke-wait 0.6)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 15.0 (lambda () (bf-avatar-alive?)))
+  (smoke-wait 1.5)
+  (let ((want (+ (* 4 (-> *bf* team)) idx)))
+    (format 0 "SMOKE deployed class ~D (want ~D) avatar ~A mode ~A~%" (-> *bf* class) want (bf-avatar-alive?) *master-mode*)
+    (smoke-check "the chosen class is in play" (and (bf-avatar-alive?) (= (-> *bf* class) want) (= *master-mode* 'game)))
+    )
+  0
+  )
+
+(defbehavior smoke-change-class process ((idx int) (tag string))
+  "START > Gamemode > Battlefront > Change class, then class IDX."
+  (smoke-step "change class")
+  (smoke-neutral)
+  (smoke-start-page 'bf-battlefront)
+  (smoke-menu-goto 1)
+  (smoke-press (pad-buttons x) 2.0)
+  (smoke-wait-for 10.0 (lambda () (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_CLASS))))
+  (smoke-wait 1.0)
+  (smoke-deploy idx tag)
+  )
+
+(defbehavior smoke-quit process ()
+  "START > Gamemode > Battlefront > Quit the battle; the city back, the battle off."
+  (smoke-step "quit the battle")
+  (smoke-neutral)
+  (smoke-start-page 'bf-battlefront)
+  (smoke-menu-goto 3)
+  (smoke-press (pad-buttons x) 2.0)
+  (smoke-wait-for 60.0 (lambda () (and (= (-> *bf* phase) BF_PHASE_OFF) (= *master-mode* 'game))))
+  (smoke-wait-stand 60.0)
+  (smoke-wait 2.0)
+  (smoke-check "Quit the battle ends it, Jak standing, no class model"
+               (and (= (-> *bf* phase) BF_PHASE_OFF) (not (bf-avatar-alive?)) *target* (not (focus-test? *target* dead)))
+               )
+  0
+  )
+
+;; ----------------------------------------------------------------------------
+;; Measures
+;; ----------------------------------------------------------------------------
+
+(define *smoke-v0* (new 'global 'vector))
+(define *smoke-v1* (new 'global 'vector))
+
+(defbehavior smoke-turn process ((rx int) (ry int) (secs float))
+  "Hold the right stick at RX, RY for SECS. Returns the camera's turn in `*smoke-v0*`: x, the part of
+   its new forward along its old screen right (the camera's rvec points to the screen's left, so
+   minus that); y, how much its forward rose."
+  (let ((rot (-> *math-camera* inv-camera-rot)))
+    (vector-copy! *smoke-v0* (-> rot rvec))
+    (vector-copy! *smoke-v1* (-> rot fvec))
+    (smoke-stick 128 128 rx ry)
+    (smoke-wait secs)
+    (smoke-stick 128 128 128 128)
+    (smoke-wait 0.1)
+    (set-vector! *smoke-v0*
+                 (- (vector-dot (-> rot fvec) *smoke-v0*))
+                 (- (-> rot fvec y) (-> *smoke-v1* y))
+                 0.0
+                 1.0
+                 )
+    )
+  *smoke-v0*
+  )
+
+(defbehavior smoke-stock-camera process ()
+  "Out of a battle: how the stock camera turns for the right stick pushed right, then up, with the
+   player's PC camera settings (printed only)."
+  (smoke-step "stock camera")
+  (let ((h (-> (smoke-turn 255 128 0.6) x)))
+    (smoke-wait 0.5)
+    (let ((v (-> (smoke-turn 128 0 0.6) y)))
+      (format 0 "SMOKE stock camera: right stick right turns ~f to the right, up turns ~f up (inverted h ~A v ~A)~%"
+              h v (-> *pc-settings* third-camera-h-inverted?) (-> *pc-settings* third-camera-v-inverted?))
+      )
+    )
+  0
+  )
+
+(define *smoke-invuln-saved* #f)
+
+(defun smoke-invulnerable ((on? symbol))
+  "ON?: the invulnerable secret on, so a measure is not cut short by a death (the player's own
+   setting kept); off: that setting back. Nothing is saved."
+  (cond
+    (on?
+     (set! *smoke-invuln-saved* (logtest? (-> *game-info* secrets) (game-secrets invulnerable)))
+     (logior! (-> *game-info* secrets) (game-secrets invulnerable))
+     )
+    ((not *smoke-invuln-saved*)
+     (logclear! (-> *game-info* secrets) (game-secrets invulnerable))
+     )
+    )
+  0
+  )
+
+(defun smoke-screen-x ((p vector))
+  "Screen x of world point P on the 512 wide screen, -1.0 behind the camera."
+  (let ((scr (new 'stack-no-clear 'vector)))
+    (if (transform-point-vector! scr p)
+        (- (-> scr x) 1792.0)
+        -1.0
+        )
+    )
+  )
+
+(defbehavior smoke-camera-checks process ()
+  "In a battle: the third-person camera is the point-of-view mode on the mod's rig; the crosshair's
+   ray runs along the camera's view; the model faces the view and stands left of the middle (the
+   camera is over its right shoulder); the right stick turns the view right when pushed right and
+   up when pushed up."
+  (smoke-step "camera checks")
+  (smoke-neutral)
+  (smoke-invulnerable #t)
+  (smoke-wait 1.0)
+  (let ((slave (-> *camera* slave)))
+    (format 0 "SMOKE camera mode ~A rig ~A~%" (if slave (-> slave 0 state name) 'none) (if (handle->process (-> *bf* rig)) #t #f))
+    (smoke-check "the battle camera is the point-of-view camera on the rig"
+                 (and slave (= (-> slave 0 state name) 'cam-pov) (if (handle->process (-> *bf* rig)) #t #f))
+                 )
+    )
+  (let* ((rot (-> *math-camera* inv-camera-rot))
+         (ray (vector-! (new 'stack-no-clear 'vector) (-> *bf* aim) (-> *math-camera* trans)))
+         (av (smoke-av))
+         (face (new 'stack-no-clear 'vector))
+         (view (bf-view-forward (new 'stack-no-clear 'vector)))
+         (head (new 'stack-no-clear 'vector))
+         )
+    (vector-normalize! ray 1.0)
+    (format 0 "SMOKE crosshair ray . view ~f~%" (vector-dot ray (-> rot fvec)))
+    (smoke-check "the crosshair aims where the camera looks" (< 0.99 (vector-dot ray (-> rot fvec))))
+    (when av
+      (vector-z-quaternion! face (-> av root quat))
+      (vector-copy! head (-> av root trans))
+      (+! (-> head y) (meters 2))
+      (format 0 "SMOKE model facing . view ~f, model screen x ~f~%" (vector-dot face view) (smoke-screen-x head))
+      (smoke-check "the class model faces where the camera looks" (< 0.95 (vector-dot face view)))
+      (smoke-check "the class model stands left of the crosshair"
+                   (and (< 0.0 (smoke-screen-x head)) (< (smoke-screen-x head) 250.0))
+                   )
+      )
+    )
+  (smoke-shot "tps-camera")
+  ;; with the PC camera settings at their defaults (third-person inversions on), as a shooter
+  (let* ((yaw0 (-> *bf* view-yaw))
+         (h (-> (smoke-turn 255 128 0.6) x))
+         (yaw1 (-> *bf* view-yaw))
+         )
+    (format 0 "SMOKE battle camera: right stick right turns ~f to the right (yaw ~f -> ~f)~%" h yaw0 yaw1)
+    (smoke-check "right stick pushed right turns the view right" (< 0.05 h))
+    )
+  (smoke-wait 0.3)
+  (let ((v (-> (smoke-turn 128 0 0.6) y)))
+    (format 0 "SMOKE battle camera: right stick up turns ~f up (pitch ~f)~%" v (-> *bf* view-pitch))
+    (smoke-check "right stick pushed up looks up" (< 0.05 v))
+    )
+  (smoke-shot "tps-camera-turned")
+  ;; back to level
+  (set! (-> *bf* view-pitch) 0.0)
+  (smoke-invulnerable #f)
+  0
+  )
+
+(defun smoke-status ((tag string))
+  "One line: class, avatar, Jak's state, health, ammo, reserves, the camera mode."
+  (let ((slave (-> *camera* slave)))
+    (format 0 "SMOKE status ~S class ~D avatar ~A state ~A hp ~f phase ~D" tag (-> *bf* class) (bf-avatar-alive?)
+            (if *target* (-> *target* state name) 'none) (if *target* (-> *target* fact health) -1.0) (-> *bf* phase))
+    (format 0 " ammo ~f ~f ~f reserves ~D ~D cam ~A~%" (-> *game-info* gun-ammo 0) (-> *game-info* gun-ammo 1)
+            (-> *game-info* gun-ammo 2) (-> *bf* reserve 0) (-> *bf* reserve 1) (if slave (-> slave 0 state name) 'none))
+    )
+  0
+  )
+
+;; ----------------------------------------------------------------------------
+;; Health and damage on the 24 point scale, ammo, each class's moves, the battle's targeting
+;; ----------------------------------------------------------------------------
+
+(define *smoke-tag* (new 'global 'string 32 (the-as string #f)))
+
+(defbehavior smoke-help-shots process ((n int))
+  "On the open class page: a screenshot of each of the side's N classes, its help under it
+   (smoke-class-help-<i>)."
+  (dotimes (i n)
+    (set! (-> (smoke-dir) cursor) i)
+    (smoke-wait 1.5)
+    (format (clear *smoke-tag*) "class-help-~D" i)
+    (smoke-shot *smoke-tag*)
+    (smoke-wait 0.6)
+    )
+  (set! (-> (smoke-dir) cursor) 0)
+  (smoke-wait 0.5)
+  0
+  )
+
+(defun smoke-near-unit ((team int) (except process) (sym symbol))
+  "The living unit of side TEAM nearest to Jak within 150 m, of type SYM (#f: any), the player and
+   EXCEPT aside; #f for none. The actor hash can hold a shape of a process moved or gone since it was
+   filled: a process that its own handle no longer finds is left out."
+  (let ((probe (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
+        (shapes (new 'stack-no-clear 'array 'collide-shape 64))
+        (best (the-as process #f))
+        (best-dist (meters 150))
+        )
+    (set! (-> probe w) (meters 150))
+    (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 64))
+      (let ((shape (as-type (-> shapes i) collide-shape)))
+        (when shape
+          (let ((proc (-> shape process)))
+            (when (and (= (handle->process (process->handle proc)) proc)
+                       (bf-ally? proc team)
+                       (type? proc enemy)
+                       (!= proc except)
+                       (or (not sym) (= (-> proc type symbol) sym))
+                       )
+              (let ((dist (vector-vector-distance (-> (the-as process-focusable proc) root trans) probe)))
+                (when (< dist best-dist)
+                  (set! best-dist dist)
+                  (set! best proc)
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    best
+    )
+  )
+
+(defun smoke-hp-check ((class int))
+  "Jak's health is CLASS's full health on the 24 point scale (`bf-class-health`)."
+  (let ((want (bf-class-health class)))
+    (format 0 "SMOKE hp class ~D: ~f (want ~f, health-max ~f)~%" class (-> *target* fact health) want
+            (-> *target* fact health-max))
+    (smoke-check "the class starts with its full health on the 24 point scale"
+                 (< (fabs (- (-> *target* fact health) want)) 0.01)
+                 )
+    )
+  )
+
+(defun smoke-ammo-line ((tag string))
+  "One line: the rifle's magazine, its reserve, the grenades."
+  (format 0 "SMOKE ammo ~S: magazine ~D reserve ~f grenades ~f~%" tag (-> *bf* mag BF_WEAPON_RIFLE)
+          (-> *game-info* gun-ammo BF_AMMO_YELLOW) (-> *game-info* gun-ammo BF_AMMO_RED))
+  0
+  )
+
+(defbehavior smoke-guard-ammo process ()
+  "A guard just deployed: rifle 10 in the magazine and 20 carried, 5 grenades (HUD screenshot). R1
+   held empties the magazine, which reloads from the reserve; the grenade launcher throws its five
+   grenades and no sixth (HUD screenshots)."
+  (smoke-step "guard ammo")
+  (smoke-ammo-line "deployed")
+  (smoke-check "a guard deploys with 10 rifle rounds in the magazine, 20 carried and 5 grenades"
+               (and (= (-> *bf* mag BF_WEAPON_RIFLE) BF_MAG_RIFLE)
+                    (= (-> *game-info* gun-ammo BF_AMMO_YELLOW) BF_RESERVE_RIFLE)
+                    (= (-> *game-info* gun-ammo BF_AMMO_RED) BF_GRENADES)
+                    )
+               )
+  (smoke-shot "hud-rifle")
+  (smoke-step "rifle until reload")
+  (smoke-hold (pad-buttons r1))
+  (smoke-wait 1.0)
+  (smoke-ammo-line "rifle 1 s")
+  (let ((mid (-> *bf* mag BF_WEAPON_RIFLE)))
+    (smoke-wait 5.0)
+    (smoke-hold (the-as pad-buttons 0))
+    (smoke-wait 3.0)
+    (smoke-ammo-line "rifle emptied, reloaded")
+    (smoke-check "the rifle spends its magazine, then reloads 10 from the 20 carried"
+                 (and (< mid BF_MAG_RIFLE)
+                      (< 0 (-> *bf* mag BF_WEAPON_RIFLE))
+                      (< (-> *game-info* gun-ammo BF_AMMO_YELLOW) BF_RESERVE_RIFLE)
+                      )
+                 )
+    )
+  (smoke-step "five grenades")
+  (smoke-press (pad-buttons up) 0.8)
+  (dotimes (i 6)
+    (smoke-press (pad-buttons r1) 1.4)
+    (if (= i 1)
+        (smoke-shot "hud-grenade")
+        )
+    )
+  (smoke-ammo-line "six throws")
+  (smoke-check "the grenade launcher throws its 5 grenades, then none" (= (-> *game-info* gun-ammo BF_AMMO_RED) 0.0))
+  (smoke-press (pad-buttons down) 0.8)
+  0
+  )
+
+(defbehavior smoke-tazer process ()
+  "The tazer: the weapon joint shrunk to a baton in the guard's hands (screenshot) and the HUD
+   without ammo (screenshot); R1 strikes once, with no reload clip; R1 again 1.5 s later does
+   nothing (20 s recharge); the rifle back at full size."
+  (smoke-step "tazer")
+  (smoke-press (pad-buttons left) 1.0)
+  (format 0 "SMOKE tazer: weapon joint ~A scale ~f~%" (if (and (smoke-av) (-> (smoke-av) gun-jm)) #t #f)
+          (if (and (smoke-av) (-> (smoke-av) gun-jm)) (-> (smoke-av) gun-jm scale x) -1.0))
+  (smoke-check "the tazer in hand shrinks the weapon to a baton"
+               (and (smoke-av) (-> (smoke-av) gun-jm) (< (fabs (- (-> (smoke-av) gun-jm scale x) BF_TAZER_SCALE)) 0.01))
+               )
+  (smoke-shot "tazer-in-hand")
+  ;; recharged, whatever happened before
+  (set! (-> *bf* tazer-time) 0)
+  (smoke-press (pad-buttons r1) 0.6)
+  (let ((t1 (-> *bf* tazer-time)))
+    (smoke-wait 1.0)
+    (format 0 "SMOKE tazer strike at ~D, reload? ~A top clip ~D~%" t1 (-> (smoke-av) reload?) (-> (smoke-av) top-step))
+    (smoke-check "R1 strikes with the tazer, with no reload after it"
+                 (and (nonzero? t1) (not (-> (smoke-av) reload?)) (< (-> (smoke-av) top-step) 2))
+                 )
+    (smoke-press (pad-buttons r1) 0.6)
+    (smoke-check "a second strike waits for the 20 s recharge" (= (-> *bf* tazer-time) t1))
+    )
+  (smoke-press (pad-buttons down) 1.0)
+  (smoke-check "the rifle back in hand at full size"
+               (and (smoke-av) (-> (smoke-av) gun-jm) (< (fabs (- (-> (smoke-av) gun-jm scale x) 1.0)) 0.01))
+               )
+  0
+  )
+
+(defbehavior smoke-roll process ((lx int) (ly int))
+  "L2 with the left stick at LX, LY (pushed on the same frame). Returns Jak's move in `*smoke-v0*`:
+   x along the camera's right, y ahead, in meters."
+  (let ((right (bf-view-right (new 'stack-no-clear 'vector)))
+        (fwd (bf-view-forward (new 'stack-no-clear 'vector)))
+        (from (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
+        )
+    (smoke-stick lx ly 128 128)
+    (smoke-tap (pad-buttons l2) 4)
+    (smoke-wait 0.15)
+    (smoke-stick 128 128 128 128)
+    (smoke-wait 1.2)
+    (let ((d (vector-! (new 'stack-no-clear 'vector) (-> *target* control trans) from)))
+      (set-vector! *smoke-v0* (/ (vector-dot d right) (meters 1)) (/ (vector-dot d fwd) (meters 1)) 0.0 1.0)
+      )
+    (format 0 "SMOKE roll stick ~D ~D: ~f m right, ~f m ahead~%" lx ly (-> *smoke-v0* x) (-> *smoke-v0* y))
+    *smoke-v0*
+    )
+  )
+
+(defbehavior smoke-strafe process ((lx int))
+  "R2 held with the left stick at LX across for 1.2 s. Returns Jak's move along the camera's right
+   (meters); prints whether the model kept facing the view."
+  (let ((right (bf-view-right (new 'stack-no-clear 'vector)))
+        (view (bf-view-forward (new 'stack-no-clear 'vector)))
+        (face (new 'stack-no-clear 'vector))
+        (from (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
+        (facing 0.0)
+        (strafe? #f)
+        )
+    (smoke-hold (pad-buttons r2))
+    (smoke-stick lx 128 128 128)
+    (smoke-wait 0.7)
+    (when (smoke-av)
+      (vector-z-quaternion! face (-> (smoke-av) root quat))
+      (set! facing (vector-dot face view))
+      (set! strafe? (-> (smoke-av) strafe?))
+      )
+    (smoke-wait 0.5)
+    (smoke-hold (the-as pad-buttons 0))
+    (smoke-stick 128 128 128 128)
+    (smoke-wait 0.5)
+    (let ((d (/ (vector-dot (vector-! (new 'stack-no-clear 'vector) (-> *target* control trans) from) right) (meters 1))))
+      (format 0 "SMOKE strafe stick ~D: ~f m right, strafe? ~A, model facing . view ~f~%" lx d strafe? facing)
+      (smoke-check "R2 strafes: the guard sidesteps facing ahead" (and strafe? (< 0.9 facing)))
+      d
+      )
+    )
+  )
+
+(defbehavior smoke-guard-moves process ()
+  "A guard's roll (L2 + the stick: right, left, ahead) and strafe (R2 + the stick: right, left)."
+  (smoke-step "rolls")
+  (let ((r (-> (smoke-roll 255 128) x)))
+    (smoke-wait 0.6)
+    (let ((l (-> (smoke-roll 0 128) x)))
+      (smoke-wait 0.6)
+      (let ((f (-> (smoke-roll 128 0) y)))
+        (smoke-check "L2 rolls toward the stick: right, left and ahead" (and (< 2.0 r) (< l -2.0) (< 2.0 f)))
+        )
+      )
+    )
+  (smoke-step "strafes")
+  (let* ((r (smoke-strafe 255))
+         (l (smoke-strafe 0))
+         )
+    (smoke-check "R2 + the stick strafes right and left" (and (< 1.0 r) (< l -1.0)))
+    )
+  0
+  )
+
+(defbehavior smoke-melee-delay process ((btn pad-buttons) (secs float))
+  "BTN (the class's close attack) twice, 0.4 SECS apart: the second is refused; once more SECS plus
+   a second later: it goes."
+  (smoke-step "close attack delay")
+  (smoke-neutral)
+  (smoke-press btn 0.2)
+  (let ((t1 (-> (smoke-av) melee-time)))
+    (smoke-wait (+ -0.2 (* 0.4 secs)))
+    (smoke-press btn 0.2)
+    (let ((t2 (-> (smoke-av) melee-time)))
+      (smoke-wait (+ 1.0 secs))
+      (smoke-press btn 0.5)
+      (let ((t3 (-> (smoke-av) melee-time)))
+        (format 0 "SMOKE close attacks at ~D, ~D, ~D (delay ~f s)~%" t1 t2 t3 secs)
+        (smoke-check "a close attack waits for its delay after the last one" (and (nonzero? t1) (= t1 t2) (!= t2 t3)))
+        )
+      )
+    )
+  0
+  )
+
+(defun smoke-hit-from ((from process) (target process))
+  "A generic attack of 1 point on TARGET from FROM, as a unit's blow. Returns TARGET's answer (#f:
+   refused)."
+  (let ((id (+ (-> *game-info* attack-id) 1))
+        (msg (new 'stack-no-clear 'event-message-block))
+        )
+    (set! (-> *game-info* attack-id) id)
+    (set! (-> msg from) (process->ppointer from))
+    (set! (-> msg num-params) 2)
+    (set! (-> msg message) 'attack)
+    (set! (-> msg param 0) (the-as uint #f))
+    (set! (-> msg param 1)
+          (the-as uint (static-attack-info :mask (vehicle-impulse-factor) ((id id)
+                                                                           (damage 1.0)
+                                                                           (vehicle-damage-factor 1.0)
+                                                                           (vehicle-impulse-factor 1.0)
+                                                                           (mode 'generic)
+                                                                           )
+                                  )
+                   )
+          )
+    (send-event-function target msg)
+    )
+  )
+
+(defbehavior smoke-player-hits process ((shield? symbol))
+  "A blow on the player from an ally is refused; one from a foe takes 10 of his 24 points, none
+   behind the robotguard's shield (SHIELD?). Real fire hits him meanwhile, so the checks read Jak's
+   answer and the damage he recorded for that very attack (`attack-info-rec`, its id), not his
+   health. The invulnerable secret is lifted for it (a save may have it on), then put back as it
+   was; his health back to full after."
+  (smoke-step "blows on the player")
+  (let ((invuln? (logtest? (-> *game-info* secrets) (game-secrets invulnerable)))
+        (ally (smoke-near-unit (-> *bf* team) (the-as process #f) 'crimson-guard))
+        (foe-found? #f)
+        )
+    (logclear! (-> *game-info* secrets) (game-secrets invulnerable))
+    (when ally
+      (let ((answer (smoke-hit-from ally *target*)))
+        (format 0 "SMOKE ally's blow answered ~A~%" answer)
+        (smoke-check "an ally's blow is refused: it takes nothing from the player" (not answer))
+        )
+      )
+    ;; out of the short invulnerability a real hit gives him, then the foe's blow at once
+    (smoke-wait-for 5.0 (lambda () (not (or (focus-test? *target* hit)
+                                            (logtest? (-> *target* target-flags) (target-flags tf2 tinvuln1 tinvuln2))
+                                            )
+                                        )
+                          )
+                    )
+    (let ((foe (smoke-near-unit (bf-other-team (-> *bf* team)) (the-as process #f) 'crimson-guard)))
+      (when foe
+        (set! foe-found? #t)
+        (let* ((id (+ (-> *game-info* attack-id) 1))
+               (answer (smoke-hit-from foe *target*))
+               (rec (-> *target* attack-info-rec))
+               (want (* BF_DMG_MELEE (/ (-> *target* fact health-max) 24.0)))
+               )
+          (format 0 "SMOKE foe's blow answered ~A, recorded attack ~D (sent ~D), damage ~f (want ~f)~%" answer
+                  (-> rec id) id (-> rec damage) want)
+          (if shield?
+              (smoke-check "the shield stops a foe's blow" (not answer))
+              (smoke-check "a foe's blow takes 10 of the player's 24 points"
+                           (and answer (= (the-as int (-> rec id)) id) (< (fabs (- (-> rec damage) want)) 0.01))
+                           )
+              )
+          )
+        )
+      )
+    (smoke-check "units of both sides near the player" (and ally foe-found?))
+    (smoke-wait 1.0)
+    (if invuln?
+        (logior! (-> *game-info* secrets) (game-secrets invulnerable))
+        )
+    (set! (-> *target* fact health) (bf-class-health (-> *bf* class)))
+    )
+  (smoke-wait 1.5)
+  0
+  )
+
+(defbehavior smoke-unit-damage process ()
+  "Rifle-shot damage on the nearest foe: 8 of its 24 points a hit (its first hit that lands: one in
+   its hit reaction takes nothing), hits until it dies, the killing hit adds a kill at once (HUD
+   screenshot); an ally's blow on an ally takes nothing. Each hit is read at once: the damage step
+   runs inside the event, and other units shoot it meanwhile."
+  (smoke-step "damage on units")
+  (let* ((ally (smoke-near-unit (-> *bf* team) (the-as process #f) 'crimson-guard))
+         (other (if ally (smoke-near-unit (-> *bf* team) ally 'crimson-guard) (the-as process #f)))
+         )
+    (when other
+      ;; the damage step first caps a unit's hit points at its stock maximum (a guard's 'victory raises
+      ;; them), then takes the hit's share: an ally's blow leaves the capped value
+      (let ((h0 (fmin (-> (the-as enemy ally) hit-points) (-> (the-as enemy ally) enemy-info default-hit-points))))
+        (smoke-hit-from other ally)
+        (format 0 "SMOKE ally's blow on an ally: ~f -> ~f~%" h0 (-> (the-as enemy ally) hit-points))
+        (smoke-check "a blow among allies takes nothing" (= (-> (the-as enemy ally) hit-points) h0))
+        )
+      )
+    )
+  (let ((foe (smoke-near-unit (bf-other-team (-> *bf* team)) (the-as process #f) 'crimson-guard))
+        (measured? #f)
+        (killed? #f)
+        (counted? #f)
+        )
+    (when (not foe)
+      (smoke-check "a foe within 150 m to hit" #f)
+      )
+    (when foe
+      (let ((h (process->handle foe)))
+        (dotimes (i 8)
+          (let ((p (handle->process h)))
+            (when (and p
+                       (not killed?)
+                       (not (focus-test? (the-as process-focusable p) dead))
+                       (< 0.0 (-> (the-as enemy p) hit-points))
+                       )
+              (let* ((max-hp (-> (the-as enemy p) enemy-info default-hit-points))
+                     (h0 (fmin (-> (the-as enemy p) hit-points) max-hp))
+                     (want (fmin h0 (* max-hp (/ BF_DMG_RIFLE (bf-unit-hp p)))))
+                     (k0 (-> *bf* kills))
+                     )
+                (bf-send-attack p BF_DMG_RIFLE)
+                (let ((lost (- h0 (fmax 0.0 (-> (the-as enemy p) hit-points)))))
+                  (format 0 "SMOKE rifle hit ~D on ~A: ~f -> ~f of ~f," i (-> p type symbol) h0 (-> (the-as enemy p) hit-points) max-hp)
+                  (format 0 " lost ~f (want ~f), kills ~D -> ~D~%" lost want k0 (-> *bf* kills))
+                  (when (and (not measured?) (< 0.0 lost))
+                    (set! measured? #t)
+                    (smoke-check "a rifle hit takes 8 of a unit's 24 points" (< (fabs (- lost want)) (* 0.02 max-hp)))
+                    )
+                  )
+                (when (>= 0.0 (-> (the-as enemy p) hit-points))
+                  (set! killed? #t)
+                  (set! counted? (= (-> *bf* kills) (+ k0 1)))
+                  )
+                )
+              (smoke-wait 1.2)
+              )
+            )
+          )
+        )
+      (smoke-check "a rifle hit landed" measured?)
+      (smoke-check "the foe killed by the player's hit adds a kill" (and killed? counted?))
+      (smoke-shot "hud-kills")
+      )
+    )
+  0
+  )
+
+(defun smoke-hatred-check ()
+  "The units near the player and what they aim at: none of his side aims at him (checked); how many
+   foes within 50 m aim at him, how many units aim at another unit (printed)."
+  (let ((probe (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
+        (shapes (new 'stack-no-clear 'array 'collide-shape 64))
+        (allies-on-me 0)
+        (foes-near 0)
+        (foes-on-me 0)
+        (on-unit 0)
+        (units 0)
+        )
+    (set! (-> probe w) (meters 150))
+    (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 64))
+      (let ((shape (as-type (-> shapes i) collide-shape)))
+        (when shape
+          (let ((proc (-> shape process)))
+            (when (and (!= proc *target*)
+                       (type? proc enemy)
+                       (>= (bf-unit-team proc) 0)
+                       (not (focus-test? (the-as process-focusable proc) dead))
+                       )
+              (let ((aim (handle->process (-> (the-as enemy proc) focus handle)))
+                    (near? (< (vector-vector-distance (-> (the-as process-focusable proc) root trans) probe) (meters 50)))
+                    )
+                (+! units 1)
+                (cond
+                  ((= (bf-unit-team proc) (-> *bf* team))
+                   (when (= aim *target*)
+                     (+! allies-on-me 1)
+                     (format 0 "SMOKE ally aiming at the player: ~A state ~A~%" (-> proc type symbol) (-> proc state name))
+                     )
+                   )
+                  (else
+                    (when near?
+                      (+! foes-near 1)
+                      (if (= aim *target*)
+                          (+! foes-on-me 1)
+                          )
+                      )
+                    )
+                  )
+                (if (and aim (!= aim *target*) (>= (bf-unit-team aim) 0))
+                    (+! on-unit 1)
+                    )
+                )
+              )
+            )
+          )
+        )
+      )
+    (format 0 "SMOKE targets: ~D units, ~D allies aim at the player, ~D of ~D foes within 50 m aim at him, ~D aim at a unit~%"
+            units allies-on-me foes-on-me foes-near on-unit)
+    (smoke-check "no unit of the player's side aims at him" (zero? allies-on-me))
+    )
+  )
+
+(defbehavior smoke-start-locks process ()
+  "The START ring during a battle: Load Game and Secrets drawn grey (screenshots), X on them refused
+   (the ring stays)."
+  (smoke-step "START ring")
+  (smoke-neutral)
+  (smoke-start-page 'main)
+  (smoke-wait 1.0)
+  (dotimes (k 2)
+    (let ((idx (if (zero? k) 6 8)))
+      (dotimes (i 12)
+        (if (and *progress-process* (!= idx (-> *progress-process* 0 option-index)))
+            (smoke-press (pad-buttons down) 0.4)
+            )
+        )
+      (format 0 "SMOKE START ring at ~D (want ~D), page ~A~%" (if *progress-process* (-> *progress-process* 0 option-index) -1)
+              idx (if *progress-process* (-> *progress-process* 0 current) 'none))
+      (smoke-shot (if (= idx 6) "start-load-grey" "start-secrets-grey"))
+      (smoke-press (pad-buttons x) 1.5)
+      (smoke-check (if (= idx 6) "Load Game refused during a battle" "Secrets refused during a battle")
+                   (and *progress-process*
+                        (= (-> *progress-process* 0 current) 'main)
+                        (= (-> *progress-process* 0 option-index) idx)
+                        )
+                   )
+      )
+    )
+  (when *progress-process*
+    (set-next-state (-> *progress-process* 0) 'go-away 0)
+    )
+  (smoke-wait 2.0)
+  0
+  )
+
+(defbehavior smoke-jet-boost process ()
+  "Jetpack: up, then R2 with the stick right for 1 s: a fast flight that way, the gauge spent; it does
+   not refill on its own (3 s), dark eco refills it."
+  (smoke-step "jetpack boost")
+  (smoke-hold (pad-buttons x))
+  (smoke-wait 1.0)
+  (smoke-hold (the-as pad-buttons 0))
+  (smoke-wait 0.5)
+  (let* ((f0 (-> (smoke-av) fuel))
+         (right (bf-view-right (new 'stack-no-clear 'vector)))
+         (from (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
+         )
+    (smoke-hold (pad-buttons r2))
+    (smoke-stick 255 128 128 128)
+    (smoke-wait 1.0)
+    (smoke-hold (the-as pad-buttons 0))
+    (smoke-stick 128 128 128 128)
+    (let ((d (/ (vector-dot (vector-! (new 'stack-no-clear 'vector) (-> *target* control trans) from) right) (meters 1)))
+          (f1 (-> (smoke-av) fuel))
+          )
+      (smoke-wait 3.0)
+      (let ((f2 (-> (smoke-av) fuel)))
+        (set! (-> *game-info* eco-pill-dark) 3.0)
+        (smoke-wait 0.5)
+        (format 0 "SMOKE boost: ~f m right in 1 s, gauge ~f -> ~f, 3 s later ~f, dark eco ~f~%" d f0 f1 f2 (-> (smoke-av) fuel))
+        (smoke-check "R2 boosts the jetpack toward the stick, spending its gauge" (and (< 12.0 d) (< f1 f0)))
+        (smoke-check "the boost gauge refills with dark eco only" (and (= f2 f1) (< f2 (-> (smoke-av) fuel))))
+        )
+      )
+    )
+  0
+  )
+
+(defbehavior smoke-robot-r14 process ()
+  "Robotguard: Circle raises the shield, the robot walks behind it, a foe's blow takes nothing; the
+   shield drops after 5 s and does not come back at once (25 s); R2 rolls as a ball until R2 again,
+   as far as the player goes. Its shot takes 4 points."
+  (smoke-step "robot shield")
+  (smoke-press (pad-buttons circle) 0.5)
+  (let ((up (-> (smoke-av) shield-time))
+        (from (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans))))
+    (smoke-check "Circle raises the shield" (-> (smoke-av) shield?))
+    (smoke-shot "robot-shield")
+    ;; back, the way the class came: ahead may be the scenery the spider ran into
+    (smoke-stick 128 255 128 128)
+    (smoke-wait 1.5)
+    (smoke-stick 128 128 128 128)
+    (let ((d (/ (vector-vector-distance (-> *target* control trans) from) (meters 1))))
+      (format 0 "SMOKE shield up, robot walked ~f m~%" d)
+      (smoke-check "the robot walks behind its shield" (and (-> (smoke-av) shield?) (< 1.5 d)))
+      )
+    (smoke-invulnerable #f)
+    (smoke-player-hits #t)
+    (smoke-wait-for 5.0 (lambda () (not (-> (smoke-av) shield?))))
+    (format 0 "SMOKE shield down ~f s after it went up~%" (/ (the float (- (-> (smoke-av) shield-time) up)) 300.0))
+    (smoke-check "the shield drops after 5 s" (not (-> (smoke-av) shield?)))
+    (smoke-press (pad-buttons circle) 0.5)
+    (smoke-check "the shield does not come back before its recharge" (not (-> (smoke-av) shield?)))
+    (smoke-step "robot ball")
+    (smoke-press (pad-buttons r2) 0.5)
+    (smoke-check "R2 rolls the robot up" (-> (smoke-av) rolling?))
+    (vector-copy! from (-> *target* control trans))
+    ;; back again: ahead stood the scenery (a ball stopped 2 m on)
+    (smoke-stick 128 255 128 128)
+    (smoke-wait 3.0)
+    (smoke-stick 128 128 128 128)
+    (smoke-wait 0.5)
+    (let ((d (/ (vector-vector-distance (-> *target* control trans) from) (meters 1))))
+      (format 0 "SMOKE ball: rolled ~f m in 3 s, still a ball ~A~%" d (-> (smoke-av) rolling?))
+      (smoke-check "the ball rolls on until R2" (and (-> (smoke-av) rolling?) (< 6.0 d)))
+      )
+    (smoke-press (pad-buttons r2) 1.0)
+    (smoke-check "R2 again stands the robot up" (not (-> (smoke-av) rolling?)))
+    (smoke-check "the robot's shot takes 4 points" (= (bf-shot-damage *target*) BF_DMG_ROBOT_SHOT))
+    )
+  0
+  )
+
+(defbehavior smoke-spider-r14 process ()
+  "Spider: X leaps about 11 m high; R2 sprints, a full gauge lasting 10 s (half spent after 5 s)."
+  (smoke-step "spider leap")
+  (smoke-neutral)
+  (smoke-wait-stand 5.0)
+  (let ((y0 (-> *target* control trans y))
+        (top (-> *target* control trans y))
+        (t0 (smoke-now))
+        )
+    (smoke-tap (pad-buttons x) 4)
+    (while (< (- (smoke-now) t0) 900)
+      (set! top (fmax top (-> *target* control trans y)))
+      (suspend)
+      )
+    (format 0 "SMOKE spider leap: ~M high~%" (- top y0))
+    (smoke-check "X leaps about 11 m high" (< (meters 9.5) (- top y0)))
+    )
+  (smoke-step "spider sprint")
+  (smoke-wait-stand 5.0)
+  (set! (-> (smoke-av) boost) 1.0)
+  (smoke-hold (pad-buttons r2))
+  (smoke-stick 128 0 128 128)
+  (smoke-wait 5.0)
+  (let ((b (-> (smoke-av) boost)))
+    (smoke-hold (the-as pad-buttons 0))
+    (smoke-stick 128 128 128 128)
+    (format 0 "SMOKE spider sprint: gauge ~f after 5 s~%" b)
+    (smoke-check "the sprint gauge lasts 10 s" (and (< 0.35 b) (< b 0.65)))
+    )
+  (smoke-wait 1.0)
+  0
+  )
+
+(defun smoke-bot-weapons ()
+  "The guards of the battle near the player and their weapons: none has the tazer."
+  (let ((probe (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
+        (shapes (new 'stack-no-clear 'array 'collide-shape 64))
+        (counts (new 'stack-no-clear 'array 'int32 4))
+        )
+    (dotimes (i 4)
+      (set! (-> counts i) 0)
+      )
+    (set! (-> probe w) (meters 200))
+    (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 64))
+      (let ((shape (as-type (-> shapes i) collide-shape)))
+        (when shape
+          (let ((proc (-> shape process)))
+            (when (and (= (-> proc type symbol) 'crimson-guard) (>= (bf-unit-team proc) 0))
+              ;; crimson-guard is a level type GAME code does not know: its guard-type, a uint32 at offset
+              ;; 1052 (decompiler/config/jak3/all-types.gc), 4 bytes before it from a basic's pointer
+              (let ((k (the-as int (-> (the-as (pointer uint32) (+ (the-as int proc) 1048)) 0))))
+                (+! (-> counts (min 3 k)) 1)
+                )
+              )
+            )
+          )
+        )
+      )
+    (format 0 "SMOKE battle guards: tazer ~D rifle ~D grenade ~D other ~D~%" (-> counts 0) (-> counts 1) (-> counts 2)
+            (-> counts 3))
+    (smoke-check "no guard of the battle carries the tazer"
+                 (and (zero? (-> counts 0)) (< 0 (+ (-> counts 1) (-> counts 2))))
+                 )
+    )
+  )
+
+;; ----------------------------------------------------------------------------
+;; Playing each class
+;; ----------------------------------------------------------------------------
+
+(defbehavior smoke-moves process ()
+  "Moves every class shares: walk turning, strafe both ways, back, look up and down, jump, R1 held,
+   Square twice."
+  (smoke-step "walk forward turning right")
+  (smoke-stick 128 0 200 128)
+  (smoke-wait 2.0)
+  (smoke-step "strafe left")
+  (smoke-stick 0 128 128 128)
+  (smoke-wait 1.2)
+  (smoke-step "strafe right")
+  (smoke-stick 255 128 128 128)
+  (smoke-wait 1.2)
+  (smoke-step "walk back")
+  (smoke-stick 128 255 128 128)
+  (smoke-wait 1.2)
+  (smoke-step "look up and down")
+  (smoke-stick 128 128 128 30)
+  (smoke-wait 0.5)
+  (smoke-stick 128 128 128 225)
+  (smoke-wait 0.5)
+  (smoke-neutral)
+  (set! (-> *bf* view-pitch) 0.0)
+  (smoke-step "jump")
+  (smoke-press (pad-buttons x) 1.2)
+  (smoke-step "R1 held")
+  (smoke-hold (pad-buttons r1))
+  (smoke-wait 2.0)
+  (smoke-hold (the-as pad-buttons 0))
+  (smoke-step "square")
+  (smoke-press (pad-buttons square) 1.0)
+  (smoke-press (pad-buttons square) 1.0)
+  0
+  )
+
+(defbehavior smoke-guard process ((tag string))
+  "A guard class: the shared moves, the three weapons (tazer held, two grenades, rifle), a reload
+   (the rifle emptied), the rolls and strafes (`smoke-guard-moves`)."
+  (smoke-moves)
+  (smoke-step "tazer")
+  (smoke-press (pad-buttons left) 0.6)
+  (smoke-hold (pad-buttons r1))
+  (smoke-wait 1.5)
+  (smoke-hold (the-as pad-buttons 0))
+  (smoke-step "grenades")
+  (smoke-press (pad-buttons up) 0.6)
+  (smoke-press (pad-buttons r1) 1.3)
+  (smoke-press (pad-buttons r1) 2.5)
+  (smoke-step "rifle until reload")
+  (smoke-press (pad-buttons down) 0.6)
+  (smoke-hold (pad-buttons r1))
+  (smoke-wait 4.0)
+  (smoke-hold (the-as pad-buttons 0))
+  (smoke-wait 2.0)
+  (smoke-guard-moves)
+  (smoke-status tag)
+  (smoke-shot tag)
+  0
+  )
+
+(defbehavior smoke-jetpack process ((tag string))
+  "A jetpack class: the shared moves, a climb (X held), a hover, a way down (Circle held), a dive
+   kick (Square)."
+  (smoke-moves)
+  (smoke-step "jetpack climb")
+  (smoke-hold (pad-buttons x))
+  (smoke-wait 1.5)
+  (smoke-hold (the-as pad-buttons 0))
+  (smoke-step "jetpack hover")
+  (smoke-wait 2.0)
+  (smoke-step "jetpack strafe in the air")
+  (smoke-stick 255 128 128 128)
+  (smoke-wait 1.0)
+  (smoke-stick 0 128 128 128)
+  (smoke-wait 1.0)
+  (smoke-neutral)
+  (smoke-step "jetpack down")
+  (smoke-hold (pad-buttons circle))
+  (smoke-wait 1.0)
+  (smoke-hold (the-as pad-buttons 0))
+  (smoke-step "dive kick")
+  (smoke-press (pad-buttons square) 1.5)
+  (smoke-status tag)
+  (smoke-shot tag)
+  0
+  )
+
+(defbehavior smoke-robot process ((tag string))
+  "The robotguard: the shared moves, a roll (R2), the shield (Circle held), a punch."
+  (smoke-moves)
+  (smoke-step "roll")
+  (smoke-stick 128 0 128 128)
+  (smoke-press (pad-buttons r2) 2.0)
+  (smoke-neutral)
+  (smoke-step "shield")
+  (smoke-hold (pad-buttons circle))
+  (smoke-wait 2.0)
+  (smoke-hold (the-as pad-buttons 0))
+  (smoke-wait 0.5)
+  (smoke-step "punch")
+  (smoke-press (pad-buttons square) 1.5)
+  (smoke-status tag)
+  (smoke-shot tag)
+  0
+  )
+
+(defbehavior smoke-spider process ((tag string))
+  "The spider robot: the shared moves, two bites (Circle), a blue eco sprint (R2 held), a high
+   jump (X held)."
+  (smoke-moves)
+  (smoke-step "bite")
+  (smoke-press (pad-buttons circle) 1.0)
+  (smoke-press (pad-buttons circle) 1.0)
+  (smoke-step "sprint")
+  (smoke-stick 128 0 128 128)
+  (smoke-hold (pad-buttons r2))
+  (smoke-wait 1.5)
+  (smoke-hold (the-as pad-buttons 0))
+  (smoke-neutral)
+  (smoke-step "high jump")
+  (smoke-hold (pad-buttons x))
+  (smoke-wait 1.0)
+  (smoke-hold (the-as pad-buttons 0))
+  (smoke-wait 1.0)
+  (smoke-status tag)
+  (smoke-shot tag)
+  0
+  )
+
+(defbehavior smoke-play process ((class int) (tag string))
+  "Play CLASS for some twenty seconds with its own moves."
+  (case class
+    ((BF_CLASS_BLUE_GUARD BF_CLASS_RED_GUARD) (smoke-guard tag))
+    ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK) (smoke-jetpack tag))
+    ((BF_CLASS_ROBOGUARD) (smoke-robot tag))
+    ((BF_CLASS_SPYDROID) (smoke-spider tag))
+    )
+  (smoke-neutral)
+  (smoke-check "still in the battle after the class's moves" (and *target* (bf-fighting?)))
+  0
+  )
+
+;; ----------------------------------------------------------------------------
+;; Jetpack hover: what the model does when the player lets go of everything
+;; ----------------------------------------------------------------------------
+
+(defbehavior smoke-hover-watch process ((tag string) (secs float))
+  "For SECS, nothing pressed: count the model's clip changes, the frames Jak's on-surface flag
+   changes, and the model's and Jak's height range, then print them; record it as a GIF (TAG)."
+  (smoke-neutral)
+  (smoke-rec-start tag 2)
+  (let ((t0 (smoke-now))
+        (av (smoke-av))
+        (clips 0)
+        (flips 0)
+        (last-anim -2)
+        (last-ground? #f)
+        (lo 1000000000.0)
+        (hi -1000000000.0)
+        (jlo 1000000000.0)
+        (jhi -1000000000.0)
+        (frames 0)
+        (last-frame -1.0)
+        (advance 0.0)
+        )
+    (when av
+      (set! last-anim (-> av anim))
+      (set! last-ground? (logtest? (-> *target* control status) (collide-status on-surface)))
+      (format 0 "SMOKE ~S start: clip ~D speed ~f frames ~D," tag (-> av anim)
+              (-> av skel root-channel 0 frame-group speed) (-> av skel root-channel 0 frame-group frames num-frames))
+      (format 0 " Jak ~M above his ground, state ~A, fuel ~f~%"
+              (- (-> *target* control trans y) (-> *target* control gspot-pos y)) (-> *target* state name) (-> av fuel))
+      )
+    (while (and (smoke-av) (< (- (smoke-now) t0) (the int (* secs 300.0))))
+      (let ((av (smoke-av)))
+        (when (!= (-> av anim) last-anim)
+          (+! clips 1)
+          (set! last-anim (-> av anim))
+          )
+        ;; how far the clip moves each game frame (a loop wraps back by its length minus one)
+        (let ((f (-> av skel root-channel 0 frame-num))
+              (n (the float (+ (-> av skel root-channel 0 frame-group frames num-frames) -1)))
+              )
+          (when (<= 0.0 last-frame)
+            (let ((d (- f last-frame)))
+              (if (< d (* -0.5 n))
+                  (+! d n)
+                  )
+              (+! advance (fabs d))
+              )
+            )
+          (set! last-frame f)
+          )
+        (let ((g? (logtest? (-> *target* control status) (collide-status on-surface))))
+          (when (!= g? last-ground?)
+            (+! flips 1)
+            (set! last-ground? g?)
+            )
+          )
+        (set! lo (fmin lo (-> av root trans y)))
+        (set! hi (fmax hi (-> av root trans y)))
+        (set! jlo (fmin jlo (-> *target* control trans y)))
+        (set! jhi (fmax jhi (-> *target* control trans y)))
+        (+! frames 1)
+        )
+      (suspend)
+      )
+    (smoke-rec-stop)
+    (format 0 "SMOKE hover ~S: ~D frames, ~D clip changes (now ~D), ~D on-surface flips," tag frames clips last-anim flips)
+    (format 0 " model y range ~M, Jak y range ~M, state ~A, clip frames per game frame ~f~%" (- hi lo) (- jhi jlo)
+            (if *target* (-> *target* state name) 'none) (/ advance (the float (max 1 frames))))
+    ;; the Jak 2 rip's frames, 15 a second: a quarter of a clip frame each game frame
+    (let ((pace (/ advance (the float (max 1 frames)))))
+      (smoke-check "the jetpack's clip plays at the rip's pace (15 frames a second)" (and (< 0.2 pace) (< pace 0.3)))
+      )
+    clips
+    )
+  )
+
+;; The model's joints against its root, the frame before (`smoke-pose-watch`).
+(define *smoke-joints* (new 'global 'inline-array 'vector 64))
+
+(defun smoke-pose-step ((av bf-avatar) (first? symbol))
+  "How far, in meters, the model's joints moved against its root since the last call, summed over
+   its joints (0 on the FIRST? call); the joints kept for the next call."
+  (let ((sum 0.0)
+        (p (new 'stack-no-clear 'vector))
+        )
+    (dotimes (i (min 64 (-> av node-list length)))
+      (vector<-cspace! p (-> av node-list data i))
+      (vector-! p p (-> av root trans))
+      (if (not first?)
+          (+! sum (vector-vector-distance p (-> *smoke-joints* i)))
+          )
+      (vector-copy! (-> *smoke-joints* i) p)
+      )
+    sum
+    )
+  )
+
+(defbehavior smoke-pose-watch process ((tag string) (secs float) (old-pace? symbol))
+  "For SECS, nothing pressed: the mean motion of the model's joints against its root each game
+   frame, in centimeters, recorded as a GIF (TAG). OLD-PACE? plays the clip at the build's own speed,
+   a clip frame each game frame, as before the fix: each frame this adds 0.75 to the frame the
+   class code advanced by 0.25 (the joints are computed again after it, `bf-avatar-cam-post`)."
+  (smoke-neutral)
+  (smoke-rec-start tag 2)
+  (let ((t0 (smoke-now))
+        (frames 0)
+        (total 0.0)
+        )
+    (when (smoke-av)
+      (smoke-pose-step (smoke-av) #t)
+      )
+    (while (and (smoke-av) (< (- (smoke-now) t0) (the int (* secs 300.0))))
+      (let* ((av (smoke-av))
+             (ch (-> av skel root-channel 0))
+             )
+        (when old-pace?
+          (let ((n (the float (+ (-> ch frame-group frames num-frames) -1)))
+                (f (+ (-> ch frame-num) 0.75))
+                )
+            (set! (-> ch frame-num) (if (>= f n) (- f n) f))
+            )
+          )
+        (+! total (smoke-pose-step av #f))
+        (+! frames 1)
+        )
+      (suspend)
+      )
+    (smoke-rec-stop)
+    (let ((cm (/ (* 100.0 (/ total (meters 1))) (the float (max 1 frames)))))
+      (format 0 "SMOKE pose ~S: ~D frames, joints moved ~f cm a game frame (summed over the joints), clip ~D~%"
+              tag frames cm (if (smoke-av) (-> (smoke-av) anim) -1))
+      cm
+      )
+    )
+  )
+
+(defbehavior smoke-jet-log process ((tag string) (secs float))
+  "For SECS, every 0.25 s: Jak's height over his ground, his state, the jetpack's fuel and clip."
+  (let ((t0 (smoke-now)))
+    (while (< (- (smoke-now) t0) (the int (* secs 300.0)))
+      (let ((av (smoke-av)))
+        (format 0 "SMOKE ~S: Jak ~M above his ground, state ~A, fuel ~f, clip ~D~%" tag
+                (- (-> *target* control trans y) (-> *target* control gspot-pos y)) (-> *target* state name)
+                (if av (-> av fuel) -1.0) (if av (-> av anim) -1))
+        )
+      (smoke-wait 0.25)
+      )
+    )
+  0
+  )
+
+;; ----------------------------------------------------------------------------
+;; Endurance: long fights, the player's death and respawn, a restart
+;; ----------------------------------------------------------------------------
+
+;; Pickup rate: every real unit death goes through `bf-queue-drop` (battlefront-h.gc, called by
+;; bf-unit-killed); this copy of it counts the deaths it saw with room in the queue and the drops
+;; they left.
+(define *smoke-deaths* 0)
+(define *smoke-drops* 0)
+(define-perm *smoke-stock-queue-drop* (function process none) bf-queue-drop)
+
+(defun bf-queue-drop ((proc process))
+  "The stock `bf-queue-drop`, counted (`*smoke-deaths*`, `*smoke-drops*`)."
+  (let ((n (-> *bf* drop-count)))
+    (*smoke-stock-queue-drop* proc)
+    (when (and (type? proc process-drawable) (< n BF_DROP_MAX))
+      (+! *smoke-deaths* 1)
+      (if (< n (-> *bf* drop-count))
+          (+! *smoke-drops* 1)
+          )
+      )
+    )
+  (none)
+  )
+
+(defbehavior smoke-free-fight process ((class int) (secs float))
+  "SECS of fighting as CLASS: strafing left and right and turning, R1 held, then one of the class's
+   own moves in turn (guards: a dodge, a weapon change, the rifle butt; jetpacks: a climb, a way
+   down, a dive kick; robotguard: a roll, the shield, a punch; spider: a bite, a sprint, a high
+   jump)."
+  (let ((t0 (smoke-now))
+        (n 0)
+        )
+    (while (< (- (smoke-now) t0) (the int (* secs 300.0)))
+      (smoke-step "free fight: strafe, turn and fire")
+      (smoke-stick (if (zero? (logand n 1)) 30 225) 90 (if (zero? (logand n 2)) 190 70) 128)
+      (smoke-hold (pad-buttons r1))
+      (smoke-wait 1.5)
+      (smoke-hold (the-as pad-buttons 0))
+      (smoke-stick 128 128 128 128)
+      (case class
+        ((BF_CLASS_BLUE_GUARD BF_CLASS_RED_GUARD)
+         (case (mod n 3)
+           ((0)
+            (smoke-step "free fight: dodge")
+            (smoke-press (if (zero? (logand n 1)) (pad-buttons l2) (pad-buttons r2)) 1.0)
+            )
+           ((1)
+            (smoke-step "free fight: weapon change")
+            (smoke-press (case (mod n 9) ((1) (pad-buttons left)) ((4) (pad-buttons up)) (else (pad-buttons down))) 0.6)
+            )
+           (else
+             (smoke-step "free fight: rifle butt")
+             (smoke-press (pad-buttons square) 1.0)
+             )
+           )
+         )
+        ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK)
+         (case (mod n 3)
+           ((0)
+            (smoke-step "free fight: jetpack climb")
+            (smoke-hold (pad-buttons x))
+            (smoke-wait 0.8)
+            (smoke-hold (the-as pad-buttons 0))
+            )
+           ((1)
+            (smoke-step "free fight: jetpack down")
+            (smoke-hold (pad-buttons circle))
+            (smoke-wait 0.8)
+            (smoke-hold (the-as pad-buttons 0))
+            )
+           (else
+             (smoke-step "free fight: dive kick")
+             (smoke-press (pad-buttons square) 1.2)
+             )
+           )
+         )
+        ((BF_CLASS_ROBOGUARD)
+         (case (mod n 3)
+           ((0)
+            (smoke-step "free fight: roll")
+            (smoke-press (pad-buttons r2) 1.4)
+            )
+           ((1)
+            (smoke-step "free fight: shield")
+            (smoke-hold (pad-buttons circle))
+            (smoke-wait 1.2)
+            (smoke-hold (the-as pad-buttons 0))
+            )
+           (else
+             (smoke-step "free fight: punch")
+             (smoke-press (pad-buttons square) 1.2)
+             )
+           )
+         )
+        ((BF_CLASS_SPYDROID)
+         (case (mod n 3)
+           ((0)
+            (smoke-step "free fight: bite")
+            (smoke-press (pad-buttons circle) 0.8)
+            )
+           ((1)
+            (smoke-step "free fight: sprint")
+            (smoke-stick 128 0 128 128)
+            (smoke-hold (pad-buttons r2))
+            (smoke-wait 1.0)
+            (smoke-hold (the-as pad-buttons 0))
+            )
+           (else
+             (smoke-step "free fight: high jump")
+             (smoke-hold (pad-buttons x))
+             (smoke-wait 0.8)
+             (smoke-hold (the-as pad-buttons 0))
+             )
+           )
+         )
+        )
+      (+! n 1)
+      )
+    )
+  (smoke-neutral)
+  0
+  )
+
+(defbehavior smoke-kill-player process ()
+  "A deadly generic attack on the player from this process (the invulnerable secret lifted for
+   it, then put back as it was)."
+  (let ((invuln? (logtest? (-> *game-info* secrets) (game-secrets invulnerable)))
+        (id (+ (-> *game-info* attack-id) 1))
+        (msg (new 'stack-no-clear 'event-message-block))
+        )
+    (logclear! (-> *game-info* secrets) (game-secrets invulnerable))
+    (set! (-> *game-info* attack-id) id)
+    (set! (-> msg from) (process->ppointer self))
+    (set! (-> msg num-params) 2)
+    (set! (-> msg message) 'attack)
+    (set! (-> msg param 0) (the-as uint #f))
+    (set! (-> msg param 1)
+          (the-as uint (static-attack-info :mask (vehicle-impulse-factor) ((id id)
+                                                                           (damage 100.0)
+                                                                           (vehicle-damage-factor 1.0)
+                                                                           (vehicle-impulse-factor 1.0)
+                                                                           (mode 'generic)
+                                                                           )
+                                  )
+                   )
+          )
+    (send-event-function *target* msg)
+    (if invuln?
+        (logior! (-> *game-info* secrets) (game-secrets invulnerable))
+        )
+    )
+  0
+  )
+
+(defbehavior smoke-death-check process ((tag string))
+  "The player killed: his side loses one, the camera watches an ally while the class model is
+   gone, then he is back at the spawn as the same class, the battle camera on him again."
+  (smoke-step "player death")
+  (smoke-neutral)
+  (let ((class (-> *bf* class))
+        (lost (-> *bf* losses (-> *bf* team)))
+        )
+    (smoke-kill-player)
+    (smoke-wait 1.0)
+    (let ((slave (-> *camera* slave)))
+      (format 0 "SMOKE ~S dead: respawn pending ~A, avatar ~A, camera ~A~%" tag (nonzero? (-> *bf* respawn-time))
+              (bf-avatar-alive?) (if slave (-> slave 0 state name) 'none))
+      )
+    (smoke-check "the killed player waits to respawn, his class model gone"
+                 (and (nonzero? (-> *bf* respawn-time)) (not (bf-avatar-alive?)))
+                 )
+    (smoke-wait-for 15.0 (lambda () (and (zero? (-> *bf* respawn-time)) (bf-avatar-alive?))))
+    (smoke-wait 1.5)
+    (let ((slave (-> *camera* slave)))
+      (format 0 "SMOKE ~S respawned: class ~D (was ~D), losses ~D (were ~D)," tag (-> *bf* class) class
+              (-> *bf* losses (-> *bf* team)) lost)
+      (format 0 " camera ~A, state ~A~%" (if slave (-> slave 0 state name) 'none) (-> *target* state name))
+      (smoke-check "back at the spawn as the same class, one more loss, the battle camera on him"
+                   (and (bf-avatar-alive?)
+                        (= (-> *bf* class) class)
+                        (< lost (-> *bf* losses (-> *bf* team)))
+                        slave
+                        (= (-> slave 0 state name) 'cam-pov)
+                        (not (focus-test? *target* dead))
+                        )
+                   )
+      )
+    )
+  0
+  )
+
+(defbehavior smoke-restart process ()
+  "START > Gamemode > Battlefront > Restart the battle: both reserves full again, the same class,
+   the battle camera."
+  (smoke-step "restart the battle")
+  (smoke-neutral)
+  (let ((class (-> *bf* class)))
+    (smoke-start-page 'bf-battlefront)
+    (smoke-menu-goto 2)
+    (smoke-press (pad-buttons x) 3.0)
+    (smoke-wait-for 90.0 (lambda () (and (bf-fighting?) (bf-avatar-alive?))))
+    (smoke-wait 2.0)
+    (let ((slave (-> *camera* slave)))
+      (format 0 "SMOKE restart: reserves ~D ~D, class ~D (was ~D), camera ~A~%" (-> *bf* reserve 0) (-> *bf* reserve 1)
+              (-> *bf* class) class (if slave (-> slave 0 state name) 'none))
+      (smoke-check "Restart the battle: the same class at the spawn, the battle camera"
+                   (and (bf-avatar-alive?) (= (-> *bf* class) class) slave (= (-> slave 0 state name) 'cam-pov))
+                   )
+      )
+    )
+  0
+  )
+
+(defbehavior smoke-endurance process ((zone int) (team int) (secs float))
+  "A battle in ZONE on side TEAM: each class of the side fights SECS (`smoke-free-fight`), then the
+   player is killed and respawns (`smoke-death-check`); a restart at the end, then Quit."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start zone team)
+  (smoke-deploy 0 "endurance first class")
+  (dotimes (i (if (= team BF_TEAM_FF) 2 4))
+    (when (> i 0)
+      (smoke-change-class i "endurance next class")
+      )
+    (format 0 "SMOKE endurance class ~D for ~D s~%" (-> *bf* class) (the int secs))
+    (smoke-free-fight (-> *bf* class) secs)
+    (smoke-status "endurance")
+    (smoke-check "still in the battle after the long fight" (and *target* (bf-fighting?)))
+    (smoke-death-check "endurance")
+    )
+  (smoke-restart)
+  (smoke-free-fight (-> *bf* class) 10.0)
+  (let ((rate (/ (the float *smoke-drops*) (the float (max 1 *smoke-deaths*)))))
+    (format 0 "SMOKE pickups: ~D of ~D unit deaths left one (~f)~%" *smoke-drops* *smoke-deaths* rate)
+    (smoke-check "about 30 % of the fallen units leave a pickup" (and (< 100 *smoke-deaths*) (< 0.22 rate) (< rate 0.38)))
+    )
+  (smoke-quit)
+  0
+  )
+
+;; ----------------------------------------------------------------------------
+;; The scenarios
+;; ----------------------------------------------------------------------------
+
+(defbehavior smoke-scenario process ()
+  (format 0 "SMOKE start scenario ~D~%" SMOKE_SCENARIO)
+  (smoke-boot)
+  (case SMOKE_SCENARIO
+    ((1)
+     ;; T1: the Mods menu opens with L3 + SELECT, as every mod's; the mode's switch adds START >
+     ;; Options > Gamemode; switched off, the stock Options page is back
+     (format 0 "SMOKE bind ~X (L3 + SELECT is ~X)~%" *mods-menu-bind* (pad-buttons l3 select))
+     (smoke-check "the Mods menu bind is L3 + SELECT" (= *mods-menu-bind* (pad-buttons l3 select)))
+     (let ((n (-> *options-options-pc* options length)))
+       (smoke-mods-toggle "mods-menu-on")
+       (smoke-check "Battlefront mode on" *mod-battlefront-enable*)
+       (smoke-check "START > Options gains Gamemode" (= (-> *options-options-pc* options length) (+ n 1)))
+       (smoke-start-page 'options)
+       (smoke-shot "options-gamemode")
+       (when *progress-process*
+         (set-next-state (-> *progress-process* 0) 'go-away 0)
+         )
+       (smoke-wait 2.0)
+       (smoke-mods-toggle "mods-menu-off")
+       (smoke-check "Battlefront mode off" (not *mod-battlefront-enable*))
+       (smoke-check "START > Options back to the stock page" (= (-> *options-options-pc* options length) n))
+       (smoke-check "no battle director while the mode is off" (not (bf-active?)))
+       )
+     )
+    ((2)
+     ;; T2 to T5, Freedom League at the Port: the page order, the camera, the blue classes played
+     (smoke-stock-camera)
+     (smoke-mods-toggle "mods-menu-on")
+     (smoke-battle-start 0 BF_TEAM_FF)
+     (smoke-deploy 0 "deploy blue guard")
+     (smoke-camera-checks)
+     (smoke-play BF_CLASS_BLUE_GUARD "blue-guard")
+     (smoke-change-class 1 "blue jetpack")
+     (smoke-play BF_CLASS_BLUE_JETPACK "blue-jetpack")
+     (smoke-quit)
+     )
+    ((3)
+     ;; T4 and T5, Krimzon Guard in the Industrial Zone: every red class played
+     (smoke-stock-camera)
+     (smoke-mods-toggle "mods-menu-on")
+     (smoke-battle-start 1 BF_TEAM_KG)
+     (smoke-deploy 0 "deploy red guard")
+     (smoke-camera-checks)
+     (smoke-play BF_CLASS_RED_GUARD "red-guard")
+     (smoke-change-class 1 "red jetpack")
+     (smoke-play BF_CLASS_RED_JETPACK "red-jetpack")
+     (smoke-change-class 2 "robotguard")
+     (smoke-play BF_CLASS_ROBOGUARD "robotguard")
+     (smoke-change-class 3 "spider")
+     (smoke-play BF_CLASS_SPYDROID "spider")
+     (smoke-quit)
+     )
+    ((7)
+     ;; T6 on film: a jetpack left alone at the clip pace before the fix and at the fixed one, on the
+     ;; ground then hovering, in the same place
+     (smoke-mods-toggle "mods-menu-on")
+     (smoke-battle-start 0 BF_TEAM_FF)
+     (smoke-deploy 1 "deploy blue jetpack")
+     (smoke-invulnerable #t)
+     (smoke-step "jetpack on the ground, both paces")
+     (let ((g-old (smoke-pose-watch "jet-ground-old" 3.0 #t))
+           (g-new (smoke-pose-watch "jet-ground-new" 3.0 #f))
+           )
+       (smoke-step "jetpack up")
+       (smoke-hold (pad-buttons x))
+       (smoke-wait 1.5)
+       (smoke-hold (the-as pad-buttons 0))
+       (smoke-wait 1.0)
+       (smoke-step "jetpack hovering, both paces")
+       (let ((h-old (smoke-pose-watch "jet-hover-old" 3.0 #t))
+             (h-new (smoke-pose-watch "jet-hover-new" 3.0 #f))
+             )
+         (format 0 "SMOKE legs: ground ~f cm before, ~f after; hovering ~f before, ~f after~%" g-old g-new h-old h-new)
+         (smoke-check "the jetpack's joints move at least three times less than before the fix, on the ground and hovering"
+                      (and (< (* 3.0 g-new) g-old) (< (* 3.0 h-new) h-old))
+                      )
+         )
+       )
+     (smoke-quit)
+     )
+    ((5)
+     ;; T7, Freedom League at the Freedom HQ: each class in a long fight, the player's death, a restart
+     (smoke-endurance 3 BF_TEAM_FF 75.0)
+     )
+    ((6)
+     ;; T7, Krimzon Guard in the Slums
+     (smoke-endurance 2 BF_TEAM_KG 60.0)
+     )
+    ((4)
+     ;; T6: a jetpack left alone, on the ground then in the air; T3 again on film: the camera turned
+     ;; by the right stick, a strafe, a guard's rolls
+     (smoke-mods-toggle "mods-menu-on")
+     (smoke-battle-start 0 BF_TEAM_FF)
+     (smoke-deploy 1 "deploy blue jetpack")
+     (smoke-invulnerable #t)
+     (smoke-step "jetpack on the ground")
+     (let ((g (smoke-hover-watch "jet-ground" 3.0)))
+       (smoke-step "jetpack up")
+       (smoke-hold (pad-buttons x))
+       (smoke-jet-log "climb" 1.5)
+       (smoke-hold (the-as pad-buttons 0))
+       (smoke-jet-log "let go" 1.0)
+       (smoke-step "jetpack hovering")
+       (let ((h (smoke-hover-watch "jet-hover" 3.0)))
+         (smoke-check "a jetpack left alone keeps its clip, on the ground and in the air" (and (zero? g) (zero? h)))
+         )
+       )
+     (smoke-change-class 0 "blue guard")
+     (smoke-step "film the camera")
+     (smoke-rec-start "tps" 2)
+     (smoke-stick 128 128 255 128)
+     (smoke-wait 1.0)
+     (smoke-stick 128 128 0 128)
+     (smoke-wait 1.0)
+     (smoke-stick 0 128 128 128)
+     (smoke-wait 1.0)
+     (smoke-stick 128 0 128 128)
+     (smoke-wait 1.5)
+     (smoke-neutral)
+     (smoke-wait 0.5)
+     (smoke-rec-stop)
+     (smoke-rec-start "roll" 2)
+     (smoke-roll 255 128)
+     (smoke-wait 0.5)
+     (smoke-roll 0 128)
+     (smoke-rec-stop)
+     (smoke-quit)
+     )
+    ((8)
+     ;; T8 to T12, Freedom League at the Port: class help, health, the guard's ammo, tazer, rolls and
+     ;; strafes, its close attack's delay, the START ring's locks, damage on the 24 point scale and
+     ;; the kill counter, who aims at whom; the jetpack's health and boost
+     (smoke-mods-toggle "mods-menu-on")
+     (smoke-battle-start 0 BF_TEAM_FF)
+     (smoke-help-shots 2)
+     (smoke-deploy 0 "deploy blue guard")
+     (smoke-hp-check BF_CLASS_BLUE_GUARD)
+     (smoke-start-locks)
+     (smoke-invulnerable #t)
+     (smoke-guard-ammo)
+     (smoke-tazer)
+     (smoke-guard-moves)
+     (smoke-melee-delay (pad-buttons square) 1.5)
+     (smoke-invulnerable #f)
+     (smoke-player-hits #f)
+     (smoke-unit-damage)
+     (smoke-hatred-check)
+     (smoke-change-class 1 "blue jetpack")
+     (smoke-hp-check BF_CLASS_BLUE_JETPACK)
+     (smoke-invulnerable #t)
+     (smoke-jet-boost)
+     (smoke-invulnerable #f)
+     (smoke-quit)
+     )
+    ((9)
+     ;; T8 to T12, Krimzon Guard in the Industrial Zone: class help; the spider's health, leap and
+     ;; sprint; the robotguard's health, shield and ball; the close attacks' delays; the red guard's
+     ;; tazer; no tazer among the battle's guards; who aims at whom
+     (smoke-mods-toggle "mods-menu-on")
+     (smoke-battle-start 1 BF_TEAM_KG)
+     (smoke-help-shots 4)
+     ;; the spider first, at the spawn: its leap needs open sky (under the Industrial Zone's pipes it
+     ;; stopped at 6.8 m)
+     (smoke-deploy 3 "deploy spider")
+     (smoke-hp-check BF_CLASS_SPYDROID)
+     (smoke-invulnerable #t)
+     (smoke-spider-r14)
+     (smoke-melee-delay (pad-buttons circle) 1.0)
+     (smoke-change-class 2 "robotguard")
+     (smoke-hp-check BF_CLASS_ROBOGUARD)
+     (smoke-robot-r14)
+     (smoke-invulnerable #t)
+     (smoke-melee-delay (pad-buttons square) 1.5)
+     (smoke-change-class 0 "red guard")
+     (smoke-hp-check BF_CLASS_RED_GUARD)
+     (smoke-tazer)
+     (smoke-bot-weapons)
+     (smoke-hatred-check)
+     (smoke-invulnerable #f)
+     (smoke-quit)
+     )
+    )
+  (format 0 "SMOKE DONE~%")
+  0
+  )
+
+(defun smoke-start ()
+  "Spawn the scenario's process in *pc-pool*, which outlives the resets of a deployment, and let it
+   run under the menus."
+  (process-spawn-function
+    process
+    (lambda :behavior process ()
+      ;; the main thread keeps 256 bytes of stack across a suspend unless told more: the scenario's
+      ;; stack vectors outgrew it ("suspend called without enough stack", then the game stopped)
+      (stack-size-set! (-> self main-thread) 4096)
+      (process-mask-clear! (-> self mask) menu pause progress freeze)
+      (smoke-scenario)
+      (sleep-code)
+      )
+    :name "smoke-test"
+    :from *default-dead-pool*
+    :to *pc-pool*
+    :stack-size #x8000
+    )
+  0
+  )
