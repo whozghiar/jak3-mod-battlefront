@@ -625,6 +625,27 @@
     )
   )
 
+(defun bf-hover-nozzle! ((this process-drawable) (pos vector) (dir vector) (side int))
+  "Called by flying-turret-method-229 (flying-turret.gc) before each of its two thruster flames. A
+   jetpack guard's flame comes out of its jetpack's turbine, node 15 (SIDE 0, Lturbine) or 17 (SIDE
+   1, Rturbine) of the Jak 2 hover guard model, along the joint's -z axis, not from the turret's
+   spots under its root (the mod Haven City: New Dawn's fix for the same model). POS, DIR: set to
+   the joint's place and that axis. Returns #t when it set them, #f (both unchanged) for a stock
+   flying turret."
+  (cond
+    ((bf-hover-art? this)
+     (let ((joint (-> this node-list data (if (zero? side) 15 17))))
+       (vector<-cspace! pos joint)
+       (vector-normalize-copy! dir (-> joint bone transform vector 2) -1.0)
+       )
+     #t
+     )
+    (else
+      #f
+      )
+    )
+  )
+
 (defun bf-unit-team ((proc process))
   "Side of a unit, BF_TEAM_NONE for anything that does not fight in the battle."
   (let ((sym (-> proc type symbol)))
@@ -951,6 +972,19 @@
     ((string= (bf-art-name proc) "bf-hover-blue-lod0") 4)
     (else stock)
     )
+  )
+
+(defun bf-guard-flags ((proc process) (flags uint) (dark uint))
+  "Called by crimson-guard citizen-method-194 (guard.gc) as a guard is put on the street, before
+   Jak 3 reads its dark-guard flag. FLAGS: the guard's citizen flags, DARK: the dark-guard bit (the
+   citizen-flag enum is CWI's, unknown here). A red guard is never a dark guard: a dark guard shows
+   the mesh effects 0 and 2 (crimson-guard-method-267, setup-masks 5), and a build-actor model has
+   its envmap draws, the red guard's shiny armor, in effect 1: only its legs showed (seen in game).
+   Returns the flags to set."
+  (if (bf-red-guard? proc)
+      (logclear flags dark)
+      flags
+      )
   )
 
 (defun bf-guard-activated ((proc process))

@@ -10,6 +10,7 @@
 (define-extern bf-attacker-type (function process int int))
 (define-extern bf-guard-activated (function process none))
 (define-extern bf-guard-weapon (function process int int))
+(define-extern bf-guard-flags (function process uint uint uint))
 (define-extern bf-guard-clips (function process-drawable none))
 
 ;; DECOMP BEGINS
@@ -1697,6 +1698,8 @@
   (set! (-> this next-update-target-time) 0)
   (set! (-> this pursuit-start-time) 0)
   (set! (-> this last-choose-new-enemy-time) 0)
+  ;; MOD battlefront -- a red guard is never a dark guard: its armor would vanish (bf-guard-flags)
+  (set! (-> this flags) (the-as citizen-flag (bf-guard-flags this (the-as uint (-> this flags)) (the-as uint (citizen-flag dark-guard)))))
   (if (logtest? (-> this flags) (citizen-flag dark-guard))
       (set! (-> this hit-points) (* 2.0 (-> this enemy-info default-hit-points)))
       )
