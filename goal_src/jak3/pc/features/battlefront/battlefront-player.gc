@@ -83,6 +83,7 @@
 (defconstant BF_DODGE_HOP (meters 0.8))     ;; (guard-states.gc roll-right: 10 m/s across) in a jump this high
 (defconstant BF_DODGE_TIME (seconds 0.8))   ;; a roll lasts until it lands, this long at most
 (defconstant BF_DODGE_DELAY (seconds 0.4))  ;; from the end of a roll to the next one
+(defconstant BF_ROLL_SPIN (seconds 0.45))   ;; a roll turns the model head over heels once in this time
 (defconstant BF_STRAFE_SPEED 0.75)          ;; guard speed multiplier while it strafes (R2 held)
 (defconstant BF_DARK_FUEL 6.0)              ;; dark eco for a full jetpack boost (one drop: 3 pills of 2)
 (defconstant BF_MAG_RIFLE 10)               ;; rifle magazine
@@ -154,7 +155,6 @@
   )
 
 ;; crimson-guard-ag clips of the guard weapons (the red guard models share them)
-(defconstant BF_CLIP_TAZER_HOLD 20) ;; stab-idle-loop: the tazer held out
 (defconstant BF_CLIP_TAZER 22)      ;; stab-attack
 (defconstant BF_CLIP_GRENADE 37)    ;; grenade-attack
 (defconstant BF_CLIP_RELOAD 44)     ;; grenade-reload, the stock rifle guards' reload too
@@ -162,8 +162,7 @@
 ;; The guards' dodges. The stock guard's roll-right state (guard-states.gc) throws it along its +x,
 ;; which is its left (`bf-view-right`), and plays jump-left unless the model is drawn mirrored: each
 ;; clip carries the body to the side it names.
-(defconstant BF_CLIP_DODGE_RIGHT 40) ;; jump-right
-(defconstant BF_CLIP_DODGE_LEFT 41)  ;; jump-left
+(defconstant BF_CLIP_ROLL 38)       ;; jump-high, the body tucked: the roll's pose (no guard clip rolls)
 ;; The guards' sidestep while they strafe: stab-shuffle, the tazer guard's shuffle (guard.gc plays
 ;; it forward and back), forward to one side, reversed to the other (`bf-avatar-loop-rate`).
 (defconstant BF_CLIP_STRAFE 25)
@@ -211,7 +210,7 @@
    (shield      handle)         ;; its `bf-shield`, #f for none
    (shield-time time-frame)     ;; when it went up, or, once down, when it went down
    (strafe?     symbol)         ;; guard: R2 held, it strafes (faces ahead, its sidestep clip)
-   (roll-yaw    float)          ;; guard: the model's heading in a roll (its sideways jump carries it the right way)
+   (roll-yaw    float)          ;; guard: the roll's heading, the way the model faces while it rolls
    (tazing?     symbol)         ;; guard: the tazer arc is drawn
    (hover-y     float)          ;; jetpack: the height it holds in the air
    (locked?     symbol)         ;; the tazer locked a foe this frame (its automatic aim)
@@ -220,7 +219,6 @@
    (aim-foe     handle)         ;; foe under the crosshair (the tazer's: the locked foe), #f for none
    (dodge-until time-frame)     ;; guard: rolling until then (L2); once over, when it ended
    (dodge-time  time-frame)     ;; when the last roll started
-   (dodge-dir   float)          ;; its clip: 1.0 the sideways jump to the model's right, -1.0 to its left
    (roll-vel    vector :inline) ;; its velocity across
    (turn        float)          ;; model heading off the camera's, toward where it walks (`bf-avatar-motion`)
    (back?       symbol)         ;; it walks backward: its walk or run clip plays reversed
@@ -690,13 +688,12 @@
            (set! (-> self tazing?) #t)
            (change-mode bolt (lightning-mode lm1))
            (sound-play "guard-zap")
-           ;; the arm thrusts the tazer out and holds it there while the arc lasts
-           (let ((top (-> self skel top-anim)))
-             (if top
-                 (set! (-> top base-anim) (-> self draw art-group data BF_CLIP_TAZER_HOLD))
-                 )
-             )
-           (bf-avatar-top-play BF_CLIP_TAZER 0.0 -1.0 1.0 #f)
+           ;; the arm thrusts the tazer out: the stab on the upper body, played to its end and then
+           ;; blended back into the legs' clip, which goes on walking. Holding the stab's pose as the
+           ;; upper body's resting clip, then dropping it as the arc went out, cut it after 0.35 s:
+           ;; no stab was seen (the author's play)
+           (bf-avatar-top-stop)
+           (bf-avatar-top-play BF_CLIP_TAZER 0.0 -1.0 1.0 #t)
            )
          (set! (-> bolt spec) (-> *lightning-spec-id-table* 20))
          (set! (-> bolt state points-to-draw) 9)
@@ -710,12 +707,6 @@
        (if bolt
            (change-mode bolt (lightning-mode lm3))
            )
-       (let ((top (-> self skel top-anim)))
-         (when top
-           (set! (-> top base-anim) (-> self draw art-group data (-> (bf-class-art-of (-> self class)) idle)))
-           (set! (-> top interp) 0.0)
-           )
-         )
        )
       )
     )
@@ -1106,11 +1097,12 @@
 
 (defbehavior bf-avatar-dodge bf-avatar ((ground? symbol))
   "Guard classes, every frame. L2 rolls toward where the left stick points (ahead when it rests),
-   from the ground, BF_DODGE_DELAY after the last roll: the stock guard's roll (guard-states.gc
-   roll-right), a jump BF_DODGE_HOP high at BF_DODGE_SPEED, that speed kept every frame of it (Jak's
-   air control would bend it), with the guard's sideways jump clip toward the side of the roll, the
-   model turned so that clip carries it the roll's way (`roll-yaw`, `bf-avatar-place`). It ends as
-   Jak lands, BF_DODGE_TIME at most; no shot or close attack meanwhile. R2 held: the guard strafes
+   from the ground, BF_DODGE_DELAY after the last roll: a jump BF_DODGE_HOP high at BF_DODGE_SPEED
+   (the stock guard's roll speed, guard-states.gc roll-right), that speed kept every frame of it
+   (Jak's air control would bend it); the model faces the roll's way (`roll-yaw`) and turns head over
+   heels once in BF_ROLL_SPIN, tucked (`bf-avatar-place`, BF_CLIP_ROLL). The guards have no roll
+   clip: the stock roll is their sideways jump, which the author saw as a strafe. It ends as Jak
+   lands once the turn is done, BF_DODGE_TIME at most; no shot or close attack meanwhile. R2 held: the guard strafes
    (`strafe?`): it keeps facing ahead and sidesteps (`bf-avatar-pick-anim`). GROUND? is Jak
    standing. Side effects: Jak's velocity, the avatar's roll fields, the upper body's clip stopped."
   (let ((now (current-time)))
@@ -1119,8 +1111,8 @@
       ((< now (-> self dodge-until))
        (set! (-> *target* control transv x) (-> self roll-vel x))
        (set! (-> *target* control transv z) (-> self roll-vel z))
-       ;; landed: the hop left the ground at its start, so a few frames go by first
-       (if (and ground? (time-elapsed? (-> self dodge-time) (seconds 0.2)))
+       ;; landed, and the turn done
+       (if (and ground? (time-elapsed? (-> self dodge-time) BF_ROLL_SPIN))
            (set! (-> self dodge-until) now)
            )
        )
@@ -1129,27 +1121,12 @@
             (>= now (-> self melee-until))
             (>= now (+ (-> self dodge-until) BF_DODGE_DELAY))
             )
-       (let* ((dir (bf-stick-dir (new 'stack-no-clear 'vector)))
-              (right (bf-view-right (new 'stack-no-clear 'vector)))
-              )
+       (let ((dir (bf-stick-dir (new 'stack-no-clear 'vector))))
          (if (< (vector-length dir) 0.1)
              (bf-view-forward dir)
              )
          (vector-normalize! dir 1.0)
-         ;; the clip of the side the roll leans to: a heading grows to the left, so a model faces
-         ;; the roll's heading plus 90 degrees to have it on its right, minus 90 on its left
-         (let ((yaw (vector-y-angle dir)))
-           (cond
-             ((<= 0.0 (vector-dot dir right))
-              (set! (-> self dodge-dir) 1.0)
-              (set! (-> self roll-yaw) (+ yaw (degrees 90)))
-              )
-             (else
-               (set! (-> self dodge-dir) -1.0)
-               (set! (-> self roll-yaw) (- yaw (degrees 90)))
-               )
-             )
-           )
+         (set! (-> self roll-yaw) (vector-y-angle dir))
          (vector-float*! (-> self roll-vel) dir BF_DODGE_SPEED)
          (set! (-> self roll-vel w) 1.0)
          )
@@ -1631,8 +1608,8 @@
        (-> art special)
        )
       ((< (current-time) (-> self dodge-until))
-       ;; a guard's roll (`bf-avatar-dodge`)
-       (if (< 0.0 (-> self dodge-dir)) BF_CLIP_DODGE_RIGHT BF_CLIP_DODGE_LEFT)
+       ;; a guard's roll (`bf-avatar-dodge`), tucked
+       BF_CLIP_ROLL
        )
       ((and (-> self strafe?)
             (or (= (-> self side) 1) (= (-> self side) 2))
@@ -1712,7 +1689,20 @@
     (set! (-> dir y) 0.0)
     (cond
       ((< (current-time) (-> av dodge-until))
-       (quaternion-axis-angle! (-> av root quat) 0.0 1.0 0.0 (-> av roll-yaw))
+       ;; a guard's roll: facing its way, turned head over heels once in BF_ROLL_SPIN around its
+       ;; middle (half its height up), which stays where the feet would put it
+       (let ((k (fmin 1.0 (/ (the float (- (current-time) (-> av dodge-time))) (the float BF_ROLL_SPIN))))
+             (mid (* 0.5 (meters 1) (-> (bf-class-art-of (-> av class)) height)))
+             (c (new 'stack-no-clear 'vector))
+             )
+         (quaternion-axis-angle! (-> av root quat) 0.0 1.0 0.0 (-> av roll-yaw))
+         (quaternion-rotate-local-x! (-> av root quat) (-> av root quat) (* k 65536.0))
+         (set-vector! c 0.0 mid 0.0 1.0)
+         (vector-orient-by-quat! c c (-> av root quat))
+         (+! (-> av root trans x) (- (-> c x)))
+         (+! (-> av root trans y) (- mid (-> c y)))
+         (+! (-> av root trans z) (- (-> c z)))
+         )
        )
       ((and (< (current-time) (-> av shoot-until)) (< (meters 1) (vector-length dir)))
        (forward-up->quaternion (-> av root quat) (vector-normalize! dir 1.0) *y-vector*)
@@ -1869,10 +1859,8 @@
              )
            )
          )
-        ((and (< (current-time) (-> self dodge-until))
-              (or (= (-> self anim) BF_CLIP_DODGE_RIGHT) (= (-> self anim) BF_CLIP_DODGE_LEFT))
-              )
-         ;; a dodge's clip plays once and holds its end until Jak lands (`bf-avatar-dodge`)
+        ((and (< (current-time) (-> self dodge-until)) (= (-> self anim) BF_CLIP_ROLL))
+         ;; a roll's clip plays once and holds its end until Jak lands (`bf-avatar-dodge`)
          (ja :num! (seek!))
          )
         (else
