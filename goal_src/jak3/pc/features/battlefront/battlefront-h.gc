@@ -169,6 +169,8 @@
    (kills         int32)          ;; units the player killed in this battle (the HUD's counter)
    (tazer-time    time-frame)     ;; guard: the last tazer strike (BF_TAZER_RECHARGE before the next)
    (own-attack    float)          ;; damage (24 scale) of the player's attack being sent, -1.0 none
+   (bag-deaths    int32)          ;; unit deaths left in the pickup bag (`bf-queue-drop`), 0 for a new bag
+   (bag-drops     int32)          ;; pickups left in it
    )
   )
 
@@ -962,23 +964,31 @@
   )
 
 (defun bf-queue-drop ((proc process))
-  "Maybe leave a pickup where PROC died: 12 % yellow ammo (the rifle's reserve), 7 % red (grenades),
-   6 % health, 5 % dark eco (the jetpack's boost), else nothing (30 % in all; 67 % covered the
-   ground; no blue ammo: the tazer needs none). Queued for the director, which spawns it in its own
-   process (`bf-spawn-drops`): this runs on the traffic manager's small stack."
+  "Maybe leave a pickup where PROC died: 3 of every 10 fallen units leave one, in a random order (a
+   bag of 10 deaths holding 3 pickups: 30 % exactly, where a 30 % chance at each death gave 26 % in
+   two long battles), 12 in 30 yellow ammo (the rifle's reserve), 7 red (grenades), 6 health, 5
+   dark eco (the jetpack's boost); no blue ammo: the tazer needs none. Queued for the director,
+   which spawns it in its own process (`bf-spawn-drops`): this runs on the traffic manager's small
+   stack."
   (when (and (type? proc process-drawable) (< (-> *bf* drop-count) BF_DROP_MAX))
-    (let* ((roll (rand-vu-int-count 100))
-           (kind (cond
-                   ((< roll 12) (pickup-type ammo-yellow))
-                   ((< roll 19) (pickup-type ammo-red))
-                   ((< roll 25) (pickup-type health))
-                   ((< roll 30) (pickup-type eco-pill-dark))
-                   (else (pickup-type none))
-                   )
-                 )
-           )
-      (when (!= kind (pickup-type none))
-        (let ((i (-> *bf* drop-count)))
+    (when (<= (-> *bf* bag-deaths) 0)
+      (set! (-> *bf* bag-deaths) 10)
+      (set! (-> *bf* bag-drops) 3)
+      )
+    (let ((drop? (< (rand-vu-int-count (-> *bf* bag-deaths)) (-> *bf* bag-drops))))
+      (+! (-> *bf* bag-deaths) -1)
+      (when drop?
+        (+! (-> *bf* bag-drops) -1)
+        (let* ((roll (rand-vu-int-count 30))
+               (kind (cond
+                       ((< roll 12) (pickup-type ammo-yellow))
+                       ((< roll 19) (pickup-type ammo-red))
+                       ((< roll 25) (pickup-type health))
+                       (else (pickup-type eco-pill-dark))
+                       )
+                     )
+               (i (-> *bf* drop-count))
+               )
           (set! (-> *bf* drop-kind i) (the-as int kind))
           (vector-copy! (-> *bf* drop-pos i) (-> (the-as process-drawable proc) root trans))
           (+! (-> *bf* drop-count) 1)
