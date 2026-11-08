@@ -187,9 +187,16 @@
 
 (let ((gp-0 *default-nav-mesh*))
   (set! (-> gp-0 work) *nav-mesh-work*)
+  ;; MOD battlefront -- 255 users, not 128: every new traffic unit takes one here until it is first woken
+  ;; onto a street, and a battle's reset at a far point took more than 128 (the game crashed)
   (if (zero? (-> gp-0 user-list))
-      (set! (-> gp-0 user-list) (new 'global 'engine 'nav-engine 128 connection))
+      (set! (-> gp-0 user-list) (new 'global 'engine 'nav-engine 255 connection))
       )
+  ;; MOD battlefront -- its nav-controls too, before any unit takes one (max-nav-control-count is a uint8)
+  (when (= (-> gp-0 max-nav-control-count) 128)
+    (set! (-> gp-0 nav-control-array) (new 'global 'inline-array 'nav-control 255))
+    (set! (-> gp-0 max-nav-control-count) 255)
+    )
   (when (zero? (-> gp-0 poly-hash))
     (set! (-> gp-0 poly-hash) (new 'global 'grid-hash 16))
     (let ((v1-12 (new 'static 'inline-array vector 2 (new 'static 'vector) (new 'static 'vector))))
