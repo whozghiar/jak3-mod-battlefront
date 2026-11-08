@@ -142,8 +142,10 @@
    (prog-team  int32)          ;; the side capturing it, BF_TEAM_NONE for none
    (progress   float)          ;; seconds of capture so far, up to BF_CAPTURE_TIME
    (near       int32 2)        ;; units of each side within BF_POINT_RADIUS at the last count
-   (ship       handle)         ;; the troop transport serving it now, #f for none (battlefront-city.gc)
+   (ship       handle)         ;; the troop transport over it now, #f for none (battlefront-city.gc)
+   (old-ship   handle)         ;; the one leaving it after a capture: the new holder's waits for it to go
    (fight      float)          ;; seconds of a fight away from the player since its last losses
+   (snapped?   symbol)         ;; moved onto the open ground nearest it once its section loaded
    )
   )
 
@@ -215,6 +217,7 @@
    (combat-time   time-frame)     ;; the player's last shot, blow or hit taken, on the game clock (`bf-combat!`)
    (respawn-at    int32)          ;; the point a far respawn's reset brings the player to, -1 none
    (redeploy-ok?  symbol)         ;; the player may redeploy now (the director's clock; the START menu reads it)
+   (flicker-until time-frame)     ;; the player's spawn shield blinks his class model until then (game clock)
    (deaths        int32)          ;; the player's deaths in this battle
    (bag-deaths    int32)          ;; unit deaths left in the pickup bag (`bf-queue-drop`), 0 for a new bag
    (bag-drops     int32)          ;; pickups left in it
@@ -250,7 +253,22 @@
 ;; the points' ships: no process (a zero handle names process 0)
 (dotimes (i BF_POINT_MAX)
   (set! (-> *bf* points i ship) (the-as handle #f))
+  (set! (-> *bf* points i old-ship) (the-as handle #f))
+  (set! (-> *bf* points i snapped?) #f)
   )
+
+;; The units awake, for the respawn page's map (battlefront.gc `bf-draw-respawn-pick`): their
+;; places and sides, written twice a second by the Haven City side (battlefront-city.gc `bf-city-steer`).
+(defconstant BF_DOT_MAX 64)
+
+(deftype bf-unit-dots (structure)
+  ((count  int32)
+   (pos    vector BF_DOT_MAX :inline)
+   (team   int8   BF_DOT_MAX)
+   )
+  )
+
+(define *bf-unit-dots* (new 'static 'bf-unit-dots))
 
 ;; Set by the Mods menu. While it is on, START > Options shows Gamemode (the battle's pages);
 ;; turning it off during a battle loads the last save (battlefront.gc `bf-leave-to-save!`).

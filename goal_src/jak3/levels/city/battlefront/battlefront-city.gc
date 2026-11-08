@@ -286,9 +286,6 @@
 ;; Battle points on the streets
 ;; ---------------------------------------------------------------------------------------------
 
-(defconstant BF_SHIPS_PER_TEAM 2)   ;; troop transports one side has in the air at once at most
-(defconstant BF_SHIP_SHORT 3)       ;; a side sends one when it lacks this many units at least
-
 (define *bf-city-hatch* (new 'static 'vector))
 
 (defun bf-city-hatch-dir ((pos vector))
@@ -327,69 +324,49 @@
 (define *bf-city-spot* (new 'static 'vector))
 
 (defun bf-city-transports ()
-  "Twice a second: a side whose units awake (bf-transport.gc `bf-transport-team-count`), plus those
-   its ships still carry, fall BF_SHIP_SHORT or more short of its caps (*bf-team-caps*) sends a troop
-   transport to the point it holds (its base, or a control point) nearest the player with no ship
-   over it yet, BF_SHIPS_PER_TEAM ships at most: units come in where the player fights. The point's
-   section must be loaded (battlefront.gc `bf-point-live?`), and the ship comes down over a spot
-   near it with nothing above (bf-transport.gc `bf-transport-spot`): it no longer goes through a
-   roof or a bridge. A point's ship handle is cleared once the ship is gone. The ships are the
-   director's children."
-  (let ((parent (the-as process (handle->process (-> *bf* director))))
-        (counts (new 'stack-no-clear 'array 'int32 4))
-        )
+  "Twice a second, for each battle point in a loaded section (battlefront.gc `bf-point-live?`):
+   - not moved yet: onto the open ground nearest it (bf-transport.gc `bf-transport-spot`: ground,
+     a nav mesh, nothing above up to 60 m), so the point stands in the open and its ship hovers
+     right over it, through no roof or bridge;
+   - held: a troop transport of its holder stationed over it, its side's place to bring units
+     (bf-transport.gc: it drops them while the side lacks some, and stays);
+   - taken by the other side: its ship leaves (`'leave`), and the new holder's comes once it has
+     gone (`old-ship`).
+   A point's ship leaves too when its section unloads. The ships are the director's children."
+  (let ((parent (the-as process (handle->process (-> *bf* director)))))
     (when (and parent *target* (bf-fighting?))
-      (dotimes (team 2)
-        (let ((ships 0)
-              (carried 0)
-              (cap 0)
-              )
-          (dotimes (i (-> *bf* point-count))
-            (let ((ship (handle->process (-> *bf* points i ship))))
-              (cond
-                ((not ship)
-                 (set! (-> *bf* points i ship) (the-as handle #f))
-                 )
-                ((= (-> (the-as bf-transport ship) team) team)
-                 (+! ships 1)
-                 (+! carried (the-as int (send-event ship 'units-left)))
-                 )
-                )
+      (dotimes (i (-> *bf* point-count))
+        (let* ((pt (-> *bf* points i))
+               (live? (bf-point-live? pt))
+               (ship (handle->process (-> pt ship)))
+               )
+          (when (and live? (not (-> pt snapped?)))
+            (set! (-> pt snapped?) #t)
+            (when (bf-transport-spot (-> pt pos) *bf-city-spot*)
+              (format 0 "battlefront: point ~D moved ~M onto open ground~%" i (vector-vector-distance (-> pt pos) *bf-city-spot*))
+              (vector-copy! (-> pt pos) *bf-city-spot*)
               )
             )
-          (dotimes (k BF_KIND_COUNT)
-            (+! cap (-> *bf-team-caps* (+ (* 4 team) k)))
-            )
-          (when (and (< ships BF_SHIPS_PER_TEAM)
-                     (<= BF_SHIP_SHORT (- cap (bf-transport-team-count team counts) carried))
-                     )
-            (let ((best -1)
-                  (best-d 0.0)
-                  )
-              (dotimes (i (-> *bf* point-count))
-                (let ((pt (-> *bf* points i)))
-                  (when (and (= (-> pt owner) team) (not (handle->process (-> pt ship))) (bf-point-live? pt))
-                    (let ((d (vector-vector-xz-distance (-> pt pos) (-> *target* control trans))))
-                      (when (and (or (< best 0) (< d best-d)) (bf-transport-spot (-> pt pos) *bf-city-spot*))
-                        (set! best i)
-                        (set! best-d d)
-                        )
+          (cond
+            ((and ship (or (not live?) (!= (-> (the-as bf-transport ship) team) (-> pt owner))))
+             (send-event ship 'leave)
+             (set! (-> pt old-ship) (-> pt ship))
+             (set! (-> pt ship) (the-as handle #f))
+             (format 0 "battlefront: the ship over point ~D leaves~%" i)
+             )
+            ((and (not ship) live? (>= (-> pt owner) 0) (not (handle->process (-> pt old-ship))))
+             (when (bf-transport-spot (-> pt pos) *bf-city-spot*)
+               (let* ((hatch (bf-city-hatch-dir *bf-city-spot*))
+                      (new-ship (bf-transport-spawn parent *bf-city-spot* (-> pt owner) i hatch))
                       )
-                    )
-                  )
-                )
-              (when (and (>= best 0) (bf-transport-spot (-> *bf* points best pos) *bf-city-spot*))
-                (let* ((hatch (bf-city-hatch-dir *bf-city-spot*))
-                       (ship (bf-transport-spawn parent *bf-city-spot* team best hatch))
-                       )
-                  (when ship
-                    (set! (-> *bf* points best ship) (process->handle ship))
-                    (format 0 "battlefront: side ~D transport to point ~D, hatch ~A~%" team best
-                            (if hatch 'onto-the-street 'toward-the-player))
-                    )
-                  )
-                )
-              )
+                 (when new-ship
+                   (set! (-> pt ship) (process->handle new-ship))
+                   (format 0 "battlefront: side ~D ship over point ~D, ~M from it~%" (-> pt owner) i
+                           (vector-vector-xz-distance *bf-city-spot* (-> pt pos)))
+                   )
+                 )
+               )
+             )
             )
           )
         )
@@ -399,13 +376,19 @@
   )
 
 (defun bf-city-ships-down ()
-  "Every troop transport of the battle gone at once (the battle's end)."
+  "Every troop transport of the battle gone at once (the battle's end, a regroup)."
   (dotimes (i BF_POINT_MAX)
-    (let ((ship (handle->process (-> *bf* points i ship))))
+    (let ((ship (handle->process (-> *bf* points i ship)))
+          (old (handle->process (-> *bf* points i old-ship)))
+          )
       (if ship
           (deactivate ship)
           )
+      (if old
+          (deactivate old)
+          )
       (set! (-> *bf* points i ship) (the-as handle #f))
+      (set! (-> *bf* points i old-ship) (the-as handle #f))
       )
     )
   (none)
@@ -570,17 +553,27 @@
   )
 
 (defun bf-city-steer ()
-  "Twice a second: each unit of the battle on a lane takes its lanes with `bf-city-choose-branch`
+  "Twice a second: the units awake into `*bf-unit-dots*` (the respawn page's map); each unit of the
+   battle on a lane takes its lanes with `bf-city-choose-branch`
    (its controller's choose-branch-callback, the stock random pick otherwise): one in two defends
    the nearest control point its side holds here, the others march on the nearest it does not, and
    each fights what it meets on the way (the attack controller). The unit pools are rebuilt with
    the stock callback at each end of a battle (`initialize!` 'life)."
-  (let ((te *traffic-engine*))
+  (let ((te *traffic-engine*)
+        (dots *bf-unit-dots*)
+        )
+    (set! (-> dots count) 0)
     (when (and te (nonzero? te))
       (dotimes (ti 2)
         (let ((tr (-> te tracker-array ti)))
           (dotimes (i (-> tr active-object-count))
             (let ((proc (handle->process (-> tr active-object-list i))))
+              ;; the units awake for the respawn page's map, live (`*bf-unit-dots*`)
+              (when (and proc (>= (bf-unit-team proc) 0) (< (-> dots count) BF_DOT_MAX))
+                (vector-copy! (-> dots pos (-> dots count)) (-> (the-as process-drawable proc) root trans))
+                (set! (-> dots team (-> dots count)) (bf-unit-team proc))
+                (+! (-> dots count) 1)
+                )
               (when (and proc (type? proc citizen) (>= (bf-unit-team proc) 0))
                 (let ((ctrl (-> (the-as citizen proc) controller)))
                   (if (!= (-> ctrl choose-branch-callback) bf-city-choose-branch)

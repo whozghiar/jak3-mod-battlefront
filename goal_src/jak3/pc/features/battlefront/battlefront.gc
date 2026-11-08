@@ -183,7 +183,8 @@
 (defun bf-page-count ((page int))
   "Number of choices of PAGE."
   (cond
-    ((= page BF_PAGE_ZONE) BF_ZONE_COUNT)
+    ;; the war zones, then Spargus, to come (grey, refused)
+    ((= page BF_PAGE_ZONE) (+ BF_ZONE_COUNT 1))
     ((= page BF_PAGE_TEAM) BF_TEAM_COUNT)
     ;; the Freedom League's third and fourth classes, the Spargus Citizen and Jak, are no longer
     ;; playable
@@ -195,7 +196,7 @@
 (defun bf-page-label ((page int) (team int) (i int))
   "Label of choice I of PAGE (TEAM picks the classes)."
   (cond
-    ((= page BF_PAGE_ZONE) (bf-zone-name i))
+    ((= page BF_PAGE_ZONE) (if (< i BF_ZONE_COUNT) (bf-zone-name i) (bf-tr "Spargus (coming soon)" "Spargus (à venir)")))
     ((= page BF_PAGE_TEAM) (bf-team-name i))
     ((= page BF_PAGE_CLASS) (bf-class-name (+ (* team 4) i)))
     (else "")
@@ -205,7 +206,13 @@
 (defun bf-page-desc ((page int) (team int) (i int))
   "Description of choice I of PAGE."
   (cond
-    ((= page BF_PAGE_ZONE) (bf-tr (-> *bf-zones* i desc) (-> *bf-zones* i desc-fr)))
+    ((= page BF_PAGE_ZONE) (if (< i BF_ZONE_COUNT)
+                               (bf-tr (-> *bf-zones* i desc) (-> *bf-zones* i desc-fr))
+                               (bf-tr "The Wastelanders' desert city: coming in a later version."
+                                      "La ville du désert des Wastelanders : dans une prochaine version."
+                                      )
+                               )
+     )
     ((= page BF_PAGE_TEAM) (if (= i BF_TEAM_FF)
                                (bf-tr "Blue guards and jetpack guards."
                                       "Gardes bleus et gardes à jetpack."
@@ -432,7 +439,11 @@
                       (+ 122.0 (* 22.0 (the float i)))
                       ;; the class names are longer ("Red Krimzon Guard (Jetpack)" ran past the panel)
                       (if (= page BF_PAGE_CLASS) 0.43 0.5)
-                      (if (= i (-> self cursor)) (font-color cyan) (font-color default))
+                      (cond
+                        ((and (= page BF_PAGE_ZONE) (>= i BF_ZONE_COUNT)) (font-color menu-invalid))
+                        ((= i (-> self cursor)) (font-color cyan))
+                        (else (font-color default))
+                        )
                       #f)
             )
           (if (= page BF_PAGE_CLASS)
@@ -449,9 +460,17 @@
                       (else (bf-tr "<PAD_X> Deploy" "<PAD_X> Déployer"))
                       )
                     54.0 330.0 0.4 (font-color default) #f)
-          (if (!= page BF_PAGE_CLASS)
+          (cond
+            ((= page BF_PAGE_CLASS)
+             0
+             )
+            ((and (= page BF_PAGE_ZONE) (>= (-> self cursor) BF_ZONE_COUNT))
+             (bf-draw-text buf (bf-tr "Coming soon" "À venir") 373.0 200.0 0.6 (font-color menu-invalid) #t)
+             )
+            (else
               (bf-draw-zone-marks buf (if (= page BF_PAGE_ZONE) (-> self cursor) (-> self pick-zone)))
               )
+            )
           )
         )
       )
@@ -848,6 +867,8 @@
       (set! (-> pt prog-team) BF_TEAM_NONE)
       (set! (-> pt progress) 0.0)
       (set! (-> pt fight) 0.0)
+      (set! (-> pt snapped?) #f)
+      (set! (-> pt old-ship) (the-as handle #f))
       (set! (-> pt near 0) 0)
       (set! (-> pt near 1) 0)
       (set! (-> pt ship) (the-as handle #f))
@@ -1149,7 +1170,8 @@
 (defun bf-draw-respawn-pick ((buf dma-buffer))
   "The player's choice of respawn point at each death or redeploy (`bf-target-death`): the whole
    city's map in the right frame, each point a dot of its holder's color, the one picked large and
-   blinking; on the left its name and how to pick."
+   blinking, and the units awake as small dots of their side's color, live; on the left its name
+   and how to pick."
   (let ((zone (-> *bf* zone))
         (pick (-> *bf* respawn-pick))
         )
@@ -1181,6 +1203,14 @@
             )
         (bf-zone-dot buf zone (-> pt pos) (if (= i pick) 11 7) rgba)
         )
+      )
+    ;; the units awake, live: small dots of their side's color (`*bf-unit-dots*`)
+    (dotimes (i (-> *bf-unit-dots* count))
+      (bf-zone-dot buf zone (-> *bf-unit-dots* pos i) 3 (if (= (-> *bf-unit-dots* team i) BF_TEAM_FF)
+                                                         (static-rgba 90 160 255 128)
+                                                         (static-rgba 255 90 90 128)
+                                                         )
+                   )
       )
     )
   (none)
@@ -1241,6 +1271,19 @@
   (get-continue-by-name *game-info*
                         (if (= team BF_TEAM_FF) (-> *bf-zones* zone ff-continue) (-> *bf-zones* zone kg-continue))
                         )
+  )
+
+(defconstant BF_SPAWN_SHIELD (seconds 3)) ;; invulnerable this long after a deployment or a respawn
+
+(defun bf-spawn-shield ()
+  "The player just deployed or respawned: invulnerable for BF_SPAWN_SHIELD (`target-timed-invulnerable`),
+   his class model blinking meanwhile (`*bf*` flicker-until, battlefront-player.gc
+   `bf-avatar-blink`), then steady."
+  (when *target*
+    (target-timed-invulnerable BF_SPAWN_SHIELD *target* 1)
+    (set! (-> *bf* flicker-until) (+ (-> *display* game-clock frame-counter) BF_SPAWN_SHIELD))
+    )
+  (none)
   )
 
 (defun bf-refill-ammo ()
@@ -1540,7 +1583,7 @@
 (defbehavior bf-respawn-at-point bf-director ()
   "After a far respawn's reset (`bf-target-death`): once Jak stands at the point's continue point,
    its levels in, move him onto the point (`*bf*` respawn-at), with his class's full health, a fresh
-   loadout, two seconds of invulnerability and the camera on him; the point is the safe place of a
+   loadout, the spawn shield (`bf-spawn-shield`) and the camera on him; the point is the safe place of a
    fall. The director draws his class again on its own (`want-avatar?`)."
   (when (and (>= (-> *bf* respawn-at) 0)
              *target*
@@ -1559,7 +1602,7 @@
       (set! (-> *bf* safe-time) 0)
       (set! (-> *target* fact health) (bf-class-health (-> *bf* class)))
       (bf-refill-ammo)
-      (target-timed-invulnerable (seconds 2) *target* 1)
+      (bf-spawn-shield)
       (send-event *camera* 'teleport)
       )
     )
@@ -1738,6 +1781,11 @@
         (i (-> self cursor))
         )
     (cond
+      ((and (= page BF_PAGE_ZONE) (>= i BF_ZONE_COUNT))
+       ;; Spargus, to come: refused
+       (sound-play "menu-back")
+       (return #f)
+       )
       ((= page BF_PAGE_ZONE)
        (set! (-> self pick-zone) i)
        (bf-open-page BF_PAGE_TEAM)
@@ -1771,6 +1819,7 @@
        (set! (-> self refill?) #f)
        (set! (-> self want-avatar?) #t)
        (bf-avatar-kill)
+       (bf-spawn-shield)
        )
       ((= page BF_PAGE_RESULT)
        (bf-close-page)
@@ -1822,7 +1871,7 @@
   (when (!= (-> self page) BF_PAGE_NONE)
     (bf-preview-update)
     (bf-draw-page)
-    (if (or (= (-> self page) BF_PAGE_ZONE) (= (-> self page) BF_PAGE_TEAM))
+    (if (or (and (= (-> self page) BF_PAGE_ZONE) (< (-> self cursor) BF_ZONE_COUNT)) (= (-> self page) BF_PAGE_TEAM))
         (bf-draw-zone-minimap (if (= (-> self page) BF_PAGE_ZONE) (-> self cursor) (-> self pick-zone)))
         )
     )
@@ -2253,7 +2302,7 @@
    (`bf-spectate-follow`) while the HUD counts down (`bf-draw-hud`); then he picks his respawn point
    on the city's map, his side's base or a control point it holds (`bf-draw-respawn-pick`), and is
    back there once its levels are loaded, facing the battlefield, alive, full health, with a fresh
-   loadout and two seconds of invulnerability, and the director draws his class again. MODE
+   loadout and three seconds of invulnerability, his class model blinking (`bf-spawn-shield`), and the director draws his class again. MODE
    'bf-redeploy (the START menu's Redeploy, out of combat for BF_REDEPLOY_CALM): no loss and no
    wait, the respawn page at once. The world runs on meanwhile. The stock death freezes the
    enemies (a 'process-mask setting), may play a death movie, and its reset ('life, `initialize!`)
@@ -2389,7 +2438,7 @@
       (send-event *camera* 'teleport-to-vector-start-string cam)
       )
     )
-  (target-timed-invulnerable (seconds 2) self 1)
+  (bf-spawn-shield)
   (go target-stance)
   (none)
   )

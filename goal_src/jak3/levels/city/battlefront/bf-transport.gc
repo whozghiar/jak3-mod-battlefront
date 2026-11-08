@@ -289,9 +289,9 @@
              )
            (format 0 "battlefront: side ~D unit dropped to guard control point ~D~%" (-> this team) (-> this point))
            )
-         (when (< (-> this count-units) BF_TRANSPORT_MAX_UNITS)
-           (set! (-> this drops (-> this count-units)) (process->handle (-> params proc)))
-           (set-time! (-> this drop-at (-> this count-units)))
+         (let ((slot (mod (the-as int (-> this count-units)) BF_TRANSPORT_MAX_UNITS)))
+           (set! (-> this drops slot) (process->handle (-> params proc)))
+           (set-time! (-> this drop-at slot))
            )
          (set! (-> this spawn-side) (- 1 (the-as int (-> this spawn-side))))
          (+! (-> this count-units) 1)
@@ -579,7 +579,7 @@
          )
      )
     (('units-left)
-     (- (-> self max-units) (-> self count-units))
+     0
      )
     )
   )
@@ -618,8 +618,8 @@
     )
   )
 
-;; Arrived: opens its hatch and drops its units; takes off 3 s after its last one, or after 6 s
-;; without one (its side lacks none, or none of its side sleeps), or once the battle is over.
+;; Arrived: opens its hatch and stays over its point, dropping a unit whenever its side lacks one
+;; (`drop-unit`); takes off when told to ('leave) or once the battle is over.
 (defstate idle (bf-transport)
   :virtual #t
   :event bf-transport-event-handler
@@ -649,12 +649,9 @@
       )
     (quaternion-slerp! (-> self root quat) (-> self root quat) (-> self want-quat) (fmin 1.0 (* 3.0 (seconds-per-frame))))
     (bf-transport-release self #f)
-    (when (and (zero? (-> self leave-time))
-               (or (>= (-> self count-units) (-> self max-units))
-                   (time-elapsed? (-> self last-drop-time) (seconds 6))
-                   (not (bf-fighting?))
-                   )
-               )
+    ;; stationed over its point: it leaves when told (`'leave`: the point lost, its section unloaded)
+  ;; or once the battle is over
+  (when (and (zero? (-> self leave-time)) (not (bf-fighting?)))
       (set! (-> self leave-time) (+ (current-time) (seconds 3)))
       (set! (-> self spawn?) #f)
       )

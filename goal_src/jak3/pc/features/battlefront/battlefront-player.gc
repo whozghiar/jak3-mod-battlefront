@@ -216,7 +216,8 @@
    (locked?     symbol)         ;; the tazer locked a foe this frame (its automatic aim)
    (bolt        lightning-control) ;; guard: the tazer arc, #f for the other classes
    (gun-jm      joint-mod)      ;; guard: scales its weapon joint (the tazer's look), #f for the other classes
-   (aim-jm      joint-mod)      ;; guard: turns its upper body toward the aim while it fires, #f for the other classes
+   (aim-jm      joint-mod)      ;; turns the upper body toward the aim while it fires (guards, jetpacks, robotguard), #f for the spider
+   (blink?      symbol)         ;; hidden by the spawn shield's blinking now (`bf-avatar-blink`)
    (aim-foe     handle)         ;; foe under the crosshair (the tazer's: the locked foe), #f for none
    (dodge-until time-frame)     ;; guard: rolling until then (L2); once over, when it ended
    (dodge-time  time-frame)     ;; when the last roll started
@@ -1068,9 +1069,9 @@
   )
 
 (defbehavior bf-avatar-aim-torso bf-avatar ()
-  "Guard classes, every frame: while the weapon fires (and 0.3 s after), the upper body turns
-   toward the aim point, so the shooting clip points the weapon where the crosshair is; otherwise
-   it eases back. The stock guards' own aim, copied (guard.gc crimson-guard-method-259 and 260): a
+  "Every class that shoots, every frame: while the weapon fires (and 0.3 s after), the upper body
+   turns toward the aim point, so the shooting clip points the weapon where the crosshair is;
+   otherwise it eases back. The stock guards' own aim, copied (guard.gc crimson-guard-method-259 and 260): a
    polar-look-at joint-mod on node 4 (swivelMe) turned in world space about the model's x and y
    axes, 80 degrees at most each, from 2 m up and 0.5 m to the side (the gun's shoulder), eased
    at 5 a second. Does nothing without the joint-mod."
@@ -1113,6 +1114,30 @@
           (quaternion-pseudo-seek (-> jm quat) (-> jm quat) *unity-quaternion* (seconds-per-frame))
           )
         )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-blink bf-avatar ()
+  "The spawn shield (battlefront.gc `bf-spawn-shield`): until `*bf*` flicker-until the class model
+   blinks, hidden one tenth of a second in two; after it, shown steady again. Only its own hiding is
+   undone (`blink?`): the pages on black hide it too."
+  (let ((now (-> *display* game-clock frame-counter)))
+    (cond
+      ((< now (-> *bf* flicker-until))
+       (let ((hide? (logtest? (/ now (seconds 0.1)) 1)))
+         (if hide?
+             (logior! (-> self draw status) (draw-control-status no-draw))
+             (logclear! (-> self draw status) (draw-control-status no-draw))
+             )
+         (set! (-> self blink?) hide?)
+         )
+       )
+      ((-> self blink?)
+       (logclear! (-> self draw status) (draw-control-status no-draw))
+       (set! (-> self blink?) #f)
+       )
       )
     )
   (none)
@@ -1319,10 +1344,11 @@
           )
       (bf-avatar-pick-weapon)
       (bf-avatar-gun-look)
-      (bf-avatar-aim-torso)
       (bf-avatar-top-update)
       (bf-clamp-ammo)
       )
+    (bf-avatar-aim-torso)
+    (bf-avatar-blink)
     ;; speed of the class (Jak's surfaces read it every frame)
     (set! (-> *setting-control* user-default speed-mult) speed)
     (set! (-> self was-ground?) ground?)
@@ -1989,6 +2015,12 @@
   (set! (-> self bolt) (the-as lightning-control #f))
   (set! (-> self gun-jm) (the-as joint-mod #f))
   (set! (-> self aim-jm) (the-as joint-mod #f))
+  (set! (-> self blink?) #f)
+  ;; every class that shoots turns its upper body toward the aim while it fires (`bf-avatar-aim-torso`):
+  ;; node 4 is the guard's swivelMe, the jetpack guard's and the robotguard's chest
+  (if (and (!= class BF_CLASS_SPYDROID) (< 4 (-> self node-list length)))
+      (set! (-> self aim-jm) (new 'process 'joint-mod (joint-mod-mode polar-look-at) self 4))
+      )
   (when (bf-guard-class? class)
     (set! (-> self bolt) (new 'process 'lightning-control (-> *lightning-spec-id-table* 19) self 0.0))
     (set! (-> self bolt state points-to-draw) 0)
@@ -1997,9 +2029,6 @@
         (set! (-> self gun-jm) (new 'process 'joint-mod (joint-mod-mode joint-set*) self BF_GUARD_GUN_NODE))
         )
     ;; the upper body turned toward the aim while firing (`bf-avatar-aim-torso`), as the stock guards
-    (if (< 4 (-> self node-list length))
-        (set! (-> self aim-jm) (new 'process 'joint-mod (joint-mod-mode polar-look-at) self 4))
-        )
     ;; the weapon clips play on the upper body (`bf-avatar-top-play`); its resting clip is the idle,
     ;; never none (top-anim falls back to it between two clips)
     (let ((top (new 'process 'top-anim-joint-control self)))
