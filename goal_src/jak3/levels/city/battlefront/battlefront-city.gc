@@ -19,22 +19,18 @@
   dies (no look again), the player twice as hated as a unit by the other side and not at all by his
   own. The changed entries are saved first and written back when the battle ends.
 
-  Battle points: three control points on the zone's lanes between the two bases
-  (`bf-city-place-points`); the units with no foe march on their side's nearest point it does not
-  hold (`bf-city-steer`); each side's troop transports (bf-transport.gc) bring its units to the
-  points it holds, the nearest the player first (`bf-city-transports`): during a fight the traffic
-  wakes none of the battle's units by itself (battlefront-h.gc `bf-wake-count`). The force field is
-  drawn as security walls across the streets leaving the zone (`bf-city-walls`).
+  Battle points: the bases and a control point in each district (battlefront-h.gc
+  `*bf-point-defs*`); the units take their lanes toward the nearest point their side holds, to
+  defend it, or toward the nearest it does not (`bf-city-steer`, `bf-city-choose-branch`); each side's troop transports (bf-transport.gc) bring
+  its units to the points it holds in the sections loaded, the nearest the player first
+  (`bf-city-transports`): during a fight the traffic wakes none of the battle's units by itself
+  (battlefront-h.gc `bf-wake-count`). The battlefield is the whole city: no force field.
 
   No Spargus citizen fights here: wastelanders brought into Haven City by the traffic engine froze
   or crashed the game within minutes (in the background collision query
   fill-bg-using-line-sphere-new, seen in two of two ten-minute battles; none in a battle without
   them). The Spargus Citizen class is gone too: nothing of the wastelanders loads in Haven City.
 |#
-
-;; ctywide-obs.gc, linked after this file in CWI: a force field wall (security-wall-child) between A
-;; and B on the ground, HEIGHT tall, child of the process given
-(define-extern spawn-security-wall (function process vector vector float symbol handle))
 
 ;; DECOMP BEGINS
 
@@ -60,7 +56,6 @@
    (faction-time   time-frame) ;; last re-application of the battle's faction commands
    (reinforce-time time-frame) ;; last look at the sides' troop transports (`bf-city-transports`)
    (retarget-time  time-frame) ;; last look at the units near the player (`bf-city-retarget`)
-   (want-mesh      nav-mesh)   ;; the nav mesh `bf-city-point-segment` looks a segment on
    )
   )
 
@@ -246,19 +241,17 @@
   )
 
 (defun bf-city-zone-branch? ((branch nav-branch))
-  "#t when nav BRANCH (a lane of a segment, or the one a unit walks) belongs to a section of the
-   battle's zone: it lies in that section's nav-graph branch array (the traffic engine patches
-   each segment's branch to point there, traffic-engine.gc level-link). A lane of a section next
-   to the zone, which the game loads at its edge, is not one. #f for a missing branch."
+  "#t when nav BRANCH (a lane of a segment, or the one a unit walks) belongs to a city section
+   loaded now: it lies in that section's nav-graph branch array (the traffic engine patches each
+   segment's branch to point there, traffic-engine.gc level-link). The whole city is the
+   battlefield. #f for a missing branch."
   (let ((addr (the-as uint branch))
         (found #f)
         )
     (when (and branch (nonzero? addr))
-      (dotimes (i 2)
-        (let* ((name (if (zero? i) (-> *bf-zones* (-> *bf* zone) level0) (-> *bf-zones* (-> *bf* zone) level1)))
-               (lev (if name (level-get *level* name)))
-               )
-          (when (and lev (= (-> lev status) 'active) (nonzero? (-> lev bsp city-level-info)))
+      (dotimes (i (-> *level* length))
+        (let ((lev (-> *level* level i)))
+          (when (and (= (-> lev status) 'active) (nonzero? (-> lev bsp)) (nonzero? (-> lev bsp city-level-info)))
             (let ((graph (-> lev bsp city-level-info nav-graph)))
               (if (and (nonzero? graph)
                        (>= addr (the-as uint (-> graph branch-array 0)))
@@ -279,10 +272,9 @@
   "Called by the traffic engine (traffic-engine.gc, its per-frame check of the awake pedestrians)
    for UNIT outside the cells it keeps awake, the ones its camera's visibility marks: the stock
    sends such a unit back to its pool. During a fight, #t keeps it awake wherever the camera is
-   while it walks a lane of the zone (`bf-city-zone-branch?`): units vanished out of the camera's
-   view (the author's notes), and with them the fight the reserves count. One on a lane of the
-   next section goes back to its pool as in the stock (no death: the reserves keep it), since that
-   section unloads as the player walks away. One on no lane (a flying unit) stays awake."
+   while it walks a lane of a loaded section (`bf-city-zone-branch?`): units vanished out of the
+   camera's view (the author's notes), and with them the fight the reserves count. One on no lane
+   (a flying unit) stays awake."
   (and (bf-fighting?)
        (let ((branch (-> (the-as citizen unit) controller branch)))
          (or (not branch) (zero? (the-as uint branch)) (bf-city-zone-branch? branch))
@@ -291,253 +283,7 @@
   )
 
 ;; ---------------------------------------------------------------------------------------------
-;; Battle points on the streets, the force field's walls
-;; ---------------------------------------------------------------------------------------------
-
-(defun bf-city-near-segment ((found traffic-find-segment-struct) (seg nav-segment))
-  "Callback of `bf-city-snap`: keep the segment of the zone (`bf-city-zone-branch?`) whose line
-   passes nearest the point `found` carries in `dir`, on the nav mesh `*bf-city-saved*` want-mesh
-   when one is set."
-  (when (and (nonzero? (-> seg nav-mesh-id))
-             (bf-city-zone-branch? (-> seg branch))
-             (or (not (-> *bf-city-saved* want-mesh))
-                 (= (get-nav-mesh (the-as actor-id (-> seg nav-mesh-id))) (-> *bf-city-saved* want-mesh))
-                 )
-             )
-    (let ((d (vector-segment-distance-point! (-> found dir) (-> seg vertex 0) (-> seg vertex 1) (the-as vector #f))))
-      (when (< (-> found best-rating) (- d))
-        (set! (-> found best-rating) (- d))
-        (set! (-> found best-seg) seg)
-        )
-      )
-    )
-  (none)
-  )
-
-(defun bf-city-point-segment ((pos vector) (mesh nav-mesh) (radius float))
-  "The segment of the zone's lanes nearest POS within RADIUS, on nav mesh MESH (#f: any), from the
-   pedestrians' tracker; #f for none."
-  (let ((te *traffic-engine*)
-        (found (new 'stack-no-clear 'traffic-find-segment-struct))
-        (sphere (vector-copy! (new 'stack-no-clear 'vector) pos))
-        )
-    (when (and te (nonzero? te))
-      (set! (-> sphere w) radius)
-      (vector-copy! (-> found dir) pos)
-      (set! (-> found best-rating) -100000000.0)
-      (set! (-> found best-seg) #f)
-      (set! (-> *bf-city-saved* want-mesh) mesh)
-      (callback-on-nav-segments-in-sphere te sphere 1 found bf-city-near-segment)
-      (set! (-> *bf-city-saved* want-mesh) #f)
-      (-> found best-seg)
-      )
-    )
-  )
-
-(deftype bf-point-pick (structure)
-  "The best lane spot found so far for each control point (`bf-city-place-points`)."
-  ((pos     vector 3 :inline)
-   (rating  float 3)
-   )
-  )
-
-(define *bf-point-pick* (new 'static 'bf-point-pick))
-
-(defun bf-city-point-candidate ((found traffic-find-segment-struct) (seg nav-segment))
-  "Callback of `bf-city-place-points`: the middle of a lane segment of the zone (pedestrians'
-   tracker, `bf-city-zone-branch?`), 40 m or more from both spawns, is a candidate for the control
-   point whose share of the way from the Freedom League's spawn to the Krimzon Guard's (its distance
-   to the first over the sum of both) is within 0.08 of a quarter, a half, three quarters; of those,
-   the one on the shortest way between the spawns (the least sum) wins."
-  (when (and (nonzero? (-> seg nav-mesh-id)) (bf-city-zone-branch? (-> seg branch)))
-    (let* ((mid (vector-lerp! (new 'stack-no-clear 'vector) (-> seg vertex 0) (-> seg vertex 1) 0.5))
-           (d0 (vector-vector-xz-distance mid (-> *bf* spawn 0)))
-           (d1 (vector-vector-xz-distance mid (-> *bf* spawn 1)))
-           (share (/ d0 (fmax 1.0 (+ d0 d1))))
-           (pick *bf-point-pick*)
-           )
-      (when (and (< (meters 40) d0) (< (meters 40) d1))
-        (dotimes (k 3)
-          (when (and (< (fabs (- share (* 0.25 (the float (+ k 1))))) 0.08) (< (-> pick rating k) (- (+ d0 d1))))
-            (set! (-> pick rating k) (- (+ d0 d1)))
-            (vector-copy! (-> pick pos k) mid)
-            (set! (-> pick pos k w) 1.0)
-            )
-          )
-        )
-      )
-    )
-  (none)
-  )
-
-(defun bf-city-place-points ()
-  "The control points of a new fight on the zone's streets: each on a lane where units walk and
-   transports find ground and a nav mesh, a quarter, half and three quarters of the way from the
-   Freedom League's spawn to the Krimzon Guard's, on the shortest way between them
-   (`bf-city-point-candidate`): a straight line between the spawns crossed the Port's water. A
-   point with no lane found keeps the place `bf-points-setup` gave it."
-  (let ((te *traffic-engine*)
-        (found (new 'stack-no-clear 'traffic-find-segment-struct))
-        (pick *bf-point-pick*)
-        )
-    (when (and te (nonzero? te))
-      (dotimes (k 3)
-        (set! (-> pick rating k) -100000000.0)
-        )
-      (callback-on-nav-segments-in-sphere te (-> *bf* center) 1 found bf-city-point-candidate)
-      (dotimes (k 3)
-        (when (and (< (+ 2 k) (-> *bf* point-count)) (< -100000000.0 (-> pick rating k)))
-          (vector-copy! (-> *bf* points (+ 2 k) pos) (-> pick pos k))
-          (format 0 "battlefront: point ~D at ~M ~M ~M~%" (+ 2 k) (-> pick pos k x) (-> pick pos k y) (-> pick pos k z))
-          )
-        )
-      )
-    )
-  (none)
-  )
-
-(defconstant BF_WALL_WIDTH (meters 30))   ;; a force field wall across a street
-(defconstant BF_WALL_HEIGHT (meters 40))
-(defconstant BF_WALL_SINK (meters 10))    ;; the wall's foot below its exit node: a street sloping down into the zone
-(defconstant BF_WALL_MERGE (meters 30))   ;; lane exits this close make one wall
-
-(deftype bf-wall-exits (structure)
-  "The zone's lane exits (`bf-city-walls`): for up to 16 streets, the sum of their exits' places and
-   directions, and how many."
-  ((count   int32)
-   (pos     vector 16 :inline)
-   (dir     vector 16 :inline)
-   (n       int32 16)
-   )
-  )
-
-(define *bf-wall-exits* (new 'static 'bf-wall-exits))
-
-(defun bf-city-wall-exit ((p0 vector) (p1 vector))
-  "One lane leaving the zone, from P0 (its last node in the zone) to P1 (the first of the next
-   section): its exit, halfway between them (P1 alone stood in the next district: the Industrial
-   Zone's wall stood in the Port), joins the street within BF_WALL_MERGE of it, or starts one, 16
-   at most."
-  (let ((w *bf-wall-exits*)
-        (dir (vector-! (new 'stack-no-clear 'vector) p1 p0))
-        (at (vector-lerp! (new 'stack-no-clear 'vector) p0 p1 0.5))
-        (k -1)
-        )
-    (set! (-> dir y) 0.0)
-    (when (< 409.6 (vector-length dir))
-      (vector-normalize! dir 1.0)
-      (dotimes (i (-> w count))
-        (let ((avg (vector-float*! (new 'stack-no-clear 'vector) (-> w pos i) (/ 1.0 (the float (-> w n i))))))
-          (if (and (< k 0) (< (vector-vector-xz-distance avg at) BF_WALL_MERGE))
-              (set! k i)
-              )
-          )
-        )
-      (when (and (< k 0) (< (-> w count) 16))
-        (set! k (-> w count))
-        (+! (-> w count) 1)
-        (vector-reset! (-> w pos k))
-        (vector-reset! (-> w dir k))
-        (set! (-> w n k) 0)
-        )
-      (when (>= k 0)
-        ;; one direction for a street's lanes
-        (if (< (vector-dot dir (-> w dir k)) 0.0)
-            (vector-negate! dir dir)
-            )
-        (vector+! (-> w pos k) (-> w pos k) at)
-        (vector+! (-> w dir k) (-> w dir k) dir)
-        (+! (-> w n k) 1)
-        )
-      )
-    )
-  (none)
-  )
-
-(defun bf-city-zone-graph ((i int))
-  "The nav graph of the zone's section I (0 or 1), #f when that section is none or not loaded."
-  (let* ((name (if (zero? i) (-> *bf-zones* (-> *bf* zone) level0) (-> *bf-zones* (-> *bf* zone) level1)))
-         (lev (if name (level-get *level* name)))
-         )
-    (if (and lev (= (-> lev status) 'active) (nonzero? (-> lev bsp city-level-info)) (nonzero? (-> lev bsp city-level-info nav-graph)))
-        (-> lev bsp city-level-info nav-graph)
-        (the-as nav-graph #f)
-        )
-    )
-  )
-
-(defun bf-city-walls ()
-  "The force field made visible: a security wall (ctywide-obs.gc, Jak 2's force field between the
-   districts, solid to Jak) across each street leaving the zone. A section's nav graph lists the
-   lanes that leave it for another section (its links: the branch going out, and a copy of the node
-   it reaches there); those to a section of the zone's own are not exits. The exits within
-   BF_WALL_MERGE make one street (`bf-city-wall-exit`), and its wall stands at their mean exit,
-   across their mean direction, BF_WALL_WIDTH wide and BF_WALL_HEIGHT tall from BF_WALL_SINK below
-   that exit: at the Port the next section's node stands 13 m above the street 25 m inside. The walls are the
-   battle's director's children; their handles in `*bf*` walls, taken down at the battle's end
-   (`bf-city-walls-down`)."
-  (let ((dir (the-as process (handle->process (-> *bf* director))))
-        (w *bf-wall-exits*)
-        )
-    (set! (-> w count) 0)
-    (when dir
-      (dotimes (i 2)
-        (let ((graph (bf-city-zone-graph i))
-              (other (bf-city-zone-graph (- 1 i)))
-              )
-          (when graph
-            (dotimes (k (-> graph link-count))
-              (let ((link (-> graph link-array k)))
-                (when (or (not other) (!= (-> link dest-graph-id) (-> other id)))
-                  (bf-city-wall-exit (-> graph branch-array (-> link src-branch-id) src-node position)
-                                     (-> link dummy-node position)
-                                     )
-                  )
-                )
-              )
-            )
-          )
-        )
-      (dotimes (k (-> w count))
-        (when (< (-> *bf* wall-count) 16)
-          (let ((c (vector-float*! (new 'stack-no-clear 'vector) (-> w pos k) (/ 1.0 (the float (-> w n k)))))
-                (side (new 'stack-no-clear 'vector))
-                (a (new 'stack-no-clear 'vector))
-                (b (new 'stack-no-clear 'vector))
-                )
-            (set! (-> c w) 1.0)
-            (set! (-> c y) (- (-> c y) BF_WALL_SINK))
-            ;; across the street: its lanes' direction turned a quarter
-            (vector-normalize! (-> w dir k) 1.0)
-            (set-vector! side (- (-> w dir k z)) 0.0 (-> w dir k x) 1.0)
-            (vector+float*! a c side (* -0.5 BF_WALL_WIDTH))
-            (vector+float*! b c side (* 0.5 BF_WALL_WIDTH))
-            (format 0 "battlefront: force field wall at ~M ~M ~M (~D lanes)~%" (-> c x) (-> c y) (-> c z) (-> w n k))
-            (set! (-> *bf* walls (-> *bf* wall-count)) (spawn-security-wall dir a b BF_WALL_HEIGHT #f))
-            (+! (-> *bf* wall-count) 1)
-            )
-          )
-        )
-      )
-    )
-  (none)
-  )
-
-(defun bf-city-walls-down ()
-  "Take the battle's force field walls down (`bf-city-walls`)."
-  (dotimes (i (-> *bf* wall-count))
-    (let ((wall (handle->process (-> *bf* walls i))))
-      (if wall
-          (deactivate wall)
-          )
-      )
-    )
-  (set! (-> *bf* wall-count) 0)
-  (none)
-  )
-
-;; ---------------------------------------------------------------------------------------------
-;; The sides' troop transports, and the units marching on the control points
+;; Battle points on the streets
 ;; ---------------------------------------------------------------------------------------------
 
 (defconstant BF_SHIPS_PER_TEAM 2)   ;; troop transports one side has in the air at once at most
@@ -578,12 +324,17 @@
     )
   )
 
+(define *bf-city-spot* (new 'static 'vector))
+
 (defun bf-city-transports ()
   "Twice a second: a side whose units awake (bf-transport.gc `bf-transport-team-count`), plus those
    its ships still carry, fall BF_SHIP_SHORT or more short of its caps (*bf-team-caps*) sends a troop
    transport to the point it holds (its base, or a control point) nearest the player with no ship
-   over it yet, BF_SHIPS_PER_TEAM ships at most: units come in where the player fights. A point's
-   ship handle is cleared once the ship is gone. The ships are the director's children."
+   over it yet, BF_SHIPS_PER_TEAM ships at most: units come in where the player fights. The point's
+   section must be loaded (battlefront.gc `bf-point-live?`), and the ship comes down over a spot
+   near it with nothing above (bf-transport.gc `bf-transport-spot`): it no longer goes through a
+   roof or a bridge. A point's ship handle is cleared once the ship is gone. The ships are the
+   director's children."
   (let ((parent (the-as process (handle->process (-> *bf* director))))
         (counts (new 'stack-no-clear 'array 'int32 4))
         )
@@ -617,9 +368,9 @@
                   )
               (dotimes (i (-> *bf* point-count))
                 (let ((pt (-> *bf* points i)))
-                  (when (and (= (-> pt owner) team) (not (handle->process (-> pt ship))))
+                  (when (and (= (-> pt owner) team) (not (handle->process (-> pt ship))) (bf-point-live? pt))
                     (let ((d (vector-vector-xz-distance (-> pt pos) (-> *target* control trans))))
-                      (when (or (< best 0) (< d best-d))
+                      (when (and (or (< best 0) (< d best-d)) (bf-transport-spot (-> pt pos) *bf-city-spot*))
                         (set! best i)
                         (set! best-d d)
                         )
@@ -627,9 +378,9 @@
                     )
                   )
                 )
-              (when (>= best 0)
-                (let* ((hatch (bf-city-hatch-dir (-> *bf* points best pos)))
-                       (ship (bf-transport-spawn parent (-> *bf* points best pos) team best hatch))
+              (when (and (>= best 0) (bf-transport-spot (-> *bf* points best pos) *bf-city-spot*))
+                (let* ((hatch (bf-city-hatch-dir *bf-city-spot*))
+                       (ship (bf-transport-spawn parent *bf-city-spot* team best hatch))
                        )
                   (when ship
                     (set! (-> *bf* points best ship) (process->handle ship))
@@ -682,47 +433,208 @@
     )
   )
 
-(defun bf-city-steer ()
-  "Twice a second: each unit of the battle with no foe to fight (in its active or wait state: the
-   attack controller sends a unit into its hostile state as soon as a foe is within 120 m, then
-   back) heads for its side's objective (`bf-city-goal-point`): farther than BF_POINT_RADIUS from it
-   and walking elsewhere, it is put on the lane nearest the point on its own nav mesh
-   (citizen-method-199, the lane its active state walks), and fights what it meets on the way.
-   Once there, it wanders around the point while its side captures it."
-  (let ((te *traffic-engine*))
-    (when (and te (nonzero? te))
-      (dotimes (ti 2)
-        (let ((tr (-> te tracker-array ti)))
-          (dotimes (i (-> tr active-object-count))
-            (let ((proc (handle->process (-> tr active-object-list i))))
-              (when (and proc (type? proc citizen) (-> proc next-state))
-                (let ((u (the-as citizen proc))
-                      (team (bf-unit-team proc))
-                      (state (-> proc next-state name))
+(defun bf-city-guard-point ((team int) (from vector))
+  "The control point nearest FROM that side TEAM holds in a loaded section (battlefront.gc
+   `bf-point-live?`): the one its defenders keep. -1 for none."
+  (let ((best -1)
+        (best-d 0.0)
+        )
+    (dotimes (i (-> *bf* point-count))
+      (let ((pt (-> *bf* points i)))
+        (when (and (not (-> pt base?)) (= (-> pt owner) team) (bf-point-live? pt))
+          (let ((d (vector-vector-xz-distance (-> pt pos) from)))
+            (when (or (< best 0) (< d best-d))
+              (set! best i)
+              (set! best-d d)
+              )
+            )
+          )
+        )
+      )
+    best
+    )
+  )
+
+(defun bf-city-unit-goal ((proc process) (team int))
+  "The point unit PROC of side TEAM heads for: the control point it guards, while its side holds it
+   (bf-transport.gc `bf-post-point`: every other unit a transport drops there); else one in two
+   (odd process id) defends the nearest control point its side holds in a loaded section
+   (`bf-city-guard-point`); the others, and all of them when it holds none here, march on the
+   nearest it does not hold (`bf-city-goal-point`). -1 for none."
+  (let ((post (bf-post-point proc))
+        (pos (-> (the-as process-drawable proc) root trans))
+        )
+    (if (and (>= post 0) (= (-> *bf* points post owner) team))
+        post
+        (let ((keep (if (logtest? (-> proc pid) 1) (bf-city-guard-point team pos) -1)))
+          (if (>= keep 0)
+              keep
+              (bf-city-goal-point team pos)
+              )
+          )
+        )
+    )
+  )
+
+(defconstant BF_ROUTE_NODES 256) ;; lane nodes a route search looks at, at most
+
+(deftype bf-route-work (structure)
+  "The lane nodes a route search reached (`bf-city-route`), each with the first lane of its way."
+  ((node   nav-node   BF_ROUTE_NODES)
+   (first  nav-branch BF_ROUTE_NODES)
+   )
+  )
+
+(define *bf-route-work* (new 'static 'bf-route-work))
+
+(defun bf-city-route ((from nav-node) (goal vector))
+  "The lane out of lane node FROM on the way to GOAL: a search breadth first over the lanes a
+   faction may walk (dest-node-id-at-max?), BF_ROUTE_NODES nodes at most, through every loaded
+   section (a section's links lead into the next one's graph), keeping the node reached nearest
+   GOAL; the first lane of the way to it. A choice at each junction of the lane ending nearest the
+   goal left the units in dead ends and detours, 140 to 200 m from a point next door. #f when no
+   lane leaves FROM."
+  (let ((w *bf-route-work*)
+        (n 0)
+        (head 0)
+        (best -1)
+        (best-d 0.0)
+        )
+    (dotimes (i (-> from branch-count))
+      (let ((b (-> from branch-array i)))
+        (when (and (< n BF_ROUTE_NODES) (dest-node-id-at-max? b))
+          (set! (-> w node n) (-> b dest-node))
+          (set! (-> w first n) b)
+          (+! n 1)
+          )
+        )
+      )
+    (while (< head n)
+      (let* ((node (-> w node head))
+             (d (vector-vector-xz-distance (-> node position) goal))
+             )
+        (when (or (< best 0) (< d best-d))
+          (set! best head)
+          (set! best-d d)
+          )
+        (dotimes (i (-> node branch-count))
+          (let ((b (-> node branch-array i)))
+            (when (and (< n BF_ROUTE_NODES) (dest-node-id-at-max? b))
+              (let* ((next (-> b dest-node))
+                     (seen? (= next from))
+                     )
+                (dotimes (k n)
+                  (if (= (-> w node k) next)
+                      (set! seen? #t)
                       )
-                  (when (and (>= team 0) (or (= state 'active) (= state 'wait)) (nonzero? (-> u nav)))
-                    (let ((goal (bf-city-goal-point team (-> u root trans))))
-                      (when (>= goal 0)
-                        (let ((gp (-> *bf* points goal pos)))
-                          (when (and (< BF_POINT_RADIUS (vector-vector-xz-distance (-> u root trans) gp))
-                                     (< (meters 20) (vector-vector-xz-distance (-> u dest-point) gp))
-                                     )
-                            (let ((seg (bf-city-point-segment gp (-> u nav state mesh) (meters 60))))
-                              (if seg
-                                  (citizen-method-199 u seg)
-                                  )
-                              )
-                            )
-                          )
-                        )
-                      )
-                    )
+                  )
+                (when (not seen?)
+                  (set! (-> w node n) next)
+                  (set! (-> w first n) (-> w first head))
+                  (+! n 1)
                   )
                 )
               )
             )
           )
         )
+      (+! head 1)
+      )
+    (if (>= best 0)
+        (-> w first best)
+        )
+    )
+  )
+
+(defun bf-city-choose-branch ((ctrl vehicle-controller) (unit vehicle))
+  "The lane a unit of the battle takes at the end of its lane (its controller's
+   choose-branch-callback, `bf-city-steer`): the first lane of its way to its point
+   (`bf-city-unit-goal`, `bf-city-route`). The lane graph joins every loaded section, so the unit
+   finds its way across them; at its point it keeps turning back across it, where a capture counts
+   it (within 20 m it used to wander at random, and its point's 15 m seldom held a defender). With
+   no point, the stock random lane (vehicle-controller method 15)."
+  (let* ((proc (the-as process unit))
+         (team (bf-unit-team proc))
+         (goal (if (and (bf-fighting?) (>= team 0)) (bf-city-unit-goal proc team) -1))
+         )
+    (if (< goal 0)
+        (vehicle-controller-method-15 ctrl)
+        (let ((first (bf-city-route (-> ctrl branch dest-node) (-> *bf* points goal pos))))
+          (if first
+              first
+              (vehicle-controller-method-15 ctrl)
+              )
+          )
+        )
+    )
+  )
+
+(defun bf-city-steer ()
+  "Twice a second: each unit of the battle on a lane takes its lanes with `bf-city-choose-branch`
+   (its controller's choose-branch-callback, the stock random pick otherwise): one in two defends
+   the nearest control point its side holds here, the others march on the nearest it does not, and
+   each fights what it meets on the way (the attack controller). The unit pools are rebuilt with
+   the stock callback at each end of a battle (`initialize!` 'life)."
+  (let ((te *traffic-engine*))
+    (when (and te (nonzero? te))
+      (dotimes (ti 2)
+        (let ((tr (-> te tracker-array ti)))
+          (dotimes (i (-> tr active-object-count))
+            (let ((proc (handle->process (-> tr active-object-list i))))
+              (when (and proc (type? proc citizen) (>= (bf-unit-team proc) 0))
+                (let ((ctrl (-> (the-as citizen proc) controller)))
+                  (if (!= (-> ctrl choose-branch-callback) bf-city-choose-branch)
+                      (set! (-> ctrl choose-branch-callback) bf-city-choose-branch)
+                      )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-city-free-navs ()
+  "Just before an `initialize!` 'life (a battle's start or end, a far respawn): every unit of the
+   traffic's pools, asleep or awake, that holds a nav-control on the engine's `*default-nav-mesh*`
+   gives it back (remove-process-drawable). A new unit takes one there (citizen.gc, its enemy
+   info's nav mesh) until it is first woken onto a street's mesh, and the reset left the old pools'
+   ones taken while the new pools took theirs: 41 of the 128 before a far respawn's reset, 115 a
+   second after it, and a new guard's setup crashed the game on the next (nav-enemy setup-enemy!).
+   The units go in the reset."
+  (let ((te *traffic-engine*)
+        (n 0)
+        )
+    (when (and te (nonzero? te))
+      (dotimes (ty 29)
+        (let ((info (-> te object-type-info-array ty)))
+          (dotimes (i (-> info inactive-count))
+            (let ((proc (the-as process-drawable (handle->process (-> info array i)))))
+              (when (and proc (nonzero? (-> proc nav)) (-> proc nav) (= (-> proc nav state mesh) *default-nav-mesh*))
+                (remove-process-drawable *default-nav-mesh* proc)
+                (+! n 1)
+                )
+              )
+            )
+          )
+        )
+      (dotimes (ti 2)
+        (let ((tr (-> te tracker-array ti)))
+          (dotimes (i (-> tr active-object-count))
+            (let ((proc (the-as process-drawable (handle->process (-> tr active-object-list i)))))
+              (when (and proc (nonzero? (-> proc nav)) (-> proc nav) (= (-> proc nav state mesh) *default-nav-mesh*))
+                (remove-process-drawable *default-nav-mesh* proc)
+                (+! n 1)
+                )
+              )
+            )
+          )
+        )
+      (format 0 "battlefront: ~D units gave back the default nav mesh (~D of ~D now taken)~%" n
+              (-> *default-nav-mesh* nav-control-count) (-> *default-nav-mesh* max-nav-control-count))
       )
     )
   (none)
@@ -737,9 +649,6 @@
     ((= cmd BF_CITY_PREPARE)
      (bf-city-restore-hatred)
      (bf-city-ships-down)
-     (bf-city-walls-down)
-     (bf-city-place-points)
-     (bf-city-walls)
      )
     ((= cmd BF_CITY_UPDATE)
      (bf-city-apply-hatred)
@@ -770,10 +679,12 @@
        (bf-city-transports)
        )
      )
+    ((= cmd BF_CITY_FREE_NAVS)
+     (bf-city-free-navs)
+     )
     ((= cmd BF_CITY_RESET)
      (bf-city-restore-hatred)
      (bf-city-ships-down)
-     (bf-city-walls-down)
      )
     )
   (none)

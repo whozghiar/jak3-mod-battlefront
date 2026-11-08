@@ -83,6 +83,36 @@
   )
 
 
+;; The guards of the control points: every other unit a troop transport drops on a control point
+;; its side holds stays on it (battlefront-city.gc `bf-city-unit-goal`) while the side holds it.
+(defconstant BF_POST_MAX 64)
+
+(deftype bf-posts (structure)
+  "The units posted on a control point, the newest over the oldest once full."
+  ((unit   handle BF_POST_MAX)
+   (point  int32  BF_POST_MAX)
+   (next   int32)
+   )
+  )
+
+(define *bf-posts* (new 'static 'bf-posts))
+
+(dotimes (i BF_POST_MAX)
+  (set! (-> *bf-posts* unit i) (the-as handle #f))
+  )
+
+(defun bf-post-point ((proc process))
+  "The control point unit PROC guards (`*bf-posts*`), -1 for none."
+  (let ((h (process->handle proc)))
+    (dotimes (i BF_POST_MAX)
+      (if (= (-> *bf-posts* unit i) h)
+          (return (-> *bf-posts* point i))
+          )
+      )
+    )
+  -1
+  )
+
 (defun bf-transport-team-count ((team int) (out (pointer int32)))
   "Units of side TEAM awake now, by kind (*bf-kinds* order), into OUT[0] to OUT[3]: the traffic's
    active lists (its trackers), each unit's side told by `bf-unit-team`. Returns their sum."
@@ -250,6 +280,14 @@
         )
       (cond
         ((-> params proc)
+         ;; every other unit dropped on a control point guards it
+         (when (and (not (-> *bf* points (-> this point) base?)) (zero? (logand (-> this count-units) 1)))
+           (let ((k (-> *bf-posts* next)))
+             (set! (-> *bf-posts* unit k) (process->handle (-> params proc)))
+             (set! (-> *bf-posts* point k) (-> this point))
+             (set! (-> *bf-posts* next) (mod (+ k 1) BF_POST_MAX))
+             )
+           )
          (when (< (-> this count-units) BF_TRANSPORT_MAX_UNITS)
            (set! (-> this drops (-> this count-units)) (process->handle (-> params proc)))
            (set-time! (-> this drop-at (-> this count-units)))
@@ -339,6 +377,53 @@
       #t
       )
     )
+  )
+
+(defun bf-transport-sky? ((pos vector))
+  "#t when nothing stands over POS (a point on the ground) up to 60 m, 6 m around: room for a troop
+   transport to come down from 40 m above its hover height and to climb away (a 6 m sphere swept
+   up from 3 m, against the scenery). Without it ships came down through roofs and bridges."
+  (let ((cq (new 'stack-no-clear 'collide-query)))
+    (vector-copy! (-> cq start-pos) pos)
+    (+! (-> cq start-pos y) (meters 3))
+    (vector-reset! (-> cq move-dist))
+    (set! (-> cq move-dist y) (meters 57))
+    (set! (-> cq radius) (meters 6))
+    (set! (-> cq collide-with) (collide-spec backgnd))
+    (set! (-> cq ignore-process0) #f)
+    (set! (-> cq ignore-process1) #f)
+    (set! (-> cq ignore-pat) (new 'static 'pat-surface :noentity #x1 :nojak #x1 :probe #x1 :noendlessfall #x1 :board #x1))
+    (set! (-> cq action-mask) (collide-action solid))
+    (< (fill-and-probe-using-line-sphere *collide-cache* cq) 0.0)
+    )
+  )
+
+(defun bf-transport-spot ((pos vector) (out vector))
+  "Where a troop transport serving the point at POS comes down: POS itself, or the first spot 10 m
+   then 20 m around it (eight ways each) with ground within 3 m of POS's height
+   (`bf-transport-ground`), a nav mesh within 2 m and nothing above (`bf-transport-sky?`). OUT gets
+   that spot on the ground. #f when none."
+  (let ((at (new 'stack-no-clear 'vector))
+        (dir (new 'stack-no-clear 'vector))
+        )
+    (dotimes (ring 3)
+      (dotimes (k (if (zero? ring) 1 8))
+        (set-vector! dir 0.0 0.0 (meters (* 10.0 (the float ring))) 1.0)
+        (vector-rotate-around-y! dir dir (* (degrees 45) (the float k)))
+        (vector+! at pos dir)
+        (set! (-> at w) 1.0)
+        (when (and (bf-transport-ground at)
+                   (< (fabs (- (-> at y) (-> pos y))) (meters 3))
+                   (find-nearest-nav-mesh at 8192.0)
+                   (bf-transport-sky? at)
+                   )
+          (vector-copy! out at)
+          (return #t)
+          )
+        )
+      )
+    )
+  #f
   )
 
 (defun bf-transport-landing? ((pos vector) (dir vector) (mesh nav-mesh))
