@@ -1218,6 +1218,8 @@ code (its name cannot be printed); the object is sound.
 - **Defenders patrol close by.** A point's guards walk the lanes within about 12 m of it and march
   back when they stray: in the runs they were on it (15 m) in 32 of 35 counts. They fight what
   comes; a determined attack can still take the point.
+- **A point far from its holder's base falls.** Its defenders are the ones its ship drops: at the
+  Port, 400 m from the Krimzon Guard's base, the Freedom League's held it 105 to 115 s.
 - **Marching is slow at first.** From the Freedom League's base, 240 m from Freedom HQ's point,
   the first guards reached it 60 s into the battle, and 14 walked onto it within 65 s.
 - **A far respawn reloads the area.** It goes through a reset at the point's continue point: the
