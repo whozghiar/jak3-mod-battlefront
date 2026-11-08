@@ -2,7 +2,7 @@
 
 - **Game:** Jak 3
 - **Repository:** `whozghiar/jak3-mod-battlefront` (prepared locally as `mods/jak3-mod-battlefront`, not published yet)
-- **Status:** In development, no release. Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
+- **Status:** In development, no release. Round 19 (2026-11-08: a side with no point near the player brings its units in from the edge of the loaded area, as Star Wars Battlefront's armies come from every command post; force fields at the ruins of the old town and at the Metal Head nest; every door shut) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T23). Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
 
 This is the developer and agent documentation of the mod: what it changes, how it works, how to
 test it, its limits, and its change log. Players read the root [`README.md`](../../../README.md).
@@ -71,8 +71,9 @@ greyed ("coming soon"), which X refuses.
 | D: Freedom HQ | `ctyslumb-bbush-4` | (522, 3, -340) m |
 
 The control points stand on lane middles found in round 16's battles (`*bf-point-defs*` in
-`battlefront-h.gc`). No force field holds the player: he walks anywhere, the game loading the
-sections around him as it does outside a battle; a jetpack class stays under a ceiling 30 m above
+`battlefront-h.gc`). No district force field holds the player: he walks anywhere but into the
+ruins of the old town and the Metal Head nest, each closed by a force field (§2.9), the game
+loading the sections around him as it does outside a battle; a jetpack class stays under a ceiling 30 m above
 the higher base (Light Jak's shield sparks, "CEILING"), and a fall 20 m below his last place
 standing puts him back there. The player cannot get into a vehicle during a battle; airlocks and
 doors to the interiors stay shut and no car is parked.
@@ -179,7 +180,7 @@ board, Dark Jak and Light Jak are off while a class is played.
 | `goal_src/jak3/engine/ui/hud-classes.gc` | `hud-health`'s `draw` calls `bf-hud-health-gauges` just before it draws its sprites. | During a battle, the class gauge takes one of the stock eco gauges, with its color (§2.6); a no-op otherwise. |
 | `goal_src/jak3/levels/city/traffic/traffic-manager.gc` | `traffic-manager-method-22` takes each pool size from `bf-want-count`. | It writes every traffic pool's `want-count` from the faction spawn levels every frame: the army caps must be applied there (§2.2). |
 | `game/graphics/opengl_renderer/foreground/Shadow2.cpp`, `Shadow2.h` | A shadow that no longer fits the frame's vertex or index buffers is dropped instead of stopping the game; the buffers are twice as large; the overflow skip loop tests `!=`. | A battle draws dozens of shadow casters: the stock buffers filled and the `alloc_verts` assertion closed the game (seen in the first deployment). Needs `task build-release-game`. |
-| `goal_src/jak3/levels/city/traffic/traffic-engine.gc` | `set-process-to-killed` calls `bf-unit-killed`; `activate-one-vehicle` takes the number of units of a type it may wake from `bf-wake-count` (none of a battle's during a fight: the transports bring them, §2.9); the per-frame check of the awake pedestrians keeps a unit when `bf-keep-unit?` (`battlefront-city.gc`) says so. | The first is reached once per real unit death (recycled units never go there): the loss counter. The second replaces the squad controls' count, which starved the Port. The third keeps the units on the district's lanes awake out of the camera's cells (§2.2). |
+| `goal_src/jak3/levels/city/traffic/traffic-engine.gc` | `set-process-to-killed` calls `bf-unit-killed`; `activate-one-vehicle` takes the number of units of a type it may wake from `bf-wake-count` (none of a battle's during a fight: the transports and the edge reinforcements bring them, §2.9); the per-frame check of the awake pedestrians keeps a unit when `bf-keep-unit?` (`battlefront-city.gc`) says so. | The first is reached once per real unit death (recycled units never go there): the loss counter. The second replaces the squad controls' count, which starved the Port. The third keeps the units on the district's lanes awake out of the camera's cells (§2.2). |
 | `goal_src/jak3/levels/city/traffic/citizen/guard.gc` | `init-enemy!` takes its skeleton from `bf-guard-skel-name`; `crimson-guard-method-267` registers red guards as roboguards and takes its weapon from `bf-guard-weapon`, and method 270 compares the weapon that would give; `citizen-method-215` registers with `bf-attacker-type`; `citizen-method-194` clears a red guard's dark-guard flag (`bf-guard-flags`) and calls `bf-guard-activated`. | Red guards run the stock guard code (§2.2); no guard of a battle carries the tazer (§2.8). |
 | `goal_src/jak3/levels/city/protect/flying-turret.gc` | `init-enemy!` takes its skeleton from `bf-turret-skel-name` and its scale from `bf-unit-scale`; `citizen-method-215` registers with `bf-attacker-type`; `enemy-common-post` calls `bf-hover-animate`; `flying-turret-method-229` asks `bf-hover-nozzle!` where each thruster flame goes. | Jetpack guards run the stock flying-turret code (§2.2), their flames out of their jetpack's turbines (nodes 15 and 17) instead of the turret's spots under its root. |
 | `goal_src/jak3/dgos/game.gd` | `battlefront-h.o`, `battlefront-player.o`, `battlefront-minimaps.o`, `battlefront.o` at the end. | After the engine code they use (enemy, guard-projectile) and `mods-menu.o`. |
@@ -663,7 +664,7 @@ ground probe's point (`gspot-pos`): hovering 2 m up, `on-surface` came on for a 
 reset the held height and let the jetpack sink a step every second (seen in game, Lisp wiki jak3
 4.33).
 
-**No force field, the ceiling.** Since round 17 nothing holds the player in a district
+**No district force field, the ceiling.** Since round 17 nothing holds the player in a district
 (`bf-keep-in-zone` kept only its fall check and the jetpack's ceiling). Until round 16 the field
 held him in the district's sections: the level the game saw him in (`*load-state*` vis-nick) and a
 minimap cell of the zone (the `city-map-bits` of its sections). `bf-keep-in-zone` takes his safe
@@ -811,6 +812,22 @@ a kind, so the ship first moves a sleeping unit of its side to the head of the p
 (`bf-transport-pick`). With the transports there, the traffic wakes none of the battle's types by
 itself (`bf-wake-count`).
 
+**Reinforcements from the edge.** Star Wars Battlefront (2004) brings each side's units in at every
+command post it holds, all over the map. Haven City loads two sections around the player (the
+traffic keeps two sections' street data, `level-data-array`), so a side's units can only be real
+there, and at a battle's start the Krimzon Guard holds nothing near the Freedom League's base: no
+enemy came near the player. Twice a second `bf-city-edge-spawn` lets a side with no point in a
+loaded section (`bf-city-team-live?`) bring one of its units in, while it lacks one against its caps
+(`bf-transport-next-kind`, its sleeping unit first in the pool): on the pedestrian street of the
+loaded area furthest toward its nearest held point, 60 to 220 m from the player (from 30 m when
+none is that far), through the traffic's `activate-by-type` (which keeps the stock spawn checks,
+but not `bf-wake-count`). It marches on its point from there. A side with a point here gets its
+units from its ship there. Each side keeps 20 units at most. A first version took the furthest
+street in a 600 m sphere: 540 m off, the street's nav mesh was not loaded, the traffic woke the unit
+without one (`get-nav-mesh` #f), the unit kept its default nav mesh's nav-control, and a far
+respawn's reset overflowed that mesh (96 taken before it, a crash); the search now wants the
+street's mesh loaded (`get-nav-mesh`) and 220 m at most, and the mesh stays near 40.
+
 A guard leaves the hatch only onto free nav mesh 4 to 6 m behind it (`crimson-guard-method-266`,
 crowds included), pinned to the ship until then (method 265), and a jetpack hovers until it
 reaches its exit point:
@@ -858,9 +875,25 @@ and the jetpack guard's and robotguard's `chest`): the stock guards' own aim (`c
 at most each, eased at 5 a second, eased back 0.3 s after the last shot. The avatar's `relocate`
 moves this joint-mod with the process, as the `gun-jm` of §2.8.
 
-**Closed city.** The battle's settings add `'airlock #f` (doors and airlocks to interiors shut),
-`'disable-parking-spots? #t` (no parked car), and every 2 s `bf-city-command` sends the lift to the
-Freedom League's headquarters (`cty-elevator-2`) `'go-dormant`: only a `'trigger` wakes it again.
+**Closed city.** The battle's settings add `'airlock #f`, `'disable-parking-spots? #t` (no parked
+car), and every 2 s `bf-city-command` sends the lift to the Freedom League's headquarters
+(`cty-elevator-2`) `'go-dormant`: only a `'trigger` wakes it again. Every door of the city to an
+interior or the sewers is a `com-airlock` (`engine/common-obs/airlock.gc`), and each opens only
+while `(-> *setting-control* user-current airlock)` is set: the airlocks (`com-airlock-inner`,
+`-outer`) of ctyfarma, ctygenb, ctyinda and ctyport, the Hip Hog's doors (`hip-door-a`), the
+Freedom League's doors (`cty-door`), Vin's (`vin-door-ctyinda`) and the nest's airlock
+(`com-airlock-outer-mhcity`). Vin's gate is an electric gate (`ctyinda-vingate`, an `elec-gate`).
+
+**Force fields.** Two red walls of Jak 2's district border (`spawn-security-wall`, ctywide-obs.gc),
+spawned again whenever gone (`bf-city-fields-up`, twice a second; gone at a reset,
+`bf-city-fields-down`), children of the director, 40 m tall:
+
+| Field | Ends (m) | Closes |
+|---|---|---|
+| The ruins | x 389.75, z -18.44 to -70.72, y 7.94 | The street from Freedom HQ's district (ctyslumb) into the ruins of the old town (ctygenb), toward the stadium: the game's own `security-wall-12`, which it drops after its first task (`decompiler_out/jak3/entities/ctyslumb-actors.json`). |
+| The Metal Head nest | z 1212, x -410 to -335, y 7 | The street from the Port up to the nest (mhcitya), just short of its dark eco door (`mhcity-dark-eco-door-1`, -381 m, 1199 m), read off the START menu's map; the nest's other way out is its airlock. |
+
+A unit's edge spawn never takes a street of ctygenb, mhcitya or mhcityb.
 
 ---
 
@@ -1218,6 +1251,9 @@ code (its name cannot be printed); the object is sound.
 - **Defenders patrol close by.** A point's guards walk the lanes within about 12 m of it and march
   back when they stray: in the runs they were on it (15 m) in 32 of 35 counts. They fight what
   comes; a determined attack can still take the point.
+- **Reinforcements near the player only.** A side's units come in at the edge of the two loaded
+  sections, 60 to 220 m from the player: the rest of the city has no unit (its points change
+  hands by a rule).
 - **A point far from its holder's base falls.** Its defenders are the ones its ship drops: at the
   Port, 400 m from the Krimzon Guard's base, the Freedom League's held it 105 to 115 s.
 - **Marching is slow at first.** From the Freedom League's base, 240 m from Freedom HQ's point,
