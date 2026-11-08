@@ -529,16 +529,203 @@
     )
   )
 
+;; The units' march to their point over the nav meshes (`bf-city-steer`, `bf-march-apply`). The
+;; city's walking lanes are loops within a section: the Freedom League's base, in ctyslumc, has 138
+;; lane nodes and no lane out of the section, and 173 of ctyslumb's 177 nodes have one lane out or
+;; none; a citizen at a lane's dead end jumps to any lane 20 to 120 m behind it (citizen-method-208).
+;; The lanes alone kept the units 140 to 290 m from a point next door. The meshes join the sections:
+;; a nav-enemy standing on a mesh's link poly moves onto the next mesh (nav-enemy-method-188).
+(defconstant BF_MARCH_MAX 64)           ;; units marching at once, at most
+(defconstant BF_MARCH_NEAR (meters 12)) ;; a unit this close to its point walks the lanes around it
+(defconstant BF_MARCH_MESHES 96)        ;; meshes a way search looks at, at most
+
+(deftype bf-march (structure)
+  "The units marching to their point, each with where it runs now (just past the link poly into its
+   next mesh, or the point) and the mesh it was on then, and a way search's work."
+  ((count  int32)
+   (unit   handle   BF_MARCH_MAX)
+   (from   nav-mesh BF_MARCH_MAX)
+   (to     vector   BF_MARCH_MAX :inline)
+   (mesh   nav-mesh BF_MARCH_MESHES)  ;; the meshes a way search reached
+   (first  int16    BF_MARCH_MESHES)  ;; the start mesh's link each was reached through
+   (goal   nav-mesh BF_POINT_MAX)     ;; each point's mesh this tick, #f for none loaded
+   )
+  )
+
+(define *bf-march* (new 'static 'bf-march))
+
+(defun bf-march-link-poly ((m nav-mesh) (link int) (out vector))
+  "OUT gets the centroid of mesh M's poly for LINK (pat 4, its link field LINK): a nav-enemy standing
+   on it moves onto the mesh beyond (nav-enemy-method-188). #f when M has none."
+  (dotimes (i (-> m poly-count))
+    (let ((poly (-> m poly-array i)))
+      (when (and (logtest? (-> poly pat) 4) (= (-> poly link) link))
+        (poly-centroid m poly out)
+        (return #t)
+        )
+      )
+    )
+  #f
+  )
+
+(defun bf-march-through ((m nav-mesh) (link int) (out vector))
+  "OUT gets a spot 2 m past mesh M's poly for LINK toward the next mesh's own link poly: a unit sent
+   there walks onto the link poly and across, where its own centroid would stop it short of it (the
+   units crowded there). #f when M has no poly for LINK."
+  (when (bf-march-link-poly m link out)
+    (let* ((lk (-> m link-array link))
+           (dest (-> lk dest-mesh))
+           (there (new 'stack-no-clear 'vector))
+           )
+      (when (and dest (< (-> lk dest-link-poly-id) (-> dest poly-count)))
+        (poly-centroid dest (-> dest poly-array (-> lk dest-link-poly-id)) there)
+        (let ((dir (vector-! (new 'stack-no-clear 'vector) there out)))
+          (set! (-> dir y) 0.0)
+          (when (< (meters 0.1) (vector-length dir))
+            (vector-normalize! dir (meters 2))
+            (vector+! out out dir)
+            )
+          )
+        )
+      )
+    #t
+    )
+  )
+
+(defun bf-march-waypoint ((unit nav-enemy) (goal nav-mesh) (pos vector) (out vector))
+  "Where UNIT runs now on its way to POS, on the mesh GOAL: POS itself on that mesh; else just past
+   the link poly of its mesh starting the way through the fewest meshes to GOAL (a search breadth
+   first over the meshes' links, BF_MARCH_MESHES at most, `bf-march-through`). #f when no way."
+  (let ((m (-> unit nav state mesh))
+        (w *bf-march*)
+        (n 1)
+        (head 0)
+        )
+    (cond
+      ((not m)
+       #f
+       )
+      ((= m goal)
+       (vector-copy! out pos)
+       #t
+       )
+      (else
+        (set! (-> w mesh 0) m)
+        (set! (-> w first 0) -1)
+        (while (< head n)
+          (let ((cur (-> w mesh head)))
+            (dotimes (i (-> cur link-count))
+              (let ((next (-> cur link-array i dest-mesh)))
+                (when (and next (< n BF_MARCH_MESHES))
+                  (let ((seen? #f))
+                    (dotimes (k n)
+                      (if (= (-> w mesh k) next)
+                          (set! seen? #t)
+                          )
+                      )
+                    (when (not seen?)
+                      (let ((first (if (zero? head) i (-> w first head))))
+                        (if (= next goal)
+                            (return (bf-march-through m first out))
+                            )
+                        (set! (-> w mesh n) next)
+                        (set! (-> w first n) first)
+                        (+! n 1)
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          (+! head 1)
+          )
+        #f
+        )
+      )
+    )
+  )
+
+(defun bf-marching? ((unit process))
+  "#t when UNIT marches now (`*bf-march*`)."
+  (let ((h (process->handle unit))
+        (w *bf-march*)
+        )
+    (dotimes (i (-> w count))
+      (if (= (-> w unit i) h)
+          (return #t)
+          )
+      )
+    )
+  #f
+  )
+
+(defun bf-march-plan ((unit citizen) (team int))
+  "In `bf-city-steer`: UNIT of side TEAM, walking its lanes ('active) more than BF_MARCH_NEAR from
+   its point (`bf-city-unit-goal`) in a loaded section, marches there: `*bf-march*` gets it with its
+   waypoint (`bf-march-waypoint`) and its mesh now. A unit walking its lanes near its point walks
+   again (its walking speed: a march runs)."
+  (let ((w *bf-march*)
+        (goal (bf-city-unit-goal unit team))
+        )
+    (when (and (-> unit nav) (= (-> unit next-state name) 'active))
+      (cond
+        ((and (>= goal 0) (< (-> w count) BF_MARCH_MAX) (-> w goal goal)
+              (< BF_MARCH_NEAR (vector-vector-xz-distance (-> unit root trans) (-> *bf* points goal pos)))
+              (bf-march-waypoint unit (-> w goal goal) (-> *bf* points goal pos) (-> w to (-> w count)))
+              )
+         (set! (-> w unit (-> w count)) (process->handle unit))
+         (set! (-> w from (-> w count)) (-> unit nav state mesh))
+         (+! (-> w count) 1)
+         )
+        (else
+          (set! (-> unit nav target-speed) (* (-> unit speed-scale) (-> unit speed-walk)))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-march-apply ()
+  "Every frame of the fight: each marching unit (`*bf-march*`), still walking its lanes ('active),
+   runs to its waypoint: its controller's dest-point, which the citizen's 'active post gives its nav
+   control as target each frame (citizen.gc), the nav control finding the way across the mesh. The
+   lanes set it again at a lane's end; this puts it back the next frame. No idle stop on the way
+   (wait-time: the 'active trans stops the unit once it is over). A unit that moved onto its next
+   mesh is left to its lanes until the next plan, which sends it on."
+  (let ((w *bf-march*))
+    (dotimes (i (-> w count))
+      (let ((unit (the-as citizen (handle->process (-> w unit i)))))
+        (when (and unit (= (-> unit next-state name) 'active) (-> unit nav))
+          (cond
+            ((!= (-> unit nav state mesh) (-> w from i))
+             (set! (-> w unit i) (the-as handle #f))
+             )
+            (else
+              (vector-copy! (-> unit dest-point) (-> w to i))
+              (set! (-> unit wait-time) (seconds 3600))
+              (set! (-> unit nav target-speed) (* (-> unit speed-scale) (-> unit speed-run)))
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-city-choose-branch ((ctrl vehicle-controller) (unit vehicle))
   "The lane a unit of the battle takes at the end of its lane (its controller's
    choose-branch-callback, `bf-city-steer`): the first lane of its way to its point
    (`bf-city-unit-goal`, `bf-city-route`). The lane graph joins every loaded section, so the unit
    finds its way across them; at its point it keeps turning back across it, where a capture counts
    it (within 20 m it used to wander at random, and its point's 15 m seldom held a defender). With
-   no point, the stock random lane (vehicle-controller method 15)."
+   no point, or marching over the meshes (`bf-marching?`: its waypoint, not a lane, leads it; the
+   post asks for a lane every frame near it), the stock random lane (vehicle-controller method 15)."
   (let* ((proc (the-as process unit))
          (team (bf-unit-team proc))
-         (goal (if (and (bf-fighting?) (>= team 0)) (bf-city-unit-goal proc team) -1))
+         (goal (if (and (bf-fighting?) (>= team 0) (not (bf-marching? proc))) (bf-city-unit-goal proc team) -1))
          )
     (if (< goal 0)
         (vehicle-controller-method-15 ctrl)
@@ -554,15 +741,21 @@
 
 (defun bf-city-steer ()
   "Twice a second: the units awake into `*bf-unit-dots*` (the respawn page's map); each unit of the
-   battle on a lane takes its lanes with `bf-city-choose-branch`
-   (its controller's choose-branch-callback, the stock random pick otherwise): one in two defends
-   the nearest control point its side holds here, the others march on the nearest it does not, and
-   each fights what it meets on the way (the attack controller). The unit pools are rebuilt with
-   the stock callback at each end of a battle (`initialize!` 'life)."
+   battle away from its point marches there over the nav meshes (`bf-march-plan`), and near it takes
+   its lanes with `bf-city-choose-branch` (its controller's choose-branch-callback, the stock random
+   pick otherwise): one in two defends the nearest control point its side holds here, the others
+   march on the nearest it does not, and each fights what it meets on the way (the attack
+   controller). The unit pools are rebuilt with the stock callback at each end of a battle
+   (`initialize!` 'life)."
   (let ((te *traffic-engine*)
         (dots *bf-unit-dots*)
+        (w *bf-march*)
         )
     (set! (-> dots count) 0)
+    (set! (-> w count) 0)
+    (dotimes (i (-> *bf* point-count))
+      (set! (-> w goal i) (find-nearest-nav-mesh (-> *bf* points i pos) (meters 2)))
+      )
     (when (and te (nonzero? te))
       (dotimes (ti 2)
         (let ((tr (-> te tracker-array ti)))
@@ -580,6 +773,7 @@
                       (set! (-> ctrl choose-branch-callback) bf-city-choose-branch)
                       )
                   )
+                (bf-march-plan (the-as citizen proc) (bf-unit-team proc))
                 )
               )
             )
@@ -650,6 +844,7 @@
        (bf-city-retarget)
        (bf-city-steer)
        )
+     (bf-march-apply)
      ;; a death reset (ctywide activates again) or a task change restores the stock faction
      ;; state: apply the battle's every 2 seconds
      (when (and *cty-faction-manager*
