@@ -2,7 +2,7 @@
 
 - **Game:** Jak 3
 - **Repository:** `whozghiar/jak3-mod-battlefront` (prepared locally as `mods/jak3-mod-battlefront`, not published yet)
-- **Status:** In development, no release. Round 16 (2026-11-08: battle points with capture and a respawn pick, troop transports bringing the units, the force field drawn as walls, the guard's upper body turned toward its aim) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T14 to T17), as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
+- **Status:** In development, no release. Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
 
 This is the developer and agent documentation of the mod: what it changes, how it works, how to
 test it, its limits, and its change log. Players read the root [`README.md`](../../../README.md).
@@ -53,25 +53,29 @@ started). X selects, Circle goes back. The texts are French when the game langua
 English otherwise.
 
 Every page is drawn on black: the world is not drawn under it. The war zone and side pages show,
-in the right frame, the zone under the cursor (or the one picked): its whole district on the
-game's own minimap textures (dark gray ground, white streets, blue water), the other districts
-black, the Freedom League spawn in blue, the Krimzon Guard spawn in red, and Jak in white when he
-is in it. North is up, as on the minimap.
+in the right frame, the whole city on the game's own minimap textures (dark gray ground, white
+streets, blue water; Jak 3's ruined center has no minimap texture and stays black), the Freedom
+League's base in blue, the Krimzon Guard's in red, the control points in gray, and Jak in white.
+North is up, as on the minimap.
 
-The battlefield is a whole district: every place of its Haven City sections.
+The battlefield is the whole of Haven City (round 17; until round 16 a battle held one district,
+its sections kept loaded behind a force field). The war zone page has one entry, Haven City.
 
-| War zone | Sections | Freedom League spawn | Krimzon Guard spawn |
-|---|---|---|---|
-| Port | `ctyport` | `ctyport-bbush-6` (west docks) | `ctyport-bombbot` (east docks, by the war zone) |
-| Industrial Zone | `ctyinda`, `ctyindb` | `ctyindb-start` | `ctyinda-bbush-5` |
-| Slums | `ctysluma` | `ctysluma-alley` | `ctysluma-bbush-3` |
-| Freedom HQ | `ctyslumb`, `ctyslumc` | `ctyslumc-freehq-exit` (the entrance of the headquarters) | `ctyslumb-bbush-4` |
+| Point | Continue point (its levels for a respawn) | Place |
+|---|---|---|
+| Freedom League base | `ctyslumc-freehq-exit` | the entrance of the headquarters |
+| Krimzon Guard base | `ctyport-bombbot` | the Port's east docks, by the KG war zone |
+| A: Port | `ctyport-bbush-6` | (225, 10, 1368) m, a lane of the Port |
+| B: Industrial Zone | `ctyinda-bbush-5` | (929, 10, 855) m |
+| C: Slums | `ctysluma-alley` | (1001, 10, 266) m |
+| D: Freedom HQ | `ctyslumb-bbush-4` | (522, 3, -340) m |
 
-The spawns are stock continue points at the two ends of each district. A force field holds the
-player on foot in the district's sections, and a jetpack class under a ceiling 30 m above the
-higher spawn; touching either shows "FORCE FIELD" with Light Jak's shield sparks. Each street
-leaving the district is crossed by a red wall of Jak 2's force field (§2.9). The player cannot get
-into a vehicle during a battle; airlocks and doors to the interiors stay shut and no car is parked.
+The control points stand on lane middles found in round 16's battles (`*bf-point-defs*` in
+`battlefront-h.gc`). No force field holds the player: he walks anywhere, the game loading the
+sections around him as it does outside a battle; a jetpack class stays under a ceiling 30 m above
+the higher base (Light Jak's shield sparks, "CEILING"), and a fall 20 m below his last place
+standing puts him back there. The player cannot get into a vehicle during a battle; airlocks and
+doors to the interiors stay shut and no car is parked.
 
 ### During a battle
 
@@ -80,12 +84,12 @@ into a vehicle during a battle; airlocks and doors to the interiors stay shut an
   robotguards, 4 spider robots. Every unit arrives by its side's troop transport (§2.9). A unit
   standing on the battlefield stays there wherever the camera looks (§2.2). No citizen walks or
   drives in the city during a battle.
-- **Battle points:** each side's base at its spawn, and three control points on the streets between
-  them, neutral at the start, each a beam in its holder's color (white while neutral). A side with
-  more units than the other within 15 m captures a point in 30 s; the HUD shows A, B and C under the
-  reserves, in the holder's color, with the capture under way in percent. A held point is a place
-  to respawn, and where the side's transports land; units with no foe march on the nearest point
-  their side does not hold (§2.9).
+- **Battle points:** each side's base, and a control point in each district, neutral at the start,
+  each a beam in its holder's color (white while neutral). A side with more units than the other
+  within 15 m captures a point in 30 s; the HUD shows A, B, C and D under the reserves, in the
+  holder's color, with the capture under way in percent. A held point is a place to respawn, and
+  where the side's transports land; units walk toward their side's points, to guard or to take
+  them, and points away from the player are fought for without units (§2.9).
 - **HUD:** the reserves at the top middle, after the reinforcement meter of Star Wars Battlefront
   (2004): the player's side's bar runs left from the middle in green, the enemy's right in red, each
   as long as its reserve, with both counts under them; the player's kills, small, on the left
@@ -119,10 +123,12 @@ into a vehicle during a battle; airlocks and doors to the interiors stay shut an
   "endless dark eco" and "endless light eco" secrets are off during a battle (they would keep every
   jetpack full and the light eco gauge lit).
 - **Death:** the player's side loses a unit; for 4 seconds the camera follows a living unit of his
-  side ("YOU WERE KILLED", "Back in 4 ... 1"). When his side holds a control point, a page then
-  lets him pick his base or one of its points on the zone map (D-pad), and X deploys him there;
-  otherwise he is back at his base. He keeps his class, with full health, fresh ammo and 2 seconds
-  of invulnerability. The battle's units keep fighting
+  side ("YOU WERE KILLED", "Back in 4 ... 1"). Then, at every death, a page lets him pick his base
+  or a control point his side holds on the city's map (D-pad), and X deploys him there, the game
+  loading that district first when it is far (§2.9). He keeps his class, with full health, fresh
+  ammo and 2 seconds of invulnerability.
+- **Redeploy:** 30 seconds after his last shot, blow or hit taken, START > Options > Gamemode >
+  Battlefront > Redeploy opens the same page without a death (no unit lost). The battle's units keep fighting
   meanwhile.
 - **End:** a result page (victory or defeat, losses of both sides); X leaves the battle.
 
@@ -166,8 +172,9 @@ board, Dark Jak and Light Jak are off while a class is played.
 | `goal_src/jak3/pc/features/battlefront/battlefront-player.gc` (new, GAME) | `bf-avatar`: the class model drawn in Jak's place, its moves, weapons, salvos, dodges, ammo, gauges and the robotguard's shield (`bf-shield`); `bf-cam-rig`: the third-person camera; `bf-icon`: a class model drawn over the game (class page preview). | See §2.4 and §2.6. |
 | `goal_src/jak3/pc/features/battlefront/battlefront.gc` (new, GAME) | `bf-director` (battle life cycle, menu pages, HUD, force field, pickups); the code of Jak's `target-death` state during a fight (`bf-target-death`); wrappers of `target-attacked`, `game-info` `initialize!`, the START menu's ring options, `progress` `set-menu-options` and `game-text-info` `lookup-text!`; the START menu's Gamemode pages; the Mods menu entry. | The director lives in `*pc-pool*` so it outlives level changes and deaths; it owns the battle's settings. |
 | `docs/modding/current_mod/battlefront_smoke.gc`, `battlefront_tests.md` (new) | The smoke test scenarios and their notebook (§3). | Never in a build: `smoke_test.py install` copies a scenario into GAME for a run. |
-| `goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc` (new, GAME, generated) | The four war zones' maps: each district's minimap cells, 256 texels on the long side, one palette, their world corners. | The zone pages show each district on the game's own minimap textures, loaded by the game only with their city section (§2.6). |
-| `goal_src/jak3/levels/city/battlefront/battlefront-city.gc` (new, CWI) | Attack-controller hatred edits, periodic faction commands, the control points' places, the force field walls, the troop transports' dispatch, the units' march on the points, `bf-keep-unit?`, the player's grenade throw; installs `*bf-city-hook*` and `*bf-city-grenade*`. | These need Haven City's types (the grenade is `vehicle-grenade-deflect`, a lane is a `nav-branch`, a unit a `citizen`, a wall a `security-wall-child`), only known in CWI. |
+| `goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc` (new, GAME, generated) | The whole city's map: every minimap cell with a texture, 256 texels on the long side, one palette, its world corner. | The zone pages show each district on the game's own minimap textures, loaded by the game only with their city section (§2.6). |
+| `goal_src/jak3/levels/city/battlefront/battlefront-city.gc` (new, CWI) | Attack-controller hatred edits, periodic faction commands, the troop transports' dispatch, the units' routes to their points (their lane callback), the release of the default nav mesh before a reset, `bf-keep-unit?`, the player's grenade throw; installs `*bf-city-hook*` and `*bf-city-grenade*`. | These need Haven City's types (the grenade is `vehicle-grenade-deflect`, a lane is a `nav-branch`, a unit a `citizen`), only known in CWI. |
+| `goal_src/jak3/engine/nav/nav-mesh.gc` | The engine's `*default-nav-mesh*` gets 255 nav-controls and users, not 128. | Every new traffic unit takes one there until it is first woken; a far respawn's reset made the traffic spawn its pools again and overflowed 128 (§2.9). |
 | `goal_src/jak3/levels/city/battlefront/bf-transport.gc` (new, CWI) | `bf-transport`: the troop transport that brings a side's units (§2.9). | Ported from the mod Haven City: New Dawn; it wakes traffic units, CWI types. |
 | `goal_src/jak3/engine/ui/hud-classes.gc` | `hud-health`'s `draw` calls `bf-hud-health-gauges` just before it draws its sprites. | During a battle, the class gauge takes one of the stock eco gauges, with its color (§2.6); a no-op otherwise. |
 | `goal_src/jak3/levels/city/traffic/traffic-manager.gc` | `traffic-manager-method-22` takes each pool size from `bf-want-count`. | It writes every traffic pool's `want-count` from the faction spawn levels every frame: the army caps must be applied there (§2.2). |
@@ -258,18 +265,14 @@ walked onto the next section's lanes, which the game loads at the district's edg
 pool as in the stock game: no death, so the reserves keep it.
 
 **Sections loaded.** Haven City holds its base (ctywide) and two sections at most: the traffic
-engine has two `level-data-array` slots. In a one-section district (Port, Slums) the stock loading
-stays: the force field keeps the player in the section, so the game always wants it, and the next
-section the game loads at an edge carries part of the district's ground (the Port's war zone,
-`ctyport-warzone`, stands on `ctyinda`'s collision: without it, no ground there). In a two-section
-district (Industrial Zone, Freedom HQ) a wrapper of `load-state` `add-borrow-levels`
-(`bf-want-zone-levels`) keeps the two sections wanted and drops every other section, interior or
-mission level: walking toward a third section would otherwise unload one of the district's. A
-respawn waits until every level its continue point lists is active (`target-death.gc`
-`target-continue`), so a camp's list must fit that rule: the camps list only their district's
-sections. The Port's war zone (`ctyport-warzone`) was its Krimzon Guard camp at first: it stands on
-`ctyinda`'s ground, and after a death at the west docks the respawn there found `mhcitya` loaded
-instead and no ground; the camp is now `ctyport-bombbot`, 176 m away on `ctyport`'s ground.
+engine has two `level-data-array` slots. Since round 17 the battle keeps the stock loading: the
+sections around the player load as he walks, and a respawn far away goes through a reset at the
+point's continue point (§2.9). A respawn waits until every level its continue point lists is active
+(`target-death.gc` `target-continue`). The Port's war zone (`ctyport-warzone`) was the Krimzon
+Guard's camp at first: it stands on `ctyinda`'s ground, and after a death at the west docks the
+respawn there found `mhcitya` loaded instead and no ground; the base is `ctyport-bombbot`, on
+`ctyport`'s ground. Until round 16 a wrapper of `load-state` `add-borrow-levels` kept a
+two-section district's sections loaded.
 
 **Waking units: the Port.** The pool size is not all: the unit picker, `activate-one-vehicle`,
 wakes a type only while it has fewer awake units than its `target-counts` entry for the faction
@@ -661,24 +664,19 @@ ground probe's point (`gspot-pos`): hovering 2 m up, `on-surface` came on for a 
 reset the held height and let the jetpack sink a step every second (seen in game, Lisp wiki jak3
 4.33).
 
-**Force field.** The battlefield is the district's sections, and the game tells which level the
-player is in: `*load-state*` `vis-nick`, which the sections' region scripts switch as he crosses
-into another. vis-nick alone is not enough: with the Port's war zone loading `ctyinda`, Jak stood
-in the Industrial Zone and the game still saw him in `ctyport`. So he must also be in a minimap
-cell of the zone's sections (`bf-zone-cell?`, the cells of their `city-map-bits`, written by
-`make_minimaps.py` as `*bf-zone-cells*`; a place past the grid's edge counts as the edge cell's:
-the Slums' alley is east of the last column). Cells are 384 m, and some are shared by two
-districts: there vis-nick decides. `bf-keep-in-zone` takes his safe place every 0.5 s while he
-stands in the zone (`*bf*` `safe`, and `safe-level`, the vis-nick there). When he is out of the
-zone, or 20 m below his safe place (a hole, or a place whose ground is not loaded), it puts him
-back there (`move-to-point!`), cancels his speed, sets vis-nick back, and shows the sparks.
-A jetpack class more than 2 m above the ceiling (only a jump takes it there) has its rise turned
-into a 2 m/s fall. Under the ceiling the jetpack's own lift fades (4 times the gap to the ceiling,
-in m/s, at most 7). The first version cut the thrust at the ceiling, refilled the fuel while X
-stayed held after it ran dry (a thrust every other frame), and the force field pushed down right
-above the ceiling: the mod's author saw the jetpack jerk in flight. The current rules were measured
-frame by frame (§3.1). Both spawn Light Jak's shield-hit sparks (`group-lightjak-shield-hit`) and
-play `shield-hit`; a jetpack holding X stopped at 0.1 m above the ceiling.
+**No force field, the ceiling.** Since round 17 nothing holds the player in a district
+(`bf-keep-in-zone` kept only its fall check and the jetpack's ceiling). Until round 16 the field
+held him in the district's sections: the level the game saw him in (`*load-state*` vis-nick) and a
+minimap cell of the zone (the `city-map-bits` of its sections). `bf-keep-in-zone` takes his safe
+place every 0.5 s while he stands; 20 m below it (a hole, or a place whose ground is not loaded),
+it puts him back there (`move-to-point!`), cancels his speed and sets vis-nick back. A jetpack
+class more than 2 m above the ceiling (only a jump takes it there) has its rise turned into a 2 m/s
+fall. Under the ceiling the jetpack's own lift fades (4 times the gap to the ceiling, in m/s, at
+most 7). The first version cut the thrust at the ceiling, refilled the fuel while X stayed held
+after it ran dry (a thrust every other frame), and pushed down right above the ceiling: the mod's
+author saw the jetpack jerk in flight. The current rules were measured frame by frame (§3.1). It
+spawns Light Jak's shield-hit sparks (`group-lightjak-shield-hit`) and plays `shield-hit`; a
+jetpack holding X stopped at 0.1 m above the ceiling.
 
 ### 2.7 Outside the campaign
 
@@ -748,78 +746,94 @@ the D-pad's left arrow is drawn from the font's D-pad parts (`~3L`, `~22L` color
 height in the frame, the spider robot its 4.4 m leg span (`bf-icon-size`): at its 2 m height it
 spilled out of the frame.
 
-### 2.9 Battle points, troop transports and the force field walls
+### 2.9 The whole city: points, transports, routes, respawns
 
-**Points.** `*bf*` `points` holds five `bf-point`s (`battlefront-h.gc`): the two bases, at the
-spawns and held by their side for good, and three control points, neutral at the start. At
-`BF_CITY_PREPARE`, `bf-city-place-points` (`battlefront-city.gc`) puts each control point on the
-middle of a pedestrian lane segment of the district, a quarter, half and three quarters of the way
-from the Freedom League's spawn to the Krimzon Guard's (its distance to the first over the sum of
-both, within 0.08), 40 m or more from both, the one on the shortest way between them winning
-(`callback-on-nav-segments-in-sphere`, the traffic's segment search). A straight line between the
-spawns put the Port's middle point over the water. Four times a second `bf-update-points`
-(`battlefront.gc`) counts each side's units within `BF_POINT_RADIUS` (15 m) through the actor hash
-(`bf-point-count`; the player counts while his class is alive): the side with more units adds 0.25 s
-of capture; the holder's majority, or a capture by the other side, takes it back first; a tie holds.
+**Points.** `*bf*` `points` holds six `bf-point`s (`battlefront-h.gc`): the two bases, held by
+their side for good, and a control point in each district, neutral at the start, where
+`*bf-point-defs*` puts them (`bf-points-setup`). Four times a second `bf-update-points`
+(`battlefront.gc`) runs each control point's capture:
+
+| Its section | The fight |
+|---|---|
+| Loaded (`bf-point-live?`: a nav mesh within 8 m; the game finds them in active levels only) | Each side's units within `BF_POINT_RADIUS` (15 m) through the actor hash (`bf-point-count`; the player counts while his class is alive): the side with more units adds 0.25 s of capture; the holder's majority, or a capture by the other side, takes it back first; a tie holds. |
+| Not loaded (`bf-point-away`) | No unit to count: a side fights for it from the points next to it it holds (`*bf-point-links*`, `bf-point-pressure`). A side alone at it captures it at the normal pace, at half pace when the holder holds a point next to it too; both sides at a neutral one, the one holding more neighbours. Every 10 s of fight each side there loses a unit (`bf-count-loss`). |
+
 At `BF_CAPTURE_TIME` (30 s) the point changes hands. Each point is a beam (`draw-beam`, gun-util.gc,
 with the blue gun's beam particle recolored: parts 5200 blue, 5201 red, 5202 white), 150 m tall;
 `draw-beam` builds its frame from the direction crossed with up, so a straight-up beam degenerates:
-it is drawn along (0, 1, 0.01).
+it is drawn along (0, 1, 0.01). Round 16 placed three control points on the lanes between the two
+spawns of one district, and drew the force field as security walls across the streets leaving it;
+both went with the district battles (the walls are in the Lisp wiki, jak3 4.42).
 
-**Respawn pick.** After the 4 s spectator, `bf-target-death` opens a page when the player's side
-holds a control point (`*bf*` `respawn-pick`, the base first): the D-pad steps through the side's
-points (`bf-next-held-point`), the zone map shows them, X deploys. A control point moves Jak there
-and makes it the force field's safe place; the base keeps the camp's level wait of §2.5.
+**Respawn page, at every death.** After the 4 s spectator, `bf-target-death` opens the page (`*bf*`
+`respawn-pick`, the base first): the D-pad steps through the side's points (`bf-next-held-point`),
+the whole city's map shows them, X deploys. The point's continue point (`*bf-point-defs*`) says
+which levels it needs:
+
+| Its levels | The respawn |
+|---|---|
+| All loaded (`bf-camp-loaded?`) | Jak is moved onto the point at once; the levels are left as they are. Wanting the continue's levels here unloaded the section that held the borrowed unit levels and crashed the game (below). |
+| Not loaded | A regroup, as the battle's start: its ships down and the stock hatred (`BF_CITY_RESET`), the deployment phase (the traffic wakes its units the stock way), the default nav mesh freed (`BF_CITY_FREE_NAVS`), then `initialize!` 'life at the point's continue point. Jak waits there for its levels (`bf-hold-at-spawn` and `bf-zone-ready?` follow `*bf*` respawn-at); the fight resumes, and `bf-respawn-at-point` moves him onto the point with full health, a fresh loadout and 2 s of invulnerability. The points are kept: they are set up once a battle. |
+
+**Redeploy.** The Battlefront page's last entry, Redeploy (`BF_REQ_REDEPLOY`), is open while
+`*bf*` `redeploy-ok?`, which the director sets every frame of a fight: the player alive with his
+class and 30 s (`BF_REDEPLOY_CALM`) since his last shot, blow or hit taken (`bf-combat!`: a shot of
+any class in `bf-avatar-fire`, the tazer, `bf-send-attack`, an attack in `target-attacked`). The
+combat time is on the game clock (`*display*` game-clock): each process reads its own clock with
+`current-time`, and the START menu's is not the game's, so the menu's own 30 s test never passed.
+The request sends Jak into `target-death` with the mode `'bf-redeploy` (`'change-state`):
+`bf-target-death` then counts no loss and skips the spectator, straight to the respawn page.
+
+**The default nav mesh.** Every new traffic unit takes a nav-control on the engine's
+`*default-nav-mesh*` (citizen.gc, its enemy info's nav mesh) until it is first woken onto a
+street's mesh; a dying process gives it back (`process-drawable` `deactivate`). The engine made it
+128; a reset at a far continue made the traffic spawn its pools again, the old units' nav-controls
+still taken, and a new guard's setup read its missing one (nav-enemy `setup-enemy!`): the game
+crashed. The mod gives it 255 (`nav-mesh.gc`, the most its uint8 count holds), and before each
+reset `bf-city-free-navs` makes every unit of the pools give its own back. With both, two far
+respawns in a row left it at 17 of 255.
 
 **Troop transports.** `bf-transport.gc` is the Haven City: New Dawn port of Jak 2's drop-ship:
 `bf-transport-red` and `bf-transport-blue` are the same rip (`FOB.DGO`), the blue one recolored by
 `mod_models` (`recolor`: hues -15 to 15 turned by 217 degrees). Twice a second
-`bf-city-transports` sends one to the held point nearest the player that has none, two per side at
-most, when the side's units awake plus those its ships still carry fall 3 or more short of its caps
-(`*bf-team-caps*`: Freedom League 14 guards and 6 jetpacks; Krimzon Guard 8 guards, 4 jetpacks, 4
-robotguards, 4 spiders). A ship comes down to the hover height there, opens its hatch and drops up to
-8 units, one at a time, each of the kind its side lacks most (`bf-transport-next-kind`), then flies
-off. A unit is the traffic's own, woken with `'activate-object` (no want-count check) and traffic
-behavior 6, its exit-transport state, with the ship's handle: a guard walks out and jumps down
-(guard-type 11 keeps its weapon), a robotguard falls as a ball, a spider drops, a jetpack flies out.
-A pool holds both sides' units of a kind, so the ship first moves a sleeping unit of its side to
-the head of the pool (`bf-transport-pick`).
+`bf-city-transports` sends one to the held point nearest the player whose section is loaded and
+that has none, two per side at most, when the side's units awake plus those its ships still carry
+fall 3 or more short of its caps (`*bf-team-caps*`: Freedom League 14 guards and 6 jetpacks;
+Krimzon Guard 8 guards, 4 jetpacks, 4 robotguards, 4 spiders). It comes down over the point, or
+over the first spot 10 then 20 m around it with ground at the point's height, a nav mesh, and
+nothing above up to 60 m (`bf-transport-spot`, `bf-transport-sky?`: a 6 m sphere swept up), so
+it never goes through a roof or a bridge. It drops up to 8 units, one at a time, each of the kind
+its side lacks most (`bf-transport-next-kind`), then flies off. A unit is the traffic's own, woken
+with `'activate-object` (no want-count check) and traffic behavior 6, its exit-transport state,
+with the ship's handle: a guard walks out and jumps down (guard-type 11 keeps its weapon), a
+robotguard falls as a ball, a spider drops, a jetpack flies out. A pool holds both sides' units of
+a kind, so the ship first moves a sleeping unit of its side to the head of the pool
+(`bf-transport-pick`). With the transports there, the traffic wakes none of the battle's types by
+itself (`bf-wake-count`).
 
 A guard leaves the hatch only onto free nav mesh 4 to 6 m behind it (`crimson-guard-method-266`,
 crowds included), pinned to the ship until then (method 265), and a jetpack hovers until it
-reaches its exit point. With the hatch toward the player alone, the ship at the Freedom League's
-headquarters faced a building: 10 of the side's 12 units awake stayed in it, rode it away and
-held their pool's places for good. So:
+reaches its exit point:
 
 | Step | What the ship does |
 |---|---|
-| Arrival | Its hatch toward the player, or the first twelfth of a turn from there whose landing (12, 15 and 18 m behind the ship) has ground within 3 m of the point's height on the street's own nav mesh (`bf-city-hatch-dir`, `bf-transport-landing?`). A landing on another mesh moved the units onto a small one at the headquarters' entrance. |
-| A guard waits 1.5 s at the hatch | It turns, eased, to the next such twelfth (`bf-transport-turn`): the guard tries again from there. |
-| A unit still in `exit-transport` 8 s after its drop, or the ship going | The unit goes back to sleep through its tracker's `deactivate-object` (`bf-transport-sleep`): no death, the reserves keep it. Sending it `'traffic-off-force` alone left it asleep but listed awake, and the game crashed in 3 of 6 runs. |
-| Before each drop | The nav mesh under it must have room for the unit (`bf-transport-mesh-room?`): with no nav-control free, the stock `'traffic-activate` reads the unit's missing one and the game crashes. | With the transports there, the traffic wakes none of the
-battle's types by itself (`bf-wake-count`).
+| Arrival | Its hatch toward the player, or the first twelfth of a turn from there whose landing (12, 15 and 18 m behind the ship) has ground within 3 m of the point's height on the street's own nav mesh (`bf-city-hatch-dir`, `bf-transport-landing?`). |
+| A guard waits 1.5 s at the hatch | It turns, eased, to the next such twelfth (`bf-transport-turn`). |
+| A unit still in `exit-transport` 8 s after its drop, or the ship going | The unit goes back to sleep through its tracker's `deactivate-object` (`bf-transport-sleep`): no death, the reserves keep it. The event `'traffic-off-force` alone left it asleep but listed awake, and the game crashed in 3 of 6 runs. |
+| Before each drop | The nav mesh under it must have room for the unit (`bf-transport-mesh-room?`). |
+| Each drop on a control point | Every other unit is posted there (`*bf-posts*`, `bf-post-point`): it guards the point while its side holds it. |
 
-**March on the points.** Twice a second `bf-city-steer` sends each unit with no foe (state `active`
-or `wait`: the attack controller puts it in its hostile state when a foe is within 120 m) toward
-its side's nearest control point it does not hold (`bf-city-goal-point`): farther than 15 m from
-it, and not already walking within 20 m of it, the unit is put on the lane segment nearest the
-point on its own nav mesh, within 60 m (`citizen-method-199`, the lane its active state walks).
-
-**Force field walls.** `bf-city-walls` draws the force field with Haven City's own security walls
-(`spawn-security-wall`, `ctywide-obs.gc`: the force field of Jak 2's district borders, solid to
-Jak, its texture animated by ctywide's `*security-texture-anim-array*`). A section's nav graph
-lists in its `link-array` the lanes that leave it for another section: each link has the graph it
-goes to (`dest-graph-id`), the branch going out (`src-branch-id`) and a copy of the node it reaches
-(`dummy-node`). The links to another section of the zone are skipped; exits within 30 m make one
-street; its wall stands across the street's mean direction at its mean exit, each exit halfway
-between the last node inside and the copied node (that node alone lies in the next district: the
-Industrial Zone's wall stood in the Port, out of the player's reach), 30 m wide and 40 m tall from
-10 m below the exit (at the Port the next section's node stands 13 m above the street 25 m inside).
-The walls are the director's children, their handles in `*bf*` `walls`, taken down at the battle's
-end (`bf-city-walls-down`). The wall color is global (`set-security-color!`): every wall is red. The
-invisible force field (§2.6) asks the zone's minimap cells, which can end before a wall (the
-Industrial Zone's at x 768 m, its wall to the Port at 745 m): within 30 m of a wall the zone's
-level alone holds the player (`bf-near-wall?`), so he walks up to the wall, which stops him.
+**Routes to the points.** A unit walks its lane and, at its end, asks its controller's
+`choose-branch-callback` which lane to take next (vehicle-control.gc, method 14; the stock pick is
+a random lane, method 15). `bf-city-steer` gives the battle's units `bf-city-choose-branch`: the
+first lane of the way to the unit's point (`bf-city-unit-goal`: the point it is posted on; else one
+in two, odd process id, the nearest control point its side holds in a loaded section; else the
+nearest it does not hold), found by a search breadth first over the lanes its faction may walk,
+256 nodes at most, through every loaded section (`bf-city-route`). At its point it keeps turning
+back across it. Two earlier tries failed: putting units on a lane every half second
+(`citizen-method-199` starts a unit over at the lane's first vertex, so they never got anywhere),
+and taking at each junction the lane ending nearest the goal (dead ends and detours left the
+defenders 140 to 200 m off).
 
 **Aim.** A guard class turns its upper body toward the aim while it fires (`bf-avatar-aim-torso`,
 `battlefront-player.gc`): the stock guards' own aim (`crimson-guard-method-259` and 260), a
@@ -1181,12 +1195,16 @@ code (its name cannot be printed); the object is sound.
   no other section, interior or mission level loads during a battle (Haven City holds two
   sections at most): a continue point whose list names another level cannot be a camp there (a
   respawn would wait for ever).
-- **Walls only on lanes.** The force field walls stand where a traffic lane leaves the district
-  (one street at the Port); a path with no lane is held by the invisible force field alone.
-- **The far side fills last.** A side's units come only by its transports, the one nearest the
-  player first: in the runs the player's side had 17 to 20 units 8 s into the fight, the far side
-  4 to 9, and 13 to 20 after 40 s. Some guards still find no ground behind a hatch: about 16 units
-  a run go back to sleep after 8 s at it (§2.9).
+- **Units are only where the player is.** Haven City holds two sections with their units at
+  most: the points away from him are fought for without units (§2.9, a simple rule on the points
+  next to them), and a side's units come only by its transports, to a held point nearest him.
+- **Defenders patrol, they do not stand.** A point's guards walk its lanes back and forth: in the
+  runs up to 4 of them were within 30 m while their ship dropped, then 0 to 1 within 15 m. They
+  fight what comes; a determined attack can still take the point.
+- **A far respawn reloads the area.** It goes through a reset at the point's continue point: the
+  units around the player are spawned again there, as at a battle's start.
+- **Some guards find no ground behind a hatch:** about 16 units a run go back to sleep after 8 s
+  at it (§2.9).
 - **The transports are silent:** their engine sounds are Jak 2's.
 - **Nothing is saved:** the battle ends with the session.
 - **The Jak 2 models are Naughty Dog assets** converted from the user's rips: the mod repository is
