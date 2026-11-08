@@ -216,6 +216,7 @@
    (locked?     symbol)         ;; the tazer locked a foe this frame (its automatic aim)
    (bolt        lightning-control) ;; guard: the tazer arc, #f for the other classes
    (gun-jm      joint-mod)      ;; guard: scales its weapon joint (the tazer's look), #f for the other classes
+   (aim-jm      joint-mod)      ;; guard: turns its upper body toward the aim while it fires, #f for the other classes
    (aim-foe     handle)         ;; foe under the crosshair (the tazer's: the locked foe), #f for none
    (dodge-until time-frame)     ;; guard: rolling until then (L2); once over, when it ended
    (dodge-time  time-frame)     ;; when the last roll started
@@ -1060,6 +1061,57 @@
   (none)
   )
 
+(defbehavior bf-avatar-aim-torso bf-avatar ()
+  "Guard classes, every frame: while the weapon fires (and 0.3 s after), the upper body turns
+   toward the aim point, so the shooting clip points the weapon where the crosshair is; otherwise
+   it eases back. The stock guards' own aim, copied (guard.gc crimson-guard-method-259 and 260): a
+   polar-look-at joint-mod on node 4 (swivelMe) turned in world space about the model's x and y
+   axes, 80 degrees at most each, from 2 m up and 0.5 m to the side (the gun's shoulder), eased
+   at 5 a second. Does nothing without the joint-mod."
+  (let ((jm (-> self aim-jm)))
+    (when jm
+      (cond
+        ((< (current-time) (+ (-> self shoot-until) (seconds 0.3)))
+         (let ((x-axis (vector-x-quaternion! (new 'stack-no-clear 'vector) (-> self root quat)))
+               (y-axis (vector-y-quaternion! (new 'stack-no-clear 'vector) (-> self root quat)))
+               (from (vector-copy! (new 'stack-no-clear 'vector) (-> self root trans)))
+               (want (new 'stack-no-clear 'vector))
+               (aim (vector-copy! (new 'stack-no-clear 'vector) (-> self aim)))
+               (now-rot (new 'stack-no-clear 'vector))
+               (want-rot (new 'stack-no-clear 'vector))
+               )
+           (vector+*! from from x-axis 2048.0)
+           (vector+*! from from y-axis 8540.16)
+           ;; the stock guard aims a little to the side of its target, the gun being off its middle
+           (vector+! aim aim (vector-rotate90-around-y!
+                               (new 'stack-no-clear 'vector)
+                               (vector-normalize! (vector-! (new 'stack-no-clear 'vector) aim from) -2998.272)
+                               )
+                     )
+           (vector-normalize! (vector-! want aim from) 1.0)
+           (rot-zxy-from-vector! now-rot (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> self root quat)))
+           (rot-zxy-from-vector! want-rot want)
+           (let ((pitch (fmax -14563.556 (fmin 14563.556 (deg- (-> want-rot x) (-> now-rot x)))))
+                 (yaw (fmax -14563.556 (fmin 14563.556 (deg- (-> want-rot y) (-> now-rot y)))))
+                 (q (new 'stack-no-clear 'quaternion))
+                 (qy (new 'stack-no-clear 'quaternion))
+                 )
+             (quaternion-vector-angle! q x-axis pitch)
+             (quaternion-vector-angle! qy y-axis yaw)
+             (quaternion*! q qy q)
+             (quaternion-slerp! (-> jm quat) (-> jm quat) q (fmin 1.0 (* 5.0 (seconds-per-frame))))
+             )
+           )
+         )
+        (else
+          (quaternion-pseudo-seek (-> jm quat) (-> jm quat) *unity-quaternion* (seconds-per-frame))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior bf-avatar-gun-look bf-avatar ()
   "Guard classes: the weapon joint at BF_TAZER_SCALE while the tazer is in hand, a short stun baton,
    at full size for the rifle and the grenade launcher. Does nothing without the joint."
@@ -1261,6 +1313,7 @@
           )
       (bf-avatar-pick-weapon)
       (bf-avatar-gun-look)
+      (bf-avatar-aim-torso)
       (bf-avatar-top-update)
       (bf-clamp-ammo)
       )
@@ -1774,8 +1827,8 @@
 
 (defmethod relocate ((this bf-avatar) (offset int))
   "The avatar comes from a dead-pool heap, which moves its processes when it compacts: the tazer
-   arc and the weapon joint's joint-mod live in the avatar's heap, so their pointers move with it
-   (as crimson-guard's l-control, gun's mag). Seen in game without it: the first tazer shot read
+   arc and the weapon and aim joint-mods live in the avatar's heap, so their pointers move with it
+   (as crimson-guard's l-control and joint, gun's mag). Seen in game without it: the first tazer shot read
    the old address, and the weapon joint's scale written there crashed the game seconds after a
    guard deployed."
   (if (-> this bolt)
@@ -1783,6 +1836,9 @@
       )
   (if (-> this gun-jm)
       (&+! (-> this gun-jm) offset)
+      )
+  (if (-> this aim-jm)
+      (&+! (-> this aim-jm) offset)
       )
   (call-parent-method this offset)
   )
@@ -1926,12 +1982,17 @@
   ;; the guards' tazer arc (guard.gc init: spec 19, nothing drawn until it fires)
   (set! (-> self bolt) (the-as lightning-control #f))
   (set! (-> self gun-jm) (the-as joint-mod #f))
+  (set! (-> self aim-jm) (the-as joint-mod #f))
   (when (bf-guard-class? class)
     (set! (-> self bolt) (new 'process 'lightning-control (-> *lightning-spec-id-table* 19) self 0.0))
     (set! (-> self bolt state points-to-draw) 0)
     ;; the weapon joint, shrunk while the tazer is in hand (`bf-avatar-gun-look`)
     (if (< BF_GUARD_GUN_NODE (-> self node-list length))
         (set! (-> self gun-jm) (new 'process 'joint-mod (joint-mod-mode joint-set*) self BF_GUARD_GUN_NODE))
+        )
+    ;; the upper body turned toward the aim while firing (`bf-avatar-aim-torso`), as the stock guards
+    (if (< 4 (-> self node-list length))
+        (set! (-> self aim-jm) (new 'process 'joint-mod (joint-mod-mode polar-look-at) self 4))
         )
     ;; the weapon clips play on the upper body (`bf-avatar-top-play`); its resting clip is the idle,
     ;; never none (top-anim falls back to it between two clips)
