@@ -7,6 +7,7 @@
   "rips": {
     "jak2/dig1": "DG1.DGO",
     "jak2/drillmtn": "DRILLMTN.DGO",
+    "jak2/forestb": "FOB.DGO",
     "jak3/ctypesa": "CTYPESA.DGO"
   },
   "models": {
@@ -50,6 +51,19 @@
       "clip_prefix": "crimson-guard-hover-",
       "textures_from": "jak3/ctypesa/crimson-guard-lod0.glb",
       "texture_prefix": "cguardgame-"
+    },
+    // The Jak 2 Krimzon Guard troop transport (A-G transport) that brings each side's units to its
+    // base and control points: red as ripped, and blue, its red texels turned to blue (the mod
+    // Haven City: New Dawn's rule). Its clips as the transport code wants them: 2 idle, 3
+    // hatch-open, 4 hatch-close.
+    "bf-transport-red": {
+      "level": "ctypesa",
+      "mesh": "jak2/forestb/transport-lod0.glb"
+    },
+    "bf-transport-blue": {
+      "level": "ctypesa",
+      "mesh": "jak2/forestb/transport-lod0.glb",
+      "recolor": {"hues": [-15, 15], "rotate": 217, "min_saturation": 0.3}
     }
   }
 }

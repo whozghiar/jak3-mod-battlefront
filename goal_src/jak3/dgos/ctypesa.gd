@@ -7,6 +7,8 @@
   "bf-red-guard-gl-ag.go"  ;; the same with the grenade launcher (build-actor)
   "crimson-guard-ag.go"    ;; 288976
   "shield-sphere-explode-ag.go"
+  "bf-transport-red-ag.go"   ;; Jak 2 troop transport, red (build-actor)
+  "bf-transport-blue-ag.go"  ;; the same in blue (build-actor)
   "shield-sphere-distort-ag.go"
   "shield-sphere-ag.go"
   "ctypesa.go"

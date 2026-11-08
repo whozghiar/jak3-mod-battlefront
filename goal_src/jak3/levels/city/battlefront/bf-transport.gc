@@ -1,0 +1,716 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: bf-transport.gc
+;; name in dgo: bf-transport
+;; dgos: CWI
+
+#|
+  Battlefront mod -- the troop transport (A-G transport) that brings each side's units to the
+  battlefield: Jak 2's Krimzon Guard drop-ship, red for the Krimzon Guard and blue for the Freedom
+  League (custom_assets/jak3/models/models.jsonc, art in CTYPESA). Ported from the mod Haven City:
+  New Dawn (levels/city/war/hj2-transport.gc there).
+
+  `bf-transport-spawn` sends one over a point (a side's base or a control point it holds,
+  battlefront-city.gc): it comes down from 40 m up to the hover vehicles' height there, opens its
+  hatch at the back and drops up to BF_TRANSPORT_MAX_UNITS units of its side, one at a time, each
+  of the kind its side lacks most (`bf-transport-next-kind`: *bf-team-caps* against the units awake
+  now), then closes and flies off, and dies once out of sight. The units are the traffic's own,
+  woken the stock way ('activate-object) with traffic behavior 6, their exit-transport state: a
+  guard walks out of the hatch and jumps down (crimson-guard method 265, guard-states.gc), a
+  roboguard falls as a ball and rolls on, a spider robot drops and lands (spydroid.gc), a jetpack
+  guard flies out to 12 m behind the ship (flying-turret.gc). A pool holds both sides' units of a
+  kind (blue and red guards, blue and red jetpacks): the ship moves a sleeping unit of its side to
+  the head of the pool, the one the traffic wakes next (`bf-transport-pick`).
+
+  Invulnerable, as Jak 2's: penetrated-by none, no 'attack. The engine sounds are Jak 2's, silent in
+  Jak 3.
+|#
+
+;; DECOMP BEGINS
+
+(defconstant BF_TRANSPORT_MAX_UNITS 8)          ;; units one ship drops at most
+(defconstant BF_TRANSPORT_HOVER_MIN (meters 4)) ;; how high over the ground it hovers: the hover
+(defconstant BF_TRANSPORT_HOVER_MAX (meters 14)) ;; vehicles' flight level there, kept between these
+
+;; Joints (Jak 2's, kept by build-actor): 3 main, 4 hatch. Clips: 2 idle, 3 hatch-open, 4 hatch-close.
+(def-actor bf-transport-red
+  :art (idle-ja hatch-open-ja hatch-close-ja)
+  :bounds (0 5 0 17)
+  )
+
+;; the Freedom League's ship: the same skeleton and clips, blue
+(def-actor bf-transport-blue
+  :art (idle-ja hatch-open-ja hatch-close-ja)
+  :bounds (0 5 0 17)
+  )
+
+;;   y-dest: the height it hovers at; y-ground: the ground under it. next-drop-time: when it may try
+;;   the next unit; last-drop-time: its last unit dropped (or its arrival). spawn-side: the side of
+;;   the hatch the next guard walks out of (0 left, 1 right). spawn?: still dropping. leave-time:
+;;   when it takes off (0: not decided). max-units / count-units: units to drop / dropped. team: its
+;;   side (BF_TEAM_*). point: the battle point it serves (`*bf*` points). ambient-sound-id: its
+;;   engine loop.
+(deftype bf-transport (process-focusable)
+  ((y-dest              float)
+   (y-ground            float)
+   (next-drop-time      time-frame)
+   (last-drop-time      time-frame)
+   (spawn-side          uint32)
+   (spawn?              symbol)
+   (leave-time          time-frame)
+   (max-units           uint32)
+   (count-units         uint32)
+   (team                int32)
+   (point               int32)
+   (ambient-sound-id    sound-id)
+   (drops               handle 8)       ;; the units it dropped, #f once out of the ship
+   (drop-at             time-frame 8)   ;; when each was dropped
+   (turn-time           time-frame)     ;; its last turn for a guard waiting at the hatch
+   (want-quat           quaternion :inline) ;; the way it turns to
+   )
+  (:state-methods
+    come-down
+    idle
+    leave
+    die-fast
+    )
+  (:methods
+    (setup-collision (_type_) none)
+    (drop-unit (_type_) none)
+    (play-engine-sound (_type_) none)
+    )
+  )
+
+
+(defun bf-transport-team-count ((team int) (out (pointer int32)))
+  "Units of side TEAM awake now, by kind (*bf-kinds* order), into OUT[0] to OUT[3]: the traffic's
+   active lists (its trackers), each unit's side told by `bf-unit-team`. Returns their sum."
+  (let ((sum 0))
+    (dotimes (k BF_KIND_COUNT)
+      (set! (-> out k) 0)
+      )
+    (when (and *traffic-engine* (nonzero? *traffic-engine*))
+      (dotimes (ti 2)
+        (let ((tr (-> *traffic-engine* tracker-array ti)))
+          (dotimes (i (-> tr active-object-count))
+            (let ((type (the-as int (-> tr active-object-type-list i))))
+              (dotimes (k BF_KIND_COUNT)
+                (when (= type (-> *bf-kinds* k))
+                  (let ((proc (handle->process (-> tr active-object-list i))))
+                    (when (and proc (= (bf-unit-team proc) team))
+                      (+! (-> out k) 1)
+                      (+! sum 1)
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    sum
+    )
+  )
+
+(defun bf-transport-pick ((type int) (team int))
+  "Find, in the traffic's pool of sleeping units of traffic type TYPE, one of side TEAM
+   (`bf-unit-team`) and move it to the head of the pool, the one the traffic's activate-from-params
+   wakes next. Returns #t when one is there, else #f. Side effects: the order of the pool's
+   handles."
+  (when (and *traffic-engine* (nonzero? *traffic-engine*))
+    (let* ((info (-> *traffic-engine* object-type-info-array type))
+           (arr (-> info array))
+           )
+      (dotimes (i (-> info inactive-count))
+        (let ((proc (handle->process (-> arr i))))
+          (when (and proc (= (bf-unit-team proc) team))
+            (let ((head (-> arr 0)))
+              (set! (-> arr 0) (-> arr i))
+              (set! (-> arr i) head)
+              )
+            (return #t)
+            )
+          )
+        )
+      )
+    )
+  #f
+  )
+
+(defun bf-transport-next-kind ((team int))
+  "Traffic type of the unit side TEAM lacks most now (*bf-team-caps* against `bf-transport-team-count`),
+   among those with a sleeping unit of its side; -1 when it lacks none."
+  (let ((now (new 'stack-no-clear 'array 'int32 4))
+        (best -1)
+        (gap 0)
+        )
+    (bf-transport-team-count team now)
+    (dotimes (k BF_KIND_COUNT)
+      (let ((left (- (-> *bf-team-caps* (+ (* 4 team) k)) (-> now k))))
+        (when (< gap left)
+          (let ((type (-> *bf-kinds* k)))
+            (when (bf-transport-pick type team)
+              (set! gap left)
+              (set! best type)
+              )
+            )
+          )
+        )
+      )
+    ;; the pick above reordered each pool it looked at: the chosen kind's again, its unit first
+    (if (>= best 0)
+        (bf-transport-pick best team)
+        )
+    best
+    )
+  )
+
+(defun bf-transport-ground-point ((this bf-transport) (out vector))
+  "Set OUT to the ground under the ship: its place at y-ground. Returns OUT."
+  (set-vector! out (-> this root trans x) (-> this y-ground) (-> this root trans z) 1.0)
+  out
+  )
+
+(defun bf-transport-mesh-room? ((mesh nav-mesh) (type int))
+  "#t when the unit of traffic type TYPE the traffic wakes next (the head of its pool) can take a
+   place on MESH: one of its nav-controls is free, or that unit holds one there already. A unit
+   keeps its nav-control on the mesh it last walked, asleep too, and a mesh holds
+   max-nav-control-count; with none free, the stock 'traffic-activate takes the unit's #f nav
+   control's state and the game crashes (nav-mesh::new-nav-control 'too many users', seen at
+   Freedom HQ when every unit of a side had been dropped at its base)."
+  (or (< (-> mesh nav-control-count) (-> mesh max-nav-control-count))
+      (let ((free #f))
+        (dotimes (i (-> mesh nav-control-count))
+          (if (not (-> mesh nav-control-array i process))
+              (set! free #t)
+              )
+          )
+        free
+        )
+      (let* ((info (-> *traffic-engine* object-type-info-array type))
+             (head (if (> (-> info inactive-count) 0) (the-as process-drawable (handle->process (-> info array 0)))))
+             )
+        (and head (nonzero? (-> head nav)) (-> head nav) (= (-> head nav state mesh) mesh))
+        )
+      )
+  )
+
+(defmethod drop-unit ((this bf-transport))
+  "Jak 2's transport-method-33, once the delay is over: wake a unit of the ship's side, of the kind it
+   lacks most (`bf-transport-next-kind`), with the traffic's 'activate-object: behavior 6 (each kind's
+   exit-transport), on the nav mesh of the ground under the ship. A guard comes in at the hatch (2 m
+   above the ship's origin; its method 265 puts it inside, on spawn-side, and walks it out); the
+   other kinds at the hatch's end, 12 m behind the ship and 3 m up, facing out, and fall or fly from
+   there, when that mesh has room for it (`bf-transport-mesh-room?`). Guard type 11 keeps the
+   weapon the squad gave. Next try 1 s later after a unit (2 s off
+   screen), 0.5 s after none. Side effects: a unit on the street, kept in drops; the pool's order,
+   spawn-side, count-units, next-drop-time, last-drop-time."
+  (when (>= (current-time) (-> this next-drop-time))
+    (let ((params (new 'stack 'traffic-object-spawn-params))
+          (on-screen (logtest? (-> this draw status) (draw-control-status on-screen)))
+          (kind (bf-transport-next-kind (-> this team)))
+          )
+      (set! (-> params proc) #f)
+      (let ((nav (find-nearest-nav-mesh (bf-transport-ground-point this (new 'stack-no-clear 'vector)) 8192.0)))
+        (when (and nav *traffic-manager* (>= kind 0) (bf-transport-mesh-room? nav kind))
+          (set! (-> params object-type) (the-as traffic-type kind))
+          (set! (-> params behavior) (the-as uint 6))
+          (set! (-> params id) (the-as uint 0))
+          (set! (-> params nav-mesh) nav)
+          (set! (-> params nav-branch) #f)
+          (set! (-> params handle) (process->handle this))
+          (set! (-> params handle-parent) (the-as handle #f))
+          (set! (-> params user-data) (-> this spawn-side))
+          (set! (-> params flags) (traffic-spawn-flags))
+          (set! (-> params guard-type) (the-as uint 11))
+          (set! (-> params entity) #f)
+          (vector-reset! (-> params velocity))
+          (quaternion-rotate-local-y! (-> params rotation) (-> this root quat) 32768.0)
+          (cond
+            ((= kind (the-as int (traffic-type guard-a)))
+             (vector-copy! (-> params position) (-> this root trans))
+             (+! (-> params position y) 8192.0)
+             )
+            (else
+              ;; the hatch's end, in the ship's frame
+              (let ((out (vector-orient-by-quat! (new 'stack-no-clear 'vector)
+                                                 (new 'static 'vector :y 12288.0 :z -49152.0 :w 1.0)
+                                                 (-> this root quat)
+                                                 )
+                         )
+                    )
+                (vector+! (-> params position) (-> this root trans) out)
+                )
+              )
+            )
+          (send-event *traffic-manager* 'activate-object params)
+          )
+        )
+      (cond
+        ((-> params proc)
+         (when (< (-> this count-units) BF_TRANSPORT_MAX_UNITS)
+           (set! (-> this drops (-> this count-units)) (process->handle (-> params proc)))
+           (set-time! (-> this drop-at (-> this count-units)))
+           )
+         (set! (-> this spawn-side) (- 1 (the-as int (-> this spawn-side))))
+         (+! (-> this count-units) 1)
+         (set-time! (-> this last-drop-time))
+         (set! (-> this next-drop-time) (+ (current-time) (if on-screen (seconds 1) (seconds 2))))
+         )
+        (else
+          (set! (-> this next-drop-time) (+ (current-time) (seconds 0.5)))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defconstant BF_TRANSPORT_STUCK (seconds 8)) ;; a unit still at the hatch this long after its drop is stuck
+(defconstant BF_TRANSPORT_WAIT (seconds 1.5)) ;; a guard waiting this long at the hatch turns the ship
+
+(defun bf-transport-sleep ((proc process))
+  "Put traffic unit PROC back to sleep the traffic's way: its tracker's deactivate-object takes it
+   out of the active list, sends it 'traffic-off-force (citizen go-inactive) and gives it back to
+   its pool. The event alone left it asleep but still listed awake: counted by the sides' counts,
+   never woken again, and the traffic's lists out of step with the units (the game crashed in 3 of
+   6 runs). Returns #t when PROC was in an active list."
+  (let ((h (process->handle proc)))
+    (dotimes (ti 2)
+      (let ((tr (-> *traffic-engine* tracker-array ti)))
+        (dotimes (i (-> tr active-object-count))
+          (when (= (-> tr active-object-list i) h)
+            (deactivate-object tr i #t)
+            (return #t)
+            )
+          )
+        )
+      )
+    )
+  #f
+  )
+
+(defun bf-transport-release ((this bf-transport) (all? symbol))
+  "Send back to its pool each unit THIS dropped that is still in its exit-transport state
+   BF_TRANSPORT_STUCK (8 s, the ship turning for it meanwhile, `bf-transport-turn`; a guard out of
+   the hatch leaves it within 1 s) after its drop, or at once when ALL? (the ship going). A guard waits at the
+   hatch until the ground 4 to 6 m behind it is free nav mesh (guard.gc crimson-guard-method-266),
+   pinned to the ship meanwhile (method 265), and rides it away when there is none; a jetpack
+   hovers until it reaches its exit point. Stuck, they held their pool's places for good: at
+   Freedom HQ 10 of the Freedom League's 12 units awake stayed in the ship. `bf-transport-sleep`
+   puts one back to sleep, no death: the reserves keep it. Side effects: drops."
+  (dotimes (i BF_TRANSPORT_MAX_UNITS)
+    (let ((proc (handle->process (-> this drops i))))
+      (cond
+        ((or (not proc) (not (-> proc next-state)) (!= (-> proc next-state name) 'exit-transport))
+         (set! (-> this drops i) (the-as handle #f))
+         )
+        ((or all? (time-elapsed? (-> this drop-at i) BF_TRANSPORT_STUCK))
+         (if (and *traffic-engine* (nonzero? *traffic-engine*))
+             (bf-transport-sleep proc)
+             )
+         (set! (-> this drops i) (the-as handle #f))
+         (format 0 "battlefront: side ~D ship sent a unit stuck at its hatch back to its pool~%" (-> this team))
+         )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-transport-ground ((pos vector))
+  "Drop POS onto the ground (backgnd) below it: a 1 m sphere cast from 5 m above to 25 m below.
+   Returns #t with POS's y on the ground, #f (POS unchanged) when nothing is there."
+  (let ((cq (new 'stack-no-clear 'collide-query)))
+    (vector-copy! (-> cq start-pos) pos)
+    (+! (-> cq start-pos y) 20480.0)
+    (vector-reset! (-> cq move-dist))
+    (set! (-> cq move-dist y) -122880.0)
+    (set! (-> cq radius) 4096.0)
+    (set! (-> cq collide-with) (collide-spec backgnd))
+    (set! (-> cq ignore-process0) #f)
+    (set! (-> cq ignore-process1) #f)
+    (set! (-> cq ignore-pat) (new 'static 'pat-surface :noentity #x1 :nojak #x1 :probe #x1 :noendlessfall #x1 :board #x1))
+    (set! (-> cq action-mask) (collide-action solid))
+    (when (>= (fill-and-probe-using-line-sphere *collide-cache* cq) 0.0)
+      (set! (-> pos y) (-> cq best-other-tri intersect y))
+      #t
+      )
+    )
+  )
+
+(defun bf-transport-landing? ((pos vector) (dir vector) (mesh nav-mesh))
+  "#t when the units a troop transport over POS drops through a hatch along DIR land on the street:
+   12, 15 and 18 m along DIR from POS (a guard leaves the hatch's end, 12 m behind the ship, onto
+   the ground 4 to 6 m further, guard.gc crimson-guard-method-266) there is ground (`bf-transport-ground`)
+   within 3 m of POS's height, on MESH, the street's nav mesh under the ship (within 0.5 m). A
+   landing on another mesh moved the units onto it: at Freedom HQ a small one by the headquarters'
+   entrance ran out of nav-controls, and the stock 'traffic-activate crashed the game on the next
+   unit (`bf-transport-mesh-room?`)."
+  (let ((at (new 'stack-no-clear 'vector))
+        (ok #t)
+        )
+    (dotimes (k 3)
+      (when ok
+        (vector+float*! at pos dir (meters (+ 12.0 (* 3.0 (the float k)))))
+        (set! ok (and (bf-transport-ground at)
+                      (< (fabs (- (-> at y) (-> pos y))) (meters 3))
+                      (= (find-nearest-nav-mesh at 2048.0) mesh)
+                      )
+              )
+        )
+      )
+    ok
+    )
+  )
+
+(defun bf-transport-waiting? ((this bf-transport))
+  "#t when a unit THIS dropped is still in its exit-transport state BF_TRANSPORT_WAIT after its drop:
+   a guard that found no free ground behind the hatch (guard.gc crimson-guard-method-266)."
+  (dotimes (i BF_TRANSPORT_MAX_UNITS)
+    (let ((proc (handle->process (-> this drops i))))
+      (if (and proc (-> proc next-state) (= (-> proc next-state name) 'exit-transport)
+               (time-elapsed? (-> this drop-at i) BF_TRANSPORT_WAIT)
+               )
+          (return #t)
+          )
+      )
+    )
+  #f
+  )
+
+(defun bf-transport-turn ((this bf-transport))
+  "Turn THIS toward the next way, a twelfth of a turn at a time from the way it turns to now, whose
+   landing is on the street under it (`bf-transport-landing?`, the same nav mesh): its want-quat,
+   which the idle state eases the ship to. A guard waiting at the hatch is pinned to it and looks for
+   free ground behind it every frame (method 266, which no test here predicts: a crowd of units
+   blocks it too), so the turn gives it another place to land. Nothing when no way passes."
+  (let* ((ground (bf-transport-ground-point this (new 'stack-no-clear 'vector)))
+         (mesh (find-nearest-nav-mesh ground 8192.0))
+         (hatch (vector-negate! (new 'stack-no-clear 'vector) (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> this want-quat))))
+         (dir (new 'stack-no-clear 'vector))
+         (found #f)
+         )
+    (set! (-> hatch y) 0.0)
+    (vector-normalize! hatch 1.0)
+    (when mesh
+      (let ((k 1))
+        (while (and (not found) (< k 12))
+          (vector-rotate-around-y! dir hatch (* (degrees 30) (the float k)))
+          (set! (-> dir w) 1.0)
+          (if (bf-transport-landing? ground dir mesh)
+              (set! found #t)
+              (+! k 1)
+              )
+          )
+        )
+      (when found
+        (forward-up-nopitch->quaternion (-> this want-quat) (vector-negate! (new 'stack-no-clear 'vector) dir) *up-vector*)
+        )
+      )
+    )
+  (none)
+  )
+
+(defmethod play-engine-sound ((this bf-transport))
+  "Jak 2's transport-method-35: the engine loop, louder the closer the ship is to the ground (silent
+   35 m up), higher the faster it climbs or sinks (Jak 2's sound: silent in Jak 3)."
+  (let ((speed-k (lerp-scale 0.0 2.0 (fabs (-> this root transv y)) 0.0 122880.0))
+        (height-k (lerp-scale 0.0 1.0 (- (-> this root trans y) (-> this y-dest)) 143360.0 20480.0))
+        (spec (static-sound-spec "transport" :volume 0.0 :mask (pitch reg0)))
+        )
+    (set! (-> spec volume) (the int (* 1024.0 height-k)))
+    (set! (-> spec pitch-mod) (the int (* 1524.0 speed-k)))
+    (sound-play-by-spec spec (-> this ambient-sound-id) (-> this root trans))
+    )
+  (none)
+  )
+
+(defmethod setup-collision ((this bf-transport))
+  "The ship's collision: a solid obstacle Jak bumps into and shots stop on, that nothing hurts
+   (penetrated-by none): one 8 m sphere on joint 3, as build-actor models carry no collide mesh."
+  (let ((cs (new 'process 'collide-shape-moving this (collide-list-enum usually-hit-by-player))))
+    (set! (-> cs dynam) (copy *standard-dynamics* 'process))
+    (set! (-> cs reaction) cshape-reaction-default)
+    (set! (-> cs no-reaction) (the-as (function collide-shape-moving collide-query vector vector object) nothing))
+    (set! (-> cs penetrated-by) (penetrate))
+    (let ((grp (new 'process 'collide-shape-prim-group cs (the-as uint 1) 0)))
+      (set! (-> cs total-prims) (the-as uint 2))
+      (set! (-> grp prim-core collide-as) (collide-spec obstacle))
+      (set! (-> grp prim-core collide-with) (collide-spec jak player-list))
+      (set! (-> grp prim-core action) (collide-action solid))
+      (set-vector! (-> grp local-sphere) 0.0 20480.0 0.0 69632.0)
+      (set! (-> cs root-prim) grp)
+      )
+    (let ((hull (new 'process 'collide-shape-prim-sphere cs (the-as uint 0))))
+      (set! (-> hull prim-core collide-as) (collide-spec obstacle))
+      (set! (-> hull prim-core collide-with) (collide-spec jak player-list))
+      (set! (-> hull prim-core action) (collide-action solid))
+      (set! (-> hull transform-index) 3)
+      (set-vector! (-> hull local-sphere) 0.0 0.0 0.0 32768.0)
+      )
+    (set! (-> cs nav-radius) (* 0.75 (-> cs root-prim local-sphere w)))
+    (let ((rp (-> cs root-prim)))
+      (set! (-> cs backup-collide-as) (-> rp prim-core collide-as))
+      (set! (-> cs backup-collide-with) (-> rp prim-core collide-with))
+      )
+    (set! (-> this root) cs)
+    )
+  (none)
+  )
+
+(defmethod run-logic? ((this bf-transport))
+  "Always run: the ship flies and drops units far from the camera too."
+  #t
+  )
+
+(defmethod deactivate ((this bf-transport))
+  "Stop the engine loop with the process, and send its units still at the hatch back to their pool
+   (`bf-transport-release`)."
+  (sound-stop (-> this ambient-sound-id))
+  (bf-transport-release this #t)
+  (call-parent-method this)
+  (none)
+  )
+
+(defbehavior bf-transport-event-handler bf-transport ((proc process) (argc int) (message symbol) (block event-message-block))
+  "'die-fast: gone at once; 'leave: take off now; 'units-left: how many units it has still to drop;
+   no 'attack (it can't be destroyed)."
+  (case message
+    (('die-fast)
+     (go-virtual die-fast)
+     )
+    (('leave)
+     (if (not (and (-> self next-state)
+                   (let ((name (-> self next-state name)))
+                     (or (= name 'leave) (= name 'die-fast))
+                     )
+                   )
+              )
+         (go-virtual leave)
+         )
+     )
+    (('units-left)
+     (- (-> self max-units) (-> self count-units))
+     )
+    )
+  )
+
+;; Sinks from 40 m up to its hover height (twice the height left per second, 30 m/s at most), then
+;; idle. The battle over: it turns back.
+(defstate come-down (bf-transport)
+  :virtual #t
+  :event bf-transport-event-handler
+  :enter (behavior ()
+    (set-time! (-> self state-time))
+    )
+  :code (behavior ()
+    (ja-channel-push! 1 0)
+    (ja-no-eval :group! bf-transport-red-idle-ja :num! (seek!) :frame-num 0.0)
+    (until (ja-done? 0)
+      (suspend)
+      (ja :num! (seek!))
+      )
+    (sleep-code)
+    )
+  :post (behavior ()
+    (set! (-> self root transv y) (* 2.0 (- (-> self y-dest) (-> self root trans y))))
+    (set! (-> self root transv y) (fmax -122880.0 (fmin 122880.0 (-> self root transv y))))
+    (+! (-> self root trans y) (* (-> self root transv y) (seconds-per-frame)))
+    (cond
+      ((not (bf-fighting?))
+       (go-virtual leave)
+       )
+      ((< (fabs (- (-> self root trans y) (-> self y-dest))) 409.6)
+       (go-virtual idle)
+       )
+      )
+    (play-engine-sound self)
+    (transform-post)
+    )
+  )
+
+;; Arrived: opens its hatch and drops its units; takes off 3 s after its last one, or after 6 s
+;; without one (its side lacks none, or none of its side sleeps), or once the battle is over.
+(defstate idle (bf-transport)
+  :virtual #t
+  :event bf-transport-event-handler
+  :enter (behavior ()
+    (set-time! (-> self state-time))
+    (set-time! (-> self last-drop-time))
+    (set! (-> self root transv y) 0.0)
+    (set! (-> self next-drop-time) 0)
+    )
+  :code (behavior ()
+    (ja-channel-push! 1 0)
+    (sound-play "tran-door-open")
+    (ja-no-eval :group! bf-transport-red-hatch-open-ja :num! (seek! max 0.5) :frame-num 0.0)
+    (until (ja-done? 0)
+      (suspend)
+      (ja :num! (seek! max 0.5))
+      )
+    (sleep-code)
+    )
+  :post (behavior ()
+    (if (-> self spawn?)
+        (drop-unit self)
+        )
+    (when (and (bf-transport-waiting? self) (time-elapsed? (-> self turn-time) BF_TRANSPORT_WAIT))
+      (set-time! (-> self turn-time))
+      (bf-transport-turn self)
+      )
+    (quaternion-slerp! (-> self root quat) (-> self root quat) (-> self want-quat) (fmin 1.0 (* 3.0 (seconds-per-frame))))
+    (bf-transport-release self #f)
+    (when (and (zero? (-> self leave-time))
+               (or (>= (-> self count-units) (-> self max-units))
+                   (time-elapsed? (-> self last-drop-time) (seconds 6))
+                   (not (bf-fighting?))
+                   )
+               )
+      (set! (-> self leave-time) (+ (current-time) (seconds 3)))
+      (set! (-> self spawn?) #f)
+      )
+    (if (and (nonzero? (-> self leave-time)) (< (-> self leave-time) (current-time)))
+        (go-virtual leave)
+        )
+    (play-engine-sound self)
+    (transform-post)
+    )
+  )
+
+;; Gone at once, its engine loop stopped
+(defstate die-fast (bf-transport)
+  :virtual #t
+  :code (behavior ()
+    (sound-stop (-> self ambient-sound-id))
+    (cleanup-for-death self)
+    )
+  )
+
+;; Closes its hatch and climbs (10 m/s^2, 30 m/s at most); gone once off screen 40 m above its hover
+;; height, or after 15 s (a camera looking up keeps it on screen)
+(defstate leave (bf-transport)
+  :virtual #t
+  :event bf-transport-event-handler
+  :enter (behavior ()
+    (set-time! (-> self state-time))
+    (set! (-> self root transv y) 0.0)
+    (set! (-> self spawn?) #f)
+    )
+  :code (behavior ()
+    (ja-channel-push! 1 0)
+    (sound-play "tran-thrust")
+    (sound-play "tran-door-close")
+    (ja-no-eval :group! bf-transport-red-hatch-close-ja :num! (seek! max 0.2) :frame-num 0.0)
+    (until (ja-done? 0)
+      (suspend)
+      (ja :num! (seek! max 0.2))
+      )
+    (sleep-code)
+    )
+  :post (behavior ()
+    (bf-transport-release self #f)
+    (play-engine-sound self)
+    (+! (-> self root transv y) (* 40960.0 (seconds-per-frame)))
+    (set! (-> self root transv y) (fmax -122880.0 (fmin 122880.0 (-> self root transv y))))
+    (+! (-> self root trans y) (* (-> self root transv y) (seconds-per-frame)))
+    (if (or (and (not (logtest? (-> self draw status) (draw-control-status on-screen)))
+                 (< 163840.0 (- (-> self root trans y) (-> self y-dest)))
+                 )
+            (time-elapsed? (-> self state-time) (seconds 15))
+            )
+        (go-virtual die-fast)
+        )
+    (transform-post)
+    )
+  )
+
+(defbehavior bf-transport-init-by-other bf-transport ((pos vector) (team int) (point int) (lev level) (hatch vector))
+  "Set the ship up over POS (the ground under it) for side TEAM, serving battle point POINT, its hatch
+   (its back) along HATCH (a direction on the ground; #f: toward Jak), its art looked up in LEV (a process looks its art up in its own level), 40
+   m above the height it hovers at (the hover vehicles' flight level there, *traffic-height-map*,
+   kept BF_TRANSPORT_HOVER_MIN to BF_TRANSPORT_HOVER_MAX above the ground), then come-down."
+  (setup-collision self)
+  (vector-copy! (-> self root trans) pos)
+  (let ((away (if hatch
+                  (vector-negate! (new 'stack-no-clear 'vector) hatch)
+                  (vector-! (new 'stack-no-clear 'vector) pos (target-pos 0))
+                  )
+              )
+        )
+    (set! (-> away y) 0.0)
+    (if (< (vector-length away) 409.6)
+        (set-vector! away 0.0 0.0 1.0 1.0)
+        )
+    (vector-normalize! away 1.0)
+    (forward-up-nopitch->quaternion (-> self root quat) away *up-vector*)
+    )
+  (vector-identity! (-> self root scale))
+  (set! (-> self team) team)
+  (set! (-> self point) point)
+  (set! (-> self max-units) (the-as uint BF_TRANSPORT_MAX_UNITS))
+  (set! (-> self count-units) (the-as uint 0))
+  (set! (-> self spawn-side) (the-as uint 0))
+  (dotimes (i BF_TRANSPORT_MAX_UNITS)
+    (set! (-> self drops i) (the-as handle #f))
+    )
+  (quaternion-copy! (-> self want-quat) (-> self root quat))
+  (set-time! (-> self turn-time))
+  (set! (-> self level) lev)
+  (initialize-skeleton self (if (= team BF_TEAM_FF) *bf-transport-blue-sg* *bf-transport-red-sg*) (the-as pair 0))
+  (set! (-> self y-ground) (-> self root trans y))
+  (set! (-> self y-dest)
+        (fmax (+ (-> self y-ground) BF_TRANSPORT_HOVER_MIN)
+              (fmin (+ (-> self y-ground) BF_TRANSPORT_HOVER_MAX)
+                    (if *traffic-height-map*
+                        (+ 6144.0 (get-height-at-point *traffic-height-map* (-> self root trans)))
+                        (-> self y-ground)
+                        )
+                    )
+              )
+        )
+  (set! (-> self root trans y) (+ (-> self y-dest) 163840.0))
+  (set! (-> self spawn?) #t)
+  (set! (-> self leave-time) 0)
+  (set! (-> self ambient-sound-id) (new-sound-id))
+  (go-virtual come-down)
+  (none)
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; The scheduler's entry point (battlefront-city.gc)
+;; ---------------------------------------------------------------------------------------------
+
+(defun bf-transport-spawn ((parent process) (pos vector) (team int) (point int) (hatch vector))
+  "Send a troop transport of side TEAM over POS (a battle point, `*bf*` points index POINT), with
+   ground under it (`bf-transport-ground`) and a nav mesh within 2 m of that ground, its hatch along
+   HATCH (#f: toward Jak). PARENT: the
+   process it becomes a child of (it dies with it). Its art is in CTYPESA, which a battle borrows.
+   Returns the ship, or #f: no Jak, no level, no traffic, no ground or nav mesh, no free process,
+   or its art missing (that process is killed). Keep its handle in a structure (a global symbol
+   drops a handle's pid)."
+  (let ((lev (level-get *level* 'ctypesa))
+        (at (vector-copy! (new 'stack-no-clear 'vector) pos))
+        )
+    (when (and *target* lev (= (-> lev status) 'active) *traffic-manager*
+               (bf-transport-ground at)
+               (find-nearest-nav-mesh at 8192.0)
+               )
+      (let ((ptr (process-spawn bf-transport at team point lev hatch :to parent)))
+        (when ptr
+          (let ((proc (ppointer->process ptr)))
+            ;; `go` sets next-state at once: come-down, or process-drawable-art-error when its art
+            ;; is not in the level (drawn nowhere, never leaves)
+            (if (and (-> proc next-state) (= (-> proc next-state name) 'come-down))
+                (return proc)
+                )
+            (deactivate proc)
+            )
+          )
+        )
+      )
+    )
+  (the-as process #f)
+  )

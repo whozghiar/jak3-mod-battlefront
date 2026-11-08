@@ -97,6 +97,8 @@
 (hash-table-set! *file-entry-map* "bf-red-guard-gl-ag.go" #f)
 (hash-table-set! *file-entry-map* "bf-hover-red-ag.go" #f)
 (hash-table-set! *file-entry-map* "bf-hover-blue-ag.go" #f)
+(hash-table-set! *file-entry-map* "bf-transport-red-ag.go" #f)
+(hash-table-set! *file-entry-map* "bf-transport-blue-ag.go" #f)
 
 (cgo-file "game.gd" '("$OUT/obj/gcommon.o" "$OUT/obj/gstate.o" "$OUT/obj/gstring.o" "$OUT/obj/gkernel.o"))
 
@@ -442,6 +444,9 @@
 (build-actor "bf-red-guard-gl" :framerate 15.0 :joint-channel 8)
 (build-actor "bf-hover-red" :framerate 15.0)
 (build-actor "bf-hover-blue" :framerate 15.0)
+;; the troop transports' rip runs at 60 frames per second, build-actor's default
+(build-actor "bf-transport-red")
+(build-actor "bf-transport-blue")
 
 ;;;;;;;;;;;;;;;;;;;;;
 ;; ANIMATIONS

@@ -89,6 +89,13 @@
 (defconstant BF_CAP_ROBOGUARDS 4)
 (defconstant BF_CAP_SPYDROIDS 4)
 
+;; The battle's unit kinds (traffic types: guard-a, flying-turret, roboguard, spydroid) and each
+;; side's share of the caps above, Freedom League then Krimzon Guard, in that order: what its troop
+;; transports bring it (levels/city/battlefront/bf-transport.gc).
+(defconstant BF_KIND_COUNT 4)
+(define *bf-kinds* (new 'static 'array int32 4 6 16 14 15))
+(define *bf-team-caps* (new 'static 'array int32 8 14 6 0 0 8 4 4 4))
+
 ;; ---------------------------------------------------------------------------------------------
 ;; Types
 ;; ---------------------------------------------------------------------------------------------
@@ -118,6 +125,26 @@
    (name-fr  string)
    (desc-fr  (array string))
    (team     int32)
+   )
+  )
+
+;; Battle points: the two sides' bases (their spawns, points 0 and 1), and BF_CONTROL_POINTS control
+;; points between them, neutral at the start. A side holding one sends its troop transports there
+;; and its player may respawn there (battlefront.gc `bf-update-points`, battlefront-city.gc).
+(defconstant BF_POINT_MAX 5)
+(defconstant BF_CONTROL_POINTS 3)
+(defconstant BF_POINT_RADIUS (meters 15))      ;; units within it count for its capture
+(defconstant BF_CAPTURE_TIME 30.0)             ;; seconds a side's majority on it takes to capture it
+
+(deftype bf-point (structure)
+  "A battle point: a side's base, or a control point the sides capture (`bf-update-points`)."
+  ((pos        vector :inline) ;; on the ground
+   (owner      int32)          ;; BF_TEAM_FF, BF_TEAM_KG, or BF_TEAM_NONE: neutral
+   (base?      symbol)         ;; a side's base: never changes hands
+   (prog-team  int32)          ;; the side capturing it, BF_TEAM_NONE for none
+   (progress   float)          ;; seconds of capture so far, up to BF_CAPTURE_TIME
+   (near       int32 2)        ;; units of each side within BF_POINT_RADIUS at the last count
+   (ship       handle)         ;; the troop transport serving it now, #f for none (battlefront-city.gc)
    )
   )
 
@@ -169,6 +196,12 @@
    (kills         int32)          ;; units the player killed in this battle (the HUD's counter)
    (tazer-time    time-frame)     ;; guard: the last tazer strike (BF_TAZER_RECHARGE before the next)
    (own-attack    float)          ;; damage (24 scale) of the player's attack being sent, -1.0 none
+   (points        bf-point BF_POINT_MAX :inline) ;; 0 and 1 the sides' bases, then the control points
+   (point-count   int32)          ;; points in use
+   (point-time    time-frame)     ;; last capture count (`bf-update-points`)
+   (respawn-pick  int32)          ;; the point the dead player chose to respawn at, -1 none yet
+   (wall-count    int32)          ;; force field walls up (battlefront-city.gc `bf-city-walls`)
+   (walls         handle 16)
    (bag-deaths    int32)          ;; unit deaths left in the pickup bag (`bf-queue-drop`), 0 for a new bag
    (bag-drops     int32)          ;; pickups left in it
    )
@@ -190,6 +223,13 @@
 (set! (-> *bf* endless-dark?) #f)
 (set! (-> *bf* endless-light?) #f)
 (set! (-> *bf* view-set?) #f)
+;; the points' ships and the force field walls: no process (a zero handle names process 0)
+(dotimes (i BF_POINT_MAX)
+  (set! (-> *bf* points i ship) (the-as handle #f))
+  )
+(dotimes (i 16)
+  (set! (-> *bf* walls i) (the-as handle #f))
+  )
 
 ;; Set by the Mods menu. While it is on, START > Options shows Gamemode (the battle's pages);
 ;; turning it off during a battle loads the last save (battlefront.gc `bf-leave-to-save!`).
@@ -274,7 +314,9 @@
       :desc "The whole slums around the headquarters of the Freedom League."
       :name-fr "QG de la Ligue"
       :desc-fr "Tous les bas quartiers autour du quartier général de la Ligue."
-      :ff-continue "ctyslumc-freehq"
+      ;; the Freedom League's base at the entrance of its headquarters: the stock point Jak comes out
+      ;; at when he leaves them (the author's wish; ctyslumc-freehq stood 5 m along the front)
+      :ff-continue "ctyslumc-freehq-exit"
       :kg-continue "ctyslumb-bbush-4"
       :level0 'ctyslumb
       :level1 'ctyslumc
@@ -949,6 +991,24 @@
         (else stock)
         )
       stock
+      )
+  )
+
+(defun bf-wake-count ((kind int) (stock int))
+  "How many units of traffic type KIND the traffic may wake on its own (traffic-engine.gc
+   activate-one-vehicle), STOCK out of a battle. During a fight none of the battle's four kinds: the
+   sides' troop transports bring every unit (levels/city/battlefront/bf-transport.gc), woken with
+   'activate-object, which this count does not hold back. Before the fight, and for the other
+   kinds, the army caps (`bf-want-count`)."
+  (if (and (bf-fighting?)
+           (or (= kind (the-as int (traffic-type guard-a)))
+               (= kind (the-as int (traffic-type flying-turret)))
+               (= kind (the-as int (traffic-type roboguard)))
+               (= kind (the-as int (traffic-type spydroid)))
+               )
+           )
+      0
+      (bf-want-count kind stock)
       )
   )
 

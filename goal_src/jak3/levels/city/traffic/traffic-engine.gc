@@ -9,6 +9,8 @@
 (define-extern bf-unit-killed (function process none))
 ;; MOD battlefront -- how many units of a type a battle wakes (same file)
 (define-extern bf-want-count (function int int int))
+;; MOD battlefront -- how many units of a type the traffic wakes by itself (none of a battle's: its transports bring them)
+(define-extern bf-wake-count (function int int int))
 ;; MOD battlefront -- a unit of a battle stays awake anywhere on its battlefield
 ;; (levels/city/battlefront/battlefront-city.gc, CWI)
 (define-extern bf-keep-unit? (function process symbol))
@@ -740,9 +742,9 @@
           (when (and (> (-> v1-15 inactive-count) 0) (> (-> v1-15 reserve-count) 0))
             (let ((s1-0 (-> this object-type-info-array s2-0)))
               (when (-> s1-0 level)
-                ;; MOD battlefront -- the squads' count for the territory, or the army cap of a battle
+                ;; MOD battlefront -- the squads' count for the territory, or the battle's (none: its transports bring them)
                 (let ((s0-0
-                        (bf-want-count
+                        (bf-wake-count
                           s2-0
                           (-> s1-0
                               target-counts

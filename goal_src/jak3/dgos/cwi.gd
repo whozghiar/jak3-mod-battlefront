@@ -70,6 +70,7 @@
   "kg-squad-control.o"
   "ff-squad-control.o"
   "mh-squad-control.o"
+  "bf-transport.o" ;; MOD battlefront -- the troop transports of a battle (before battlefront-city.o)
   "battlefront-city.o" ;; MOD battlefront -- Haven City side of a battle (after the types it uses)
   "cty-borrow-manager.o"
   "ctywide-init.o"
