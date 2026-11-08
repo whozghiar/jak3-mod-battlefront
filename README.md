@@ -22,6 +22,8 @@ Battlefront for Jak 3: the Freedom League and the Krimzon Guard fight over a war
 
 ## Key Features
 - **Battles in Haven City:** pick a war zone, a whole district (Port, Industrial Zone, Slums, Freedom HQ), a side, and a class. Each side starts with 500 units; every death takes one, and the first side down to 0 loses. Up to 20 units per side fight at once, and they stay on the battlefield wherever you look.
+- **Battle points:** each side has a base, and three control points stand between them, neutral at the start, each a beam of light in its holder's color (white while neutral). A side with more units than the other within 15 m of a point for 30 seconds captures it. Units with no foe at hand march on the nearest point their side does not hold.
+- **Troop transports:** each side's units arrive by the A-G troop transport of Jak 2, red for the Krimzon Guard and blue for the Freedom League. It comes down over a point its side holds, the one nearest you first, and its units leave it each their own way: a guard jumps down from the hatch, a robotguard rolls out as a ball, a spider robot drops, a jetpack guard flies out.
 - **Two armies:** the Freedom League (blue guards, jetpack guards) against the Krimzon Guard (red Krimzon Guards from Jak 2, jetpack guards, robotguards, spider robots).
 - **Play any class:** each of the six classes has its own model, moves and weapons, previewed turning on the class page with what it does and its own buttons, shown as the pad's icons: switch between tazer, rifle and grenade launcher, roll and strafe as a guard, fly as long as you like and boost on dark eco with the jetpack, roll as a ball and raise a red shield as a robotguard, or leap 11 m high and sprint on blue eco as a spider robot.
 - **A third-person shooter camera:** as in Star Wars Battlefront (2004), over your class's right shoulder. The right stick turns it left and right and tilts it up and down, the crosshair stays in the middle of the screen, and your class faces where you aim while the left stick moves it forward, back and sideways.
@@ -31,9 +33,9 @@ Battlefront for Jak 3: the Freedom League and the Krimzon Guard fight over a war
 - **Ammo and pickups:** a guard's rifle holds 10 rounds with 20 more carried, its grenade launcher 5 grenades; the tazer needs no ammo but recharges for 20 s after each strike. The battle's guards on both sides carry rifles and grenade launchers: the tazer is yours alone. Three fallen units in every ten drop something: ammo, health, or dark eco, which refills a jetpack's boost.
 - **A soldier's HUD:** the reserves at the top, as bars in the style of Star Wars Battlefront (2004) (yours in green, the enemy's in red), your kills on the left, the crosshair, your gun's icon at the top right with its rounds as shells and a count (10/20 for the rifle, the grenades left, nothing for the tazer but its recharge seconds), and your class's gauge in Jak's eco gauges: jetpack boost as dark eco, spider blue eco in blue, robotguard shield in red.
 - **Outside the campaign:** during a battle no mission can start, no vehicle can be taken, and Save, Load Game and Secrets are greyed out in the START menu.
-- **A force field** keeps you in the district and the jetpacks under its ceiling. Every street of the district is yours to fight in.
+- **A force field** keeps you in the district and the jetpacks under its ceiling, a red wall of Jak 2's force field across each street that leaves it. Every street of the district is yours to fight in, its whole map loaded; doors to the interiors stay shut, and no mission, vehicle or parked car is there.
 - **Jak 2 models in Jak 3:** the red Krimzon Guard and the jetpack guard of Jak 2.
-- **Watch, then respawn:** when you fall, the camera follows one of your side's units for 4 seconds, then you are back at your spawn with your class and fresh ammo.
+- **Watch, then respawn:** when you fall, the camera follows one of your side's units for 4 seconds, then you pick where you come back, your base or a control point your side holds, and deploy there with your class and fresh ammo.
 - **Off by default:** nothing changes until you turn it on in the Mods menu.
 
 ## How to Play
@@ -41,8 +43,8 @@ Battlefront for Jak 3: the Freedom League and the Krimzon Guard fight over a war
 2. Open the START menu: **Options > Gamemode > Battlefront > New battle**.
 3. Choose the war zone, then your side; the whole district is shown on its minimap, with both spawns.
 4. The class page follows at once, while your side's spawn loads behind it: the class under the cursor turns in a frame next to the list as soon as the models are in, its health, what it does and its buttons under the list. Once "Loading the war zone..." gives way to "Deploy", X deploys you with fresh ammo.
-5. The reserves of both sides are shown at the top of the screen: your side's bar and count in green, the enemy's in red. A force field holds you inside the district.
-6. When you fall, you watch the battle for 4 seconds, then you come back at your spawn as the same class, with fresh ammo.
+5. The reserves of both sides are shown at the top of the screen: your side's bar and count in green, the enemy's in red. Under them, the control points A, B and C in their holder's color, with the capture under way in percent. A force field holds you inside the district.
+6. When you fall, you watch the battle for 4 seconds. If your side holds a control point, the D-pad picks your base or one of its points on the map and X deploys you there; otherwise you come back at your base. You keep your class and get fresh ammo.
 7. During a battle, the same START page has **Change class** (the battle goes on), **Restart the battle** and **Quit the battle**.
 8. Switching the mode off in the Mods menu during a battle loads your last save.
 
@@ -55,14 +57,14 @@ When a side's reserve reaches 0, the result page shows the winner and the losses
 
 ### War zones
 
-Each war zone is a whole district of Haven City: every street of it is yours, and the force field only stops you at its border with the next district.
+Each war zone is a whole district of Haven City: every street of it is yours, and the force field only stops you at its border with the next district. The control points stand on the streets between the two spawns, a quarter, half and three quarters of the way.
 
 | War zone | Freedom League spawn | Krimzon Guard spawn |
 |---|---|---|
 | Port | west docks | east docks, by the Krimzon Guard's war zone |
 | Industrial Zone | north end | south end, near the Port |
 | Slums | an alley on the east edge | west side |
-| Freedom HQ | the Freedom League's headquarters | the slums south of it |
+| Freedom HQ | the entrance of the Freedom League's headquarters | the slums south of it |
 
 | Port | Industrial Zone |
 |---|---|
