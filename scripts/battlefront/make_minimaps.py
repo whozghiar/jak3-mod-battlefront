@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Write the Battlefront mod's zone minimaps: for each war zone, the in-game minimap of its whole
-district (every Haven City level the zone is made of), as the zone and side pages of the battle
-menu show it.
+Write the Battlefront mod's zone minimaps: for each war zone, the in-game minimap of its levels (or,
+for the whole city, of every minimap cell with a texture), as the zone and side pages of the battle
+menu and the respawn page show it.
 
     python scripts/battlefront/make_minimaps.py [--png <folder>]
 
@@ -13,8 +13,7 @@ Inputs:
 
 Output:
     goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc
-    (with --png, each zone's map as a PNG in <folder> too, to look at); it also lists each zone's
-    minimap cells, the force field's test of the district
+    (with --png, each zone's map as a PNG in <folder> too, to look at)
 
 How the minimap places its textures (engine/ui/minimap.gc): Haven City is a grid of 5 x 7 cells of
 384 m, a cell's column `(x + 768 m) / 384 m` and row `(z + 768 m) / 384 m`; each cell names a
@@ -47,12 +46,10 @@ LEVEL_INFO = ROOT / "goal_src/jak3/engine/level/level-info.gc"
 TEXTURES = ROOT / "decompiler_out/jak3/textures"
 OUT = ROOT / "goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc"
 
-# The war zones in `*bf-zones*` order (battlefront-h.gc) and their levels.
+# The war zones in `*bf-zones*` order (battlefront-h.gc) and their levels; None for the whole city
+# (every cell with a minimap texture), the battlefield since round 17.
 ZONES = [
-    ("Port", ["ctyport"]),
-    ("Industrial Zone", ["ctyinda", "ctyindb"]),
-    ("Slums", ["ctysluma"]),
-    ("Freedom HQ", ["ctyslumb", "ctyslumc"]),
+    ("Haven City", None),
 ]
 
 # engine/ui/minimap.gc *minimap-texture-name-array*, 5 columns by 7 rows
@@ -103,10 +100,14 @@ def tex0(w: int, h: int) -> int:
     return 8 | ((w // 64) << 14) | (0x13 << 20) | (tw << 26) | (th << 30) | (1 << 61)
 
 
-def zone_map(levels: list[str]):
-    """The map of a zone made of LEVELS: its image and (x0, z0, texel, width, height, valid width,
-    texture names)."""
-    cells = sorted({c for lev in levels for c in level_cells(lev)})
+def zone_map(levels):
+    """The map of a zone made of LEVELS (None: every cell with a texture, the whole city): its image
+    and (x0, z0, texel, width, height, valid width, texture names)."""
+    if levels is None:
+        # the stadium's texture page is not among the extracted ones: its cell stays black
+        cells = [c for c in range(len(CELLS)) if CELLS[c] and any(TEXTURES.glob(f"cty*-minimap/{CELLS[c]}.png"))]
+    else:
+        cells = sorted({c for lev in levels for c in level_cells(lev)})
     cols = [c % 5 for c in cells]
     rows = [c // 5 for c in cells]
     x0 = CELL_ORIGIN + min(cols) * CELL
@@ -149,12 +150,10 @@ def main() -> None:
     png_dir = pathlib.Path(sys.argv[sys.argv.index("--png") + 1]) if "--png" in sys.argv else None
     images = []
     infos = []
-    masks = []
     for label, levels in ZONES:
         img, info, cells = zone_map(levels)
         images.append(img)
         infos.append(info)
-        masks.append(sum(1 << c for c in cells))
         print(f"{label}: levels {levels}, cells {cells}, {info[5]} x {info[4]} texels of "
               f"{info[2] / 4096:.1f} m (stored {info[3]} wide), textures {info[6]}")
         if png_dir:
@@ -183,6 +182,7 @@ def main() -> None:
     print(f"{len(colors)} colors, {len(words) * 8} bytes of texels")
 
     names = " ".join('"' + " ".join(i[6]) + '"' for i in infos)
+    n = len(ZONES)
     OUT.write_text(f""";;-*-Lisp-*-
 (in-package goal)
 
@@ -203,7 +203,7 @@ def main() -> None:
 
 ;; DECOMP BEGINS
 
-;; Texels of the four zones' maps, one after the other: 8-bit palette indices, row after row.
+;; Texels of the zones' maps, one after the other: 8-bit palette indices, row after row.
 (define *bf-zone-minimap-texels*
   (new 'static 'array uint64 {len(words)}
 {rows(words, 6, lambda v: f"#x{v:016x}")}
@@ -218,30 +218,26 @@ def main() -> None:
   )
 
 ;; Where each zone's texels start in `*bf-zone-minimap-texels*`, in 64-bit words.
-(define *bf-zone-minimap-offset* (new 'static 'array int32 4 {" ".join(str(o) for o in offsets)}))
+(define *bf-zone-minimap-offset* (new 'static 'array int32 {n} {" ".join(str(o) for o in offsets)}))
 
 ;; Each zone's map: stored width, height, and the width the map fills (the rest is padding).
 (define *bf-zone-minimap-size*
-  (new 'static 'array int32 12
+  (new 'static 'array int32 {3 * n}
 {rows([v for i in infos for v in (i[3], i[4], i[5])], 3, str)}
     )
   )
 
 ;; World x and z of each map's top left corner, and the world units a texel covers.
 (define *bf-zone-minimap-corner*
-  (new 'static 'array float 12
+  (new 'static 'array float {3 * n}
 {rows([v for i in infos for v in (i[0], i[1], i[2])], 3, lambda v: f"{v:.1f}")}
     )
   )
 
 ;; GS TEX0 of each map as uploaded (tbp 8, its buffer width, mt8, its size, palette loaded).
 (define *bf-zone-minimap-tex0*
-  (new 'static 'array uint64 4 {" ".join(f"#x{tex0(i[3], i[4]):x}" for i in infos)})
+  (new 'static 'array uint64 {n} {" ".join(f"#x{tex0(i[3], i[4]):x}" for i in infos)})
   )
-
-;; The minimap cells of each zone's levels (bit row * 5 + column, their city-map-bits): the force
-;; field's test of the district (battlefront.gc `bf-zone-cell?`).
-(define *bf-zone-cells* (new 'static 'array uint64 4 {" ".join(f"#x{v:x}" for v in masks)}))
 
 ;; The minimap textures each zone's map is made of, as engine/ui/minimap.gc names them.
 (define *bf-zone-minimap-name* (new 'static 'boxed-array :type string {names}))

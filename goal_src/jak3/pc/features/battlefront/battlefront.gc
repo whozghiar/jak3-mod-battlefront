@@ -41,6 +41,10 @@
 ;; DECOMP BEGINS
 
 (define-extern mods-menu-close! (function none))
+;; defined further down this file: the player's base continue point and its levels, and the redeploy
+(define-extern bf-camp-continue (function continue-point))
+(define-extern bf-camp-loaded? (function continue-point symbol))
+(define-extern bf-can-redeploy? (function symbol))
 
 ;; Pages of the battle menu.
 (defconstant BF_PAGE_NONE 0)
@@ -56,6 +60,8 @@
 (defconstant BF_REQ_CLASS 2)
 (defconstant BF_REQ_END 3)
 (defconstant BF_REQ_RESTART 4)
+(defconstant BF_REQ_REDEPLOY 5)
+(defconstant BF_REDEPLOY_CALM (seconds 30)) ;; out of combat this long, the player may redeploy
 
 (defconstant BF_DEPLOY_TIMEOUT (seconds 60))  ;; give up when the zone is not loaded by then
 (defconstant BF_FALL_DEPTH (meters 20))       ;; that far below his last safe place, Jak fell out of
@@ -346,8 +352,9 @@
   )
 
 (defun bf-draw-zone-marks ((buf dma-buffer) (zone int))
-  "Over the zone's map (`bf-draw-zone-minimap`): its frame, the Freedom League's spawn (blue), the
-   Krimzon Guard's (red) and Jak (white). The whole district is the battlefield."
+  "Over the zone's map (`bf-draw-zone-minimap`): its frame, the Freedom League's base (blue), the
+   Krimzon Guard's (red), the control points (grey, `*bf-point-defs*`) and Jak (white). The whole
+   city is the battlefield."
   (bf-zone-view! zone)
   (let ((view *bf-zone-view*)
         (ff (get-continue-by-name *game-info* (-> *bf-zones* zone ff-continue)))
@@ -365,6 +372,16 @@
     (if kg
         (bf-zone-dot buf zone (-> kg trans) 9 (static-rgba 255 40 40 128))
         )
+    (when (not (bf-active?))
+      (let ((at (new 'stack-no-clear 'vector)))
+        (dotimes (i BF_CONTROL_POINTS)
+          (let ((def (-> *bf-point-defs* (+ i 2))))
+            (set-vector! at (meters (-> def x)) (meters (-> def y)) (meters (-> def z)) 1.0)
+            (bf-zone-dot buf zone at 7 (static-rgba 220 220 220 128))
+            )
+          )
+        )
+      )
     (if *target*
         (bf-zone-dot buf zone (-> *target* control trans) 5 (static-rgba 255 255 255 128))
         )
@@ -807,10 +824,8 @@
 
 (defun bf-points-setup ()
   "The battle's points as its fight starts: the two bases at the sides' spawns (`*bf*` spawn, point
-   0 the Freedom League's, 1 the Krimzon Guard's), then BF_CONTROL_POINTS control points, neutral,
-   a quarter, half and three quarters of the way from one spawn to the other. The Haven City side
-   then moves each control point onto the nearest street of the zone (battlefront-city.gc,
-   BF_CITY_PREPARE)."
+   0 the Freedom League's, 1 the Krimzon Guard's), then a control point in each district, neutral,
+   where `*bf-point-defs*` puts it."
   (set! (-> *bf* point-count) (+ 2 BF_CONTROL_POINTS))
   (set! (-> *bf* respawn-pick) -1)
   (set! (-> *bf* point-time) 0)
@@ -823,13 +838,16 @@
          (set! (-> pt base?) #t)
          )
         (else
-          (vector-lerp! (-> pt pos) (-> *bf* spawn 0) (-> *bf* spawn 1) (* 0.25 (the float (+ i -1))))
+          (let ((def (-> *bf-point-defs* i)))
+            (set-vector! (-> pt pos) (meters (-> def x)) (meters (-> def y)) (meters (-> def z)) 1.0)
+            )
           (set! (-> pt owner) BF_TEAM_NONE)
           (set! (-> pt base?) #f)
           )
         )
       (set! (-> pt prog-team) BF_TEAM_NONE)
       (set! (-> pt progress) 0.0)
+      (set! (-> pt fight) 0.0)
       (set! (-> pt near 0) 0)
       (set! (-> pt near 1) 0)
       (set! (-> pt ship) (the-as handle #f))
@@ -839,13 +857,111 @@
   )
 
 (defun bf-point-name ((i int))
-  "Letter of control point I on the HUD: A, B, C... (the bases are not lettered)."
+  "Name of point I in the game's language (`*bf-point-defs*`)."
+  (bf-tr (-> *bf-point-defs* i name) (-> *bf-point-defs* i name-fr))
+  )
+
+(defun bf-point-letter ((i int))
+  "Letter of control point I on the HUD: A, B, C, D (the bases are not lettered)."
   (case i
     ((2) "A")
     ((3) "B")
     ((4) "C")
+    ((5) "D")
     (else "?")
     )
+  )
+
+(defun bf-point-live? ((pt bf-point))
+  "#t when the section PT stands in is loaded with its streets: a nav mesh within 8 m (the game
+   finds one in active levels only). Its fight is then the units' own (`bf-point-count`)."
+  (if (find-nearest-nav-mesh (-> pt pos) (meters 8)) #t #f)
+  )
+
+(defun bf-point-pressure ((i int) (team int))
+  "How many points next to point I (`*bf-point-links*`) side TEAM holds."
+  (let ((n 0))
+    (dotimes (k (-> *bf* point-count))
+      (if (and (logtest? (-> *bf-point-links* i) (ash 1 k)) (= (-> *bf* points k owner) team))
+          (+! n 1)
+          )
+      )
+    n
+    )
+  )
+
+(defconstant BF_FIGHT_LOSS 10.0) ;; seconds of a fight away from the player per unit each side loses
+
+(defun bf-point-away ((i int) (dt float))
+  "The fight for point I while its section is not loaded, DT seconds of it: no unit is there to
+   count, so a side fights for it from the points next to it it holds (`bf-point-pressure`). A side
+   alone at it captures it at the normal pace, at half pace when the holder holds a point next to
+   it too; both sides at a neutral one, the one holding more neighbours; a tie holds it. Every
+   BF_FIGHT_LOSS seconds of fight, each side there loses a unit (`bf-count-loss`)."
+  (let* ((pt (-> *bf* points i))
+         (owner (-> pt owner))
+         (ff (if (= owner BF_TEAM_FF) 0 (bf-point-pressure i BF_TEAM_FF)))
+         (kg (if (= owner BF_TEAM_KG) 0 (bf-point-pressure i BF_TEAM_KG)))
+         (held (if (= owner BF_TEAM_NONE) 0 (bf-point-pressure i owner)))
+         (major (cond
+                  ((< kg ff) BF_TEAM_FF)
+                  ((< ff kg) BF_TEAM_KG)
+                  (else BF_TEAM_NONE)
+                  )
+                )
+         (pace (if (< 0 held) 0.5 1.0))
+         )
+    (set! (-> pt near 0) 0)
+    (set! (-> pt near 1) 0)
+    (cond
+      ((and (zero? ff) (zero? kg))
+       ;; no one comes: a capture under way fades
+       (set! (-> pt fight) 0.0)
+       (set! (-> pt progress) (fmax 0.0 (- (-> pt progress) dt)))
+       (if (= (-> pt progress) 0.0)
+           (set! (-> pt prog-team) BF_TEAM_NONE)
+           )
+       )
+      (else
+        (+! (-> pt fight) dt)
+        (when (>= (-> pt fight) BF_FIGHT_LOSS)
+          (set! (-> pt fight) 0.0)
+          (if (< 0 ff)
+              (bf-count-loss BF_TEAM_FF)
+              )
+          (if (< 0 kg)
+              (bf-count-loss BF_TEAM_KG)
+              )
+          (if (< 0 held)
+              (bf-count-loss owner)
+              )
+          )
+        (cond
+          ((= major BF_TEAM_NONE)
+           0
+           )
+          ((and (!= (-> pt prog-team) BF_TEAM_NONE) (!= (-> pt prog-team) major))
+           (set! (-> pt progress) (fmax 0.0 (- (-> pt progress) dt)))
+           (if (= (-> pt progress) 0.0)
+               (set! (-> pt prog-team) major)
+               )
+           )
+          (else
+            (set! (-> pt prog-team) major)
+            (+! (-> pt progress) (* pace dt))
+            (when (>= (-> pt progress) BF_CAPTURE_TIME)
+              (set! (-> pt owner) major)
+              (set! (-> pt progress) 0.0)
+              (set! (-> pt prog-team) BF_TEAM_NONE)
+              (set! (-> pt fight) 0.0)
+              (format 0 "battlefront: point ~S captured away from the player by side ~D~%" (bf-point-name i) major)
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
   )
 
 (defun bf-point-count ((pt bf-point))
@@ -893,10 +1009,11 @@
   )
 
 (defun bf-update-points ()
-  "Four times a second during a fight: each control point's capture. The side with more units within
-   BF_POINT_RADIUS (`bf-point-count`) captures it: its progress grows by the time gone by, and at
-   BF_CAPTURE_TIME seconds the point is its. Another side's capture under way is first taken back
-   down to zero; a tie, or no one, holds it; the holder's majority takes a capture back down."
+  "Four times a second during a fight: each control point's capture. In a loaded section
+   (`bf-point-live?`) the side with more units within BF_POINT_RADIUS (`bf-point-count`) captures
+   it: its progress grows by the time gone by, and at BF_CAPTURE_TIME seconds the point is its.
+   Another side's capture under way is first taken back down to zero; a tie, or no one, holds it;
+   the holder's majority takes a capture back down. Away from the player, `bf-point-away`."
   (when (or (zero? (-> *bf* point-time)) (time-elapsed? (-> *bf* point-time) (seconds 0.25)))
     (let ((dt (if (zero? (-> *bf* point-time))
                   0.0
@@ -907,8 +1024,16 @@
       (set-time! (-> *bf* point-time))
       (dotimes (i (-> *bf* point-count))
         (let ((pt (-> *bf* points i)))
+          (cond
+            ((-> pt base?)
+             0
+             )
+            ((not (bf-point-live? pt))
+             (bf-point-away i dt)
+             )
+            (else
           (bf-point-count pt)
-          (when (not (-> pt base?))
+          (set! (-> pt fight) 0.0)
             (let* ((ff (-> pt near BF_TEAM_FF))
                    (kg (-> pt near BF_TEAM_KG))
                    (major (cond
@@ -941,6 +1066,7 @@
                   )
                 )
               )
+            )
             )
           )
         )
@@ -985,8 +1111,8 @@
   (dotimes (i (-> *bf* point-count))
     (let ((pt (-> *bf* points i)))
       (when (not (-> pt base?))
-        (let ((x (+ 256.0 (* 36.0 (the float (+ i -3))))))
-          (bf-draw-text buf (bf-point-name i) x 66.0 0.7 (bf-team-color (-> pt owner)) #t)
+        (let ((x (+ 256.0 (* 36.0 (+ -3.5 (the float i))))))
+          (bf-draw-text buf (bf-point-letter i) x 66.0 0.7 (bf-team-color (-> pt owner)) #t)
           (when (and (!= (-> pt prog-team) BF_TEAM_NONE) (< 0.0 (-> pt progress)))
             (clear *bf-text*)
             (format *bf-text* "~D%" (the int (* 100.0 (/ (-> pt progress) BF_CAPTURE_TIME))))
@@ -1021,9 +1147,9 @@
   )
 
 (defun bf-draw-respawn-pick ((buf dma-buffer))
-  "The dead player's choice of respawn point (`bf-target-death`): the zone's map in the right frame,
-   each point a dot of its holder's color, the one picked large and blinking; on the left, how to
-   pick."
+  "The player's choice of respawn point at each death or redeploy (`bf-target-death`): the whole
+   city's map in the right frame, each point a dot of its holder's color, the one picked large and
+   blinking; on the left its name and how to pick."
   (let ((zone (-> *bf* zone))
         (pick (-> *bf* respawn-pick))
         )
@@ -1037,7 +1163,7 @@
                           )
     (clear *bf-text*)
     (format *bf-text* "~S" (if (< pick 2) (bf-tr "Base" "Base") (bf-point-name pick)))
-    (bf-draw-text buf *bf-text* 149.0 190.0 0.9 (bf-team-color (-> *bf* team)) #t)
+    (bf-draw-text buf *bf-text* 149.0 190.0 (if (< pick 2) 0.9 0.6) (bf-team-color (-> *bf* team)) #t)
     (bf-draw-text buf (bf-tr "<PAD_DPAD_ANY> Choose" "<PAD_DPAD_ANY> Choisir") 70.0 250.0 0.45 (font-color default) #f)
     (bf-draw-text buf (bf-tr "<PAD_X> Deploy" "<PAD_X> Déployer") 70.0 276.0 0.45 (font-color default) #f)
     (bf-draw-zone-marks buf zone)
@@ -1079,7 +1205,7 @@
     (format *bf-text* (bf-tr "Kills: ~D" "Éliminations : ~D") (-> *bf* kills))
     (bf-draw-text buf *bf-text* 14.0 52.0 0.45 (font-color default) #f)
     (if (not (time-elapsed? (-> self field-time) (seconds 1)))
-        (bf-draw-text buf (bf-tr "FORCE FIELD" "CHAMP DE FORCE") 0.0 150.0 0.6 (font-color red) #t)
+        (bf-draw-text buf (bf-tr "CEILING" "PLAFOND") 0.0 150.0 0.6 (font-color red) #t)
         )
     ;; the player waits to respawn (`bf-target-death`)
     (when (and (nonzero? (-> *bf* respawn-time)) (< (-> *bf* respawn-pick) 0))
@@ -1160,6 +1286,10 @@
         (set! (-> *bf* drop-count) 0)
         (set! (-> *bf* winner) BF_TEAM_NONE)
         (set! (-> *bf* kills) 0)
+        (set! (-> *bf* combat-time) 0)
+        (set! (-> *bf* respawn-at) -1)
+        (set! (-> *bf* deaths) 0)
+        (set! (-> *bf* redeploy-ok?) #f)
         (set! (-> *bf* tazer-time) 0)
         (dotimes (i BF_TEAM_COUNT)
           (set! (-> *bf* reserve i) BF_RESERVE)
@@ -1243,6 +1373,7 @@
         ;; battle's skins. Rebuilding the traffic on its own in mid-game (ctywide-activate) left
         ;; process records broken: a later level change crashed the game deactivating an airlock.
         (set-continue! *game-info* (if (= team BF_TEAM_FF) ff kg) #f)
+        (bf-city-call BF_CITY_FREE_NAVS)
         (initialize! *game-info* 'life (the-as game-save #f) (the-as string #f) (the-as resetter-spec #f))
         )
       )
@@ -1300,6 +1431,7 @@
     ;; respawn at the current continue (the side's spawn) the way a death does: every unit of the
     ;; battle is replaced by a stock one
     (if city?
+        (bf-city-call BF_CITY_FREE_NAVS)
         (initialize! *game-info* 'life (the-as game-save #f) (the-as string #f) (the-as resetter-spec #f))
         )
     )
@@ -1308,14 +1440,14 @@
   )
 
 (defbehavior bf-zone-ready? bf-director ()
-  "#t once the player stands in the zone with its levels and the unit levels active. The battle's
+  "#t once the player stands at his base with its levels (`bf-camp-loaded?`) and the unit levels
+   active. The battle's
    Haven City alias reloads ctywide and its collision: Jak must have stood on real ground (stance,
    not the stale on-surface flag of his continue state) after the first 2 seconds."
   (and *target*
-       (= (level-status? *level* (-> *bf-zones* (-> *bf* zone) level0) #f) 'active)
-       (or (not (-> *bf-zones* (-> *bf* zone) level1))
-           (= (level-status? *level* (-> *bf-zones* (-> *bf* zone) level1) #f) 'active)
-           )
+       (let ((cont (bf-camp-continue)))
+         (or (not cont) (bf-camp-loaded? cont))
+         )
        (not (focus-test? *target* dead))
        (time-elapsed? (-> *bf* phase-time) (seconds 2))
        (logtest? (-> *target* control status) (collide-status on-surface))
@@ -1345,72 +1477,29 @@
   (none)
   )
 
-(defun bf-zone-cell? ((zone int) (pos vector))
-  "#t when POS is in a minimap cell of ZONE's levels (battlefront-minimaps.gc `*bf-zone-cells*`,
-   their city-map-bits): Haven City's 5 x 7 cells of 384 m, from -768 m on x and z. A place past
-   the grid's edge counts as the edge cell's (the Slums' alley is east of the last column)."
-  (let ((col (max 0 (min 4 (the int (/ (+ (-> pos x) (meters 768)) (meters 384))))))
-        (row (max 0 (min 6 (the int (/ (+ (-> pos z) (meters 768)) (meters 384))))))
-        )
-    (logtest? (-> *bf-zone-cells* zone) (ash 1 (+ (* row 5) col)))
-    )
-  )
-
-(defconstant BF_WALL_REACH (meters 30)) ;; within this of a force field wall the zone's cells are not asked
-
-(defun bf-near-wall? ((pos vector))
-  "#t when POS is within BF_WALL_REACH of a force field wall of the battle (its middle, on the
-   ground plane; battlefront-city.gc `bf-city-walls`). The walls stand on the lanes' border between
-   two sections, and a minimap cell of 384 m can end up to 25 m before it (the Industrial Zone's
-   cells end at x 768 m, the wall to the Port stands at 745 m): near a wall, which is solid, the
-   zone's level alone holds the player."
-  (dotimes (i (-> *bf* wall-count))
-    (let ((wall (the-as process-drawable (handle->process (-> *bf* walls i)))))
-      (if (and wall (< (vector-vector-xz-distance (-> wall root trans) pos) BF_WALL_REACH))
-          (return #t)
-          )
-      )
-    )
-  #f
-  )
-
 (defbehavior bf-keep-in-zone bf-director ()
-  "The battlefield's force field: the zone's levels, the whole district. Jak goes anywhere in them.
-   As he leaves them, the level the game sees him in (`*load-state*` vis-nick, which the levels'
-   region scripts switch as he crosses into another section) no longer one of the zone's, or his
-   place out of the zone's minimap cells (`bf-zone-cell?`: the game kept vis-nick on the Port with
-   Jak in the Industrial Zone, whose section the Port's war zone loads) away from the force field's
-   walls (`bf-near-wall?`: he walks up to a wall, which stops him), or as he falls
+  "The whole city is the battlefield: no force field holds the player (round 17). As he falls
    BF_FALL_DEPTH below the last place he stood (a hole, or a section that is not loaded), he is put
-   back at that place (`*bf*` safe, taken every 0.5 s while he stands in the zone), his speed
-   cancelled and the game's level of him set back, with Light Jak's shield sparks. A jetpack class
-   cannot climb past the ceiling: its thrust fades under it (battlefront-player.gc), and 2 m above
-   it, which only a jump carries it to, its rise is turned into a fall."
+   back at that place (`*bf*` safe, taken every 0.5 s while he stands), his speed cancelled and the
+   game's level of him set back. A jetpack class cannot climb past the ceiling: its thrust fades
+   under it (battlefront-player.gc), and 2 m above it, which only a jump carries it to, its rise is
+   turned into a fall, with Light Jak's shield sparks."
   (when (and *target* (not (focus-test? *target* dead)))
-    (let ((pos (-> *target* control trans))
-          (vis (-> *load-state* vis-nick))
-          )
+    (let ((pos (-> *target* control trans)))
       (cond
-        ((and (bf-zone-level? (-> *bf* zone) vis)
-              (or (bf-zone-cell? (-> *bf* zone) pos) (bf-near-wall? pos))
-              (< (- (-> *bf* safe y) BF_FALL_DEPTH) (-> pos y))
-              )
+        ((< (- (-> *bf* safe y) BF_FALL_DEPTH) (-> pos y))
          (when (and (logtest? (-> *target* control status) (collide-status on-surface))
                     (time-elapsed? (-> *bf* safe-time) (seconds 0.5))
                     )
            (vector-copy! (-> *bf* safe) pos)
-           (set! (-> *bf* safe-level) vis)
+           (set! (-> *bf* safe-level) (-> *load-state* vis-nick))
            (set-time! (-> *bf* safe-time))
            )
          )
         (else
-          (let ((spark (vector-copy! (new 'stack-no-clear 'vector) pos)))
-            (+! (-> spark y) (meters 1.2))
-            (move-to-point! (-> *target* control) (-> *bf* safe))
-            (vector-reset! (-> *target* control transv))
-            (want-vis-level *load-state* (-> *bf* safe-level))
-            (bf-force-field-spark spark)
-            )
+          (move-to-point! (-> *target* control) (-> *bf* safe))
+          (vector-reset! (-> *target* control transv))
+          (want-vis-level *load-state* (-> *bf* safe-level))
           )
         )
       (when (and (or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK))
@@ -1448,50 +1537,32 @@
   (none)
   )
 
-(defun bf-want-zone-levels ((ls load-state))
-  "During a battle in a two-section district, the levels Haven City keeps loaded are its base
-   (ctywide, under the battle's alias) and the district's two sections, displayed. Its continue
-   points and region scripts also ask for the next section, an interior or a mission's level, and
-   it holds two sections at most: the district's second section went as the player crossed it
-   toward a third. Every other wanted level is dropped; the borrowed unit levels (ctypesa, ctypesc)
-   come from the 'borrow setting, after this.
-   A one-section district keeps the stock loading: the force field keeps the player in it, so the
-   game always wants it, and its edges stand on the next section's ground, which the game loads
-   with it there (the Port's war zone, on ctyinda's). Its camps' continue points list that
-   section too, and a respawn waits for every level of its list (target-death.gc target-continue)."
-  (let ((zone (-> *bf* zone)))
-    (when (-> *bf-zones* zone level1)
-      (dotimes (i 10)
-        (let ((name (-> ls want i name)))
-          (when (and name (not (string-prefix= "ctywide" (symbol->string name))) (not (bf-zone-level? zone name)))
-            (set! (-> ls want i name) #f)
-            (set! (-> ls want i display?) #f)
-            (set! (-> ls want i force-vis?) #f)
-            (set! (-> ls want i force-inside?) #f)
-            )
-          )
-        )
-      (bf-want-level ls (-> *bf-zones* zone level0))
-      (bf-want-level ls (-> *bf-zones* zone level1))
+(defbehavior bf-respawn-at-point bf-director ()
+  "After a far respawn's reset (`bf-target-death`): once Jak stands at the point's continue point,
+   its levels in, move him onto the point (`*bf*` respawn-at), with his class's full health, a fresh
+   loadout, two seconds of invulnerability and the camera on him; the point is the safe place of a
+   fall. The director draws his class again on its own (`want-avatar?`)."
+  (when (and (>= (-> *bf* respawn-at) 0)
+             *target*
+             (not (focus-test? *target* dead))
+             (= (-> *target* state name) 'target-stance)
+             (logtest? (-> *target* control status) (collide-status on-surface))
+             (< (-> *game-info* blackout-time) (current-time))
+             )
+    (let ((at (-> *bf* points (-> *bf* respawn-at) pos)))
+      (format 0 "battlefront: respawned at ~S after the reset~%" (bf-point-name (-> *bf* respawn-at)))
+      (set! (-> *bf* respawn-at) -1)
+      (move-to-point! (-> *target* control) at)
+      (vector-reset! (-> *target* control transv))
+      (vector-copy! (-> *bf* safe) at)
+      (set! (-> *bf* safe-level) (-> *load-state* vis-nick))
+      (set! (-> *bf* safe-time) 0)
+      (set! (-> *target* fact health) (bf-class-health (-> *bf* class)))
+      (bf-refill-ammo)
+      (target-timed-invulnerable (seconds 2) *target* 1)
+      (send-event *camera* 'teleport)
       )
     )
-  (none)
-  )
-
-;; Stock borrow step, kept across REPL reloads of this file (Lisp wiki jak3 4.10).
-(define-perm *bf-stock-add-borrow-levels* (function load-state none)
-             (method-of-type load-state add-borrow-levels)
-             )
-
-(defmethod add-borrow-levels ((this load-state))
-  "Every change of the levels the game wants ends here (load-state.gc: a continue point's list,
-   want-levels from the region scripts, a level displayed). During a battle in a two-section
-   district its sections are kept first (`bf-want-zone-levels`), then the stock adds the borrowed
-   levels."
-  (if (bf-active?)
-      (bf-want-zone-levels this)
-      )
-  (*bf-stock-add-borrow-levels* this)
   (none)
   )
 
@@ -1499,13 +1570,17 @@
   "During a deployment, keep Jak at his side's spawn until he stands on real ground: the battle's
    `start` drops him there before the collision of the ground is loaded (seen in game: he fell
    through the port and died)."
-  (when (and *target*
-             (not (focus-test? *target* dead))
-             (not (logtest? (-> *target* control status) (collide-status on-surface)))
-             (< (-> *target* control trans y) (+ (-> *bf* spawn (-> *bf* team) y) (meters -1)))
-             )
-    (move-to-point! (-> *target* control) (-> *bf* spawn (-> *bf* team)))
-    (vector-reset! (-> *target* control transv))
+  (let* ((cont (bf-camp-continue))
+         (at (if cont (-> cont trans) (-> *bf* spawn (-> *bf* team))))
+         )
+    (when (and *target*
+               (not (focus-test? *target* dead))
+               (not (logtest? (-> *target* control status) (collide-status on-surface)))
+               (< (-> *target* control trans y) (+ (-> at y) (meters -1)))
+               )
+      (move-to-point! (-> *target* control) at)
+      (vector-reset! (-> *target* control transv))
+      )
     )
   (none)
   )
@@ -1870,6 +1945,14 @@
            (bf-open-class-page #f #t)
            )
        )
+      ((and (= req BF_REQ_REDEPLOY) (bf-can-open-menu?))
+       (set! *bf-request* BF_REQ_NONE)
+       ;; the respawn page without a death (`bf-target-death`'s 'bf-redeploy mode)
+       (when (bf-can-redeploy?)
+         (format 0 "battlefront: redeploy~%")
+         (send-event *target* 'change-state target-death 'bf-redeploy)
+         )
+       )
       )
     )
   ;; the mode switched off in the Mods menu during a battle: back to the last save, once that menu
@@ -1929,6 +2012,8 @@
               (set! (-> self want-avatar?) #t)
               )
              )
+           (bf-respawn-at-point)
+           (set! (-> *bf* redeploy-ok?) (bf-can-redeploy?))
            (bf-keep-in-zone)
            (bf-spawn-drops)
            )
@@ -2023,6 +2108,10 @@
            (logior! (-> arg1 mask) (attack-mask damage))
            )
           )
+        ;; a hit taken: in combat (redeploying waits BF_REDEPLOY_CALM)
+        (if (not ignore?)
+            (bf-combat!)
+            )
         )
       )
     (set! (-> self fact shield-level) (if (-> *bf* shield?) 1.0 0.0))
@@ -2089,11 +2178,20 @@
   )
 
 (defun bf-camp-continue ()
-  "The continue point of the player's camp in the battle's zone (`*bf-zones*`), or #f."
-  (get-continue-by-name *game-info* (if (= (-> *bf* team) BF_TEAM_FF)
-                                        (-> *bf-zones* (-> *bf* zone) ff-continue)
+  "The continue point the player deploys at: the one of the point a far respawn takes him to
+   (`*bf*` respawn-at, `*bf-point-defs*`), else his camp's in the battle's zone (`*bf-zones*`); #f
+   for none."
+  (get-continue-by-name *game-info* (cond
+                                      ((>= (-> *bf* respawn-at) 0)
+                                       (-> *bf-point-defs* (-> *bf* respawn-at) continue)
+                                       )
+                                      ((= (-> *bf* team) BF_TEAM_FF)
+                                       (-> *bf-zones* (-> *bf* zone) ff-continue)
+                                       )
+                                      (else
                                         (-> *bf-zones* (-> *bf* zone) kg-continue)
                                         )
+                                      )
                         )
   )
 
@@ -2152,9 +2250,12 @@
 (defbehavior bf-target-death target ((mode symbol))
   "Jak's death during a fight, in place of the stock one (`target-death` below): his side loses a
    unit and his class model goes; for BF_RESPAWN_TIME the camera follows a living unit of his side
-   (`bf-spectate-follow`) while the HUD counts down (`bf-draw-hud`); then he is back at his side's
-   spawn, facing the battlefield, alive, full health, with a fresh loadout and two seconds of
-   invulnerability, and the director draws his class again. The world runs on meanwhile. The stock death freezes the
+   (`bf-spectate-follow`) while the HUD counts down (`bf-draw-hud`); then he picks his respawn point
+   on the city's map, his side's base or a control point it holds (`bf-draw-respawn-pick`), and is
+   back there once its levels are loaded, facing the battlefield, alive, full health, with a fresh
+   loadout and two seconds of invulnerability, and the director draws his class again. MODE
+   'bf-redeploy (the START menu's Redeploy, out of combat for BF_REDEPLOY_CALM): no loss and no
+   wait, the respawn page at once. The world runs on meanwhile. The stock death freezes the
    enemies (a 'process-mask setting), may play a death movie, and its reset ('life, `initialize!`)
    spawned every unit of Haven City again: the battle's units vanished and came back at each death.
    First it sets what the stock death sets that the game reads: Jak dead (units leave him alone),
@@ -2168,9 +2269,13 @@
       )
   (set! (-> self control mod-surface) *neutral-mods*)
   (vector-reset! (-> self control transv))
-  (bf-count-loss (-> *bf* team))
+  (when (!= mode 'bf-redeploy)
+    (bf-count-loss (-> *bf* team))
+    (+! (-> *bf* deaths) 1)
+    )
+  (set! (-> *bf* redeploy-ok?) #f)
   (bf-avatar-kill)
-  (set! (-> *bf* respawn-time) (+ (current-time) BF_RESPAWN_TIME))
+  (set! (-> *bf* respawn-time) (+ (current-time) (if (= mode 'bf-redeploy) 0 BF_RESPAWN_TIME)))
   (set! (-> *bf* spectate) (the-as handle #f))
   (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
     (if dir
@@ -2189,11 +2294,10 @@
     (bf-spectate-follow (-> self control trans))
     (suspend)
     )
-  ;; the respawn point: his side's base, or a control point it holds, picked on the zone's map
-  ;; (`bf-draw-respawn-pick`: D-pad left or right, then X) while the battle goes on; with the base
-  ;; alone, the base at once
+  ;; the respawn point: his side's base, or a control point it holds, picked on the city's map at
+  ;; every death (`bf-draw-respawn-pick`: D-pad, then X) while the battle goes on
   (set! (-> *bf* respawn-pick) (-> *bf* team))
-  (when (and (bf-fighting?) (!= (bf-next-held-point (-> *bf* team) (-> *bf* team) 1) (-> *bf* team)))
+  (when (bf-fighting?)
     (cpad-clear! 0 confirm)
     (until (or (not (bf-fighting?)) (cpad-pressed? 0 confirm))
       (logior! (-> self draw status) (draw-control-status no-draw))
@@ -2212,34 +2316,49 @@
     )
   (let ((pick (-> *bf* respawn-pick)))
     (set! (-> *bf* respawn-pick) -1)
-    (when (and (>= pick 2) (bf-point-held? pick (-> *bf* team)))
-      ;; a control point: in the zone, whose levels are all loaded; the field's safe place is there
-      (move-to-point! (-> self control) (-> *bf* points pick pos))
+    ;; a point lost meanwhile: the base
+    (if (not (bf-point-held? pick (-> *bf* team)))
+        (set! pick (-> *bf* team))
+        )
+    (let ((at (-> *bf* points pick pos))
+          (cont (get-continue-by-name *game-info* (-> *bf-point-defs* pick continue)))
+          )
+      (when (and cont (not (bf-camp-loaded? cont)))
+        ;; far, its sections not loaded: the stock way, a reset at the point's continue point
+        ;; (`initialize!` 'life, as the battle's start and the stock death do), then the director
+        ;; brings him onto the point (`bf-respawn-at-point`). Moving him there and wanting its
+        ;; levels instead unloaded the section that held the borrowed unit levels: every unit's
+        ;; process went, the traffic spawned its pools again over them, the engine's default nav
+        ;; mesh ran out of its 128 nav-controls and a new guard's setup crashed the game (nav-enemy
+        ;; setup-enemy!).
+        (remove-setting! 'string-min-length)
+        (remove-setting! 'string-max-length)
+        (remove-setting! 'string-min-height)
+        (remove-setting! 'string-max-height)
+        (bf-spectate-end!)
+        (set! (-> *bf* respawn-at) pick)
+        (format 0 "battlefront: respawn at ~S through a reset at ~S~%" (bf-point-name pick) (-> cont name))
+        ;; as the battle's start does: its ships down and the stock hatred (the Haven City side's
+        ;; reset), then the deployment, the traffic waking its units the stock way while Jak waits
+        ;; for the levels (`bf-deploy-update`; its points kept: they are set up once a battle)
+        (bf-city-call BF_CITY_RESET)
+        (bf-set-phase! BF_PHASE_DEPLOY)
+        (set-continue! *game-info* cont #f)
+        (vector-reset! (-> self control transv))
+        (bf-city-call BF_CITY_FREE_NAVS)
+        (initialize! *game-info* 'life (the-as game-save #f) (the-as string #f) (the-as resetter-spec #f))
+        (sleep-code)
+        )
+      ;; near, its sections loaded: there at once, the levels left as they are; the point is the
+      ;; safe place of a fall (`bf-keep-in-zone`), not where he died
+      (move-to-point! (-> self control) at)
       (vector-reset! (-> self control transv))
-      (vector-copy! (-> *bf* safe) (-> *bf* points pick pos))
-      (set! (-> *bf* safe-time) 0)
-      )
-    (when (< pick 2)
-      ;; back at the spawn, once the camp's levels are loaded, 10 s at most, still hidden; the
-      ;; field's safe place is the spawn again (`bf-keep-in-zone`), not where he died
-      (move-to-point! (-> self control) (-> *bf* spawn (-> *bf* team)))
-      (vector-reset! (-> self control transv))
-      (let ((cont (bf-camp-continue))
-            (start (current-time))
-            )
-        (when cont
-          (bf-want-camp-levels cont)
-          (while (and (bf-fighting?) (not (bf-camp-loaded? cont)) (not (time-elapsed? start (seconds 10))))
-            (logior! (-> self draw status) (draw-control-status no-draw))
-            (move-to-point! (-> self control) (-> *bf* spawn (-> *bf* team)))
-            (vector-reset! (-> self control transv))
-            (suspend)
-            )
+      (if cont
           (set! (-> *bf* safe-level) (-> cont level))
           )
-        )
-      (vector-copy! (-> *bf* safe) (-> *bf* spawn (-> *bf* team)))
+      (vector-copy! (-> *bf* safe) at)
       (set! (-> *bf* safe-time) 0)
+      (format 0 "battlefront: respawned at ~S~%" (bf-point-name pick))
       )
     )
   (remove-setting! 'string-min-length)
@@ -2406,17 +2525,19 @@
 (defconstant BF_TEXT_CLASS #x7f03)
 (defconstant BF_TEXT_RESTART #x7f04)
 (defconstant BF_TEXT_QUIT #x7f05)
-(defconstant BF_TEXT_COUNT 6)
+(defconstant BF_TEXT_REDEPLOY #x7f06)
+(defconstant BF_TEXT_COUNT 7)
 
 (define *bf-menu-text*
   (new 'static 'boxed-array :type string
-    "Gamemode" "Battlefront" "New battle" "Change class" "Restart the battle" "Quit the battle"
+    "Gamemode" "Battlefront" "New battle" "Change class" "Restart the battle" "Quit the battle" "Redeploy"
     )
   )
 
 (define *bf-menu-text-fr*
   (new 'static 'boxed-array :type string
     "Mode de jeu" "Battlefront" "Nouvelle bataille" "Changer de classe" "Recommencer la bataille" "Quitter la bataille"
+    "Se redéployer"
     )
   )
 
@@ -2467,8 +2588,23 @@
     )
   )
 
+(defun bf-can-redeploy? ()
+  "#t when the player may redeploy: in a fight, alive with his class, and out of combat (no shot,
+   blow or hit taken, `*bf*` combat-time) for BF_REDEPLOY_CALM."
+  (if (and (bf-fighting?)
+           *target*
+           (not (focus-test? *target* dead))
+           (bf-avatar-alive?)
+           (< BF_REDEPLOY_CALM (- (-> *display* game-clock frame-counter) (-> *bf* combat-time)))
+           )
+      #t
+      #f
+      )
+  )
+
 ;; START > Options > Gamemode > Battlefront: a new battle (its zone, side and class pages), or,
-;; during one, a class change, a restart or the end. The entries that do not apply are grey.
+;; during one, a class change, a restart, the end, or a redeploy (last, out of combat only). The
+;; entries that do not apply are grey.
 (define *bf-battlefront-page*
   (progress-new-generic-scrolling-page BF_TEXT_BATTLEFRONT
     (new 'static 'menu-generic-button-option
@@ -2490,6 +2626,12 @@
       :name BF_TEXT_QUIT
       :should-disable? (lambda () (not (bf-active?)))
       :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_END) (none))
+      )
+    (new 'static 'menu-generic-button-option
+      :name BF_TEXT_REDEPLOY
+      ;; the director's answer: this page runs on the menu's clock, which `*bf*` combat-time is not on
+      :should-disable? (lambda () (not (-> *bf* redeploy-ok?)))
+      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_REDEPLOY) (none))
       )
     )
   )

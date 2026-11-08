@@ -422,8 +422,9 @@
   "Hit FOE with a generic attack of DAMAGE points on the battle's 24 point scale, sent from Jak (the
    foe reacts to Jak). `*bf*` own-attack carries the points while the foe takes the event (the
    damage step, battlefront-h.gc `bf-attack-damage`, reads them: any other blow of Jak's body deals
-   none)."
+   none). A blow is combat: `*bf*` combat-time."
   (set! (-> *bf* own-attack) damage)
+  (bf-combat!)
   (let ((id (+ (-> *game-info* attack-id) 1))
         (msg (new 'stack-no-clear 'event-message-block))
         )
@@ -701,6 +702,7 @@
          (set-first-meet-point bolt from)
          (set-last-meet-point bolt to)
          (set! (-> self shoot-until) (+ (current-time) (seconds 0.15)))
+         (bf-combat!)
          )
        )
       ((-> self tazing?)
@@ -788,6 +790,10 @@
           )
       )
     (set! (-> self shoot-until) (+ (current-time) hold))
+    ;; a shot of any class: in combat (the START menu's Redeploy waits 30 s out of it, battlefront.gc)
+    (if (> hold 0)
+        (bf-combat!)
+        )
     )
   (none)
   )

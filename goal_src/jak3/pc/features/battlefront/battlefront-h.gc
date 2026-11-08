@@ -36,7 +36,7 @@
 (defconstant BF_RESERVE 500)          ;; units in stock per side at the start of a battle
 (defconstant BF_TEAM_COUNT 2)
 (defconstant BF_CLASS_COUNT 8)
-(defconstant BF_ZONE_COUNT 4)
+(defconstant BF_ZONE_COUNT 1)          ;; the whole of Haven City (`*bf-zones*`)
 
 ;; Teams. The values index `reserve` and `losses` in `bf-state`.
 (defconstant BF_TEAM_NONE -1)
@@ -101,17 +101,14 @@
 ;; ---------------------------------------------------------------------------------------------
 
 (deftype bf-zone (basic)
-  "One war zone: a whole Haven City district, one or two of its levels (sections), with a continue
-   point of each side at its two ends. The battlefield is the district: its levels stay loaded for
-   the whole battle and the force field holds the player inside them (battlefront.gc)."
+  "One war zone, with a continue point of each side: its base. The battlefield is the whole of
+   Haven City; the game loads its sections around the player as it does outside a battle."
   ((name        string)    ;; menu label
    (desc        string)    ;; menu description
    (name-fr     string)    ;; the same in French (game language French)
    (desc-fr     string)
-   (ff-continue string)    ;; Freedom League spawn
-   (kg-continue string)    ;; Krimzon Guard spawn
-   (level0      symbol)    ;; the district's levels: Haven City keeps two sections loaded at most
-   (level1      symbol)    ;; #f for a one-level district
+   (ff-continue string)    ;; Freedom League base
+   (kg-continue string)    ;; Krimzon Guard base
    )
   )
 
@@ -128,11 +125,12 @@
    )
   )
 
-;; Battle points: the two sides' bases (their spawns, points 0 and 1), and BF_CONTROL_POINTS control
-;; points between them, neutral at the start. A side holding one sends its troop transports there
-;; and its player may respawn there (battlefront.gc `bf-update-points`, battlefront-city.gc).
-(defconstant BF_POINT_MAX 5)
-(defconstant BF_CONTROL_POINTS 3)
+;; Battle points: the two sides' bases (their spawns, points 0 and 1), and a control point in each
+;; district the units fight in, neutral at the start (`*bf-point-defs*`). A side holding one sends
+;; its troop transports there and its player may respawn there (battlefront.gc `bf-update-points`,
+;; battlefront-city.gc).
+(defconstant BF_POINT_MAX 6)
+(defconstant BF_CONTROL_POINTS 4)
 (defconstant BF_POINT_RADIUS (meters 15))      ;; units within it count for its capture
 (defconstant BF_CAPTURE_TIME 30.0)             ;; seconds a side's majority on it takes to capture it
 
@@ -145,6 +143,20 @@
    (progress   float)          ;; seconds of capture so far, up to BF_CAPTURE_TIME
    (near       int32 2)        ;; units of each side within BF_POINT_RADIUS at the last count
    (ship       handle)         ;; the troop transport serving it now, #f for none (battlefront-city.gc)
+   (fight      float)          ;; seconds of a fight away from the player since its last losses
+   )
+  )
+
+(deftype bf-point-def (basic)
+  "Where a battle point stands: its name (English, French), the continue point whose levels a
+   respawn there loads (a base stands on it), and, for a control point, its place: the middle of a
+   lane of its district, where units walk and transports find ground."
+  ((name      string)
+   (name-fr   string)
+   (continue  string)
+   (x         float)  ;; meters
+   (y         float)
+   (z         float)
    )
   )
 
@@ -200,8 +212,10 @@
    (point-count   int32)          ;; points in use
    (point-time    time-frame)     ;; last capture count (`bf-update-points`)
    (respawn-pick  int32)          ;; the point the dead player chose to respawn at, -1 none yet
-   (wall-count    int32)          ;; force field walls up (battlefront-city.gc `bf-city-walls`)
-   (walls         handle 16)
+   (combat-time   time-frame)     ;; the player's last shot, blow or hit taken, on the game clock (`bf-combat!`)
+   (respawn-at    int32)          ;; the point a far respawn's reset brings the player to, -1 none
+   (redeploy-ok?  symbol)         ;; the player may redeploy now (the director's clock; the START menu reads it)
+   (deaths        int32)          ;; the player's deaths in this battle
    (bag-deaths    int32)          ;; unit deaths left in the pickup bag (`bf-queue-drop`), 0 for a new bag
    (bag-drops     int32)          ;; pickups left in it
    )
@@ -223,12 +237,19 @@
 (set! (-> *bf* endless-dark?) #f)
 (set! (-> *bf* endless-light?) #f)
 (set! (-> *bf* view-set?) #f)
-;; the points' ships and the force field walls: no process (a zero handle names process 0)
+(set! (-> *bf* respawn-at) -1)
+
+(defun bf-combat! ()
+  "The player is in combat now (a shot, a blow, a hit taken): `*bf*` combat-time, on the game clock.
+   Each process reads its own clock with `current-time`, and Jak's, the class model's, the director's
+   and the START menu's are not all the same: the menu's 30 s test never passed."
+  (set! (-> *bf* combat-time) (-> *display* game-clock frame-counter))
+  (none)
+  )
+(set! (-> *bf* redeploy-ok?) #f)
+;; the points' ships: no process (a zero handle names process 0)
 (dotimes (i BF_POINT_MAX)
   (set! (-> *bf* points i ship) (the-as handle #f))
-  )
-(dotimes (i 16)
-  (set! (-> *bf* walls i) (the-as handle #f))
   )
 
 ;; Set by the Mods menu. While it is on, START > Options shows Gamemode (the battle's pages);
@@ -239,6 +260,7 @@
 (defconstant BF_CITY_PREPARE 0)   ;; the zone is loaded, the fight starts
 (defconstant BF_CITY_UPDATE 1)    ;; every frame of the fight
 (defconstant BF_CITY_RESET 2)     ;; the battle ends
+(defconstant BF_CITY_FREE_NAVS 3) ;; just before an `initialize!` 'life: the units give back the default nav mesh
 
 ;; Factions of a battle: Freedom League and Krimzon Guard both strong everywhere, Metal Heads
 ;; out; guards at the "combat" spawn level (guard-a 13), KG robots at "war" (roboguard 5,
@@ -270,57 +292,51 @@
 ;; Tables
 ;; ---------------------------------------------------------------------------------------------
 
-;; War zones: whole districts of Haven City, the levels the game loads together there (its
-;; continue points name them: ctywide plus one or two sections). The slums are two districts the
-;; game never loads together: the old slums by the Industrial Zone (ctysluma), and the slums around
-;; the Freedom League's headquarters (ctyslumb and ctyslumc). Each side spawns at a stock continue
-;; point at one end of the district, so the stock level loading takes the player there.
+;; The war zone: the whole of Haven City. Each side's base is a stock continue point: the Freedom
+;; League's at the entrance of its headquarters (the point Jak comes out at when he leaves them), the
+;; Krimzon Guard's on the Port's east docks, by its war zone. The battle used to hold one district,
+;; its sections kept loaded and a force field at its edges; the author wanted the whole city.
 (define *bf-zones*
   (new 'static 'boxed-array :type bf-zone
     (new 'static 'bf-zone
-      :name "Port"
-      :desc "The whole port, from its west docks to the KG war zone."
-      :name-fr "Port"
-      :desc-fr "Tout le port, des quais ouest à la zone de guerre de la KG."
-      :ff-continue "ctyport-bbush-6"
-      ;; not ctyport-warzone: it stands on ctyinda's ground, which the game loads only near it, and a
-      ;; respawn there after a death far away found none (seen in game)
-      :kg-continue "ctyport-bombbot"
-      :level0 'ctyport
-      :level1 #f
-      )
-    (new 'static 'bf-zone
-      :name "Industrial Zone"
-      :desc "The whole Industrial Zone, its factories and pipes, from the port to the slums."
-      :name-fr "Zone industrielle"
-      :desc-fr "Toute la zone industrielle, usines et canalisations, du port aux bas quartiers."
-      :ff-continue "ctyindb-start"
-      :kg-continue "ctyinda-bbush-5"
-      :level0 'ctyinda
-      :level1 'ctyindb
-      )
-    (new 'static 'bf-zone
-      :name "Slums"
-      :desc "The whole old slums by the Industrial Zone, their alleys and yards."
-      :name-fr "Bas quartiers"
-      :desc-fr "Tous les vieux bas quartiers près de la zone industrielle, ruelles et cours."
-      :ff-continue "ctysluma-alley"
-      :kg-continue "ctysluma-bbush-3"
-      :level0 'ctysluma
-      :level1 #f
-      )
-    (new 'static 'bf-zone
-      :name "Freedom HQ"
-      :desc "The whole slums around the headquarters of the Freedom League."
-      :name-fr "QG de la Ligue"
-      :desc-fr "Tous les bas quartiers autour du quartier général de la Ligue."
-      ;; the Freedom League's base at the entrance of its headquarters: the stock point Jak comes out
-      ;; at when he leaves them (the author's wish; ctyslumc-freehq stood 5 m along the front)
+      :name "Haven City"
+      :desc "The whole city: a control point in each district, the Port, the Industrial Zone, the Slums and Freedom HQ."
+      :name-fr "Haven City"
+      :desc-fr "Toute la ville : un point de contrôle dans chaque quartier, le Port, la zone industrielle, les bas quartiers et le QG de la Ligue."
       :ff-continue "ctyslumc-freehq-exit"
-      :kg-continue "ctyslumb-bbush-4"
-      :level0 'ctyslumb
-      :level1 'ctyslumc
+      :kg-continue "ctyport-bombbot"
       )
+    )
+  )
+
+;; The battle points, in `*bf*` points order: the bases (their places are their continue points),
+;; then a control point in each district, the middle of a lane between that district's ends (found
+;; on its streets by the battles of round 16), with a continue point of its section.
+(define *bf-point-defs*
+  (new 'static 'boxed-array :type bf-point-def
+    (new 'static 'bf-point-def :name "Freedom League base" :name-fr "Base de la Ligue" :continue "ctyslumc-freehq-exit")
+    (new 'static 'bf-point-def :name "Krimzon Guard base" :name-fr "Base de la Grenagarde" :continue "ctyport-bombbot")
+    (new 'static 'bf-point-def :name "Port" :name-fr "Port" :continue "ctyport-bbush-6"
+      :x 225.08 :y 9.71 :z 1368.35)
+    (new 'static 'bf-point-def :name "Industrial Zone" :name-fr "Zone industrielle" :continue "ctyinda-bbush-5"
+      :x 929.45 :y 10.17 :z 854.68)
+    (new 'static 'bf-point-def :name "Slums" :name-fr "Bas quartiers" :continue "ctysluma-alley"
+      :x 1000.76 :y 10.35 :z 266.12)
+    (new 'static 'bf-point-def :name "Freedom HQ" :name-fr "QG de la Ligue" :continue "ctyslumb-bbush-4"
+      :x 522.14 :y 2.88 :z -339.72)
+    )
+  )
+
+;; Which points are next to which (the districts' streets): a side fights for a point away from
+;; the player only from one next to it (battlefront.gc `bf-update-points`). Bit i: point i.
+(define *bf-point-links*
+  (new 'static 'array uint32 6
+    #b100000  ;; Freedom League base: Freedom HQ
+    #b001100  ;; Krimzon Guard base: Port, Industrial Zone
+    #b001010  ;; Port: Krimzon Guard base, Industrial Zone
+    #b010110  ;; Industrial Zone: Krimzon Guard base, Port, Slums
+    #b101000  ;; Slums: Industrial Zone, Freedom HQ
+    #b010001  ;; Freedom HQ: Freedom League base, Slums
     )
   )
 
@@ -1010,11 +1026,6 @@
       0
       (bf-want-count kind stock)
       )
-  )
-
-(defun bf-zone-level? ((zone int) (name symbol))
-  "#t when level NAME is one of war zone ZONE's levels."
-  (and name (or (= name (-> *bf-zones* zone level0)) (= name (-> *bf-zones* zone level1))))
   )
 
 (defun bf-unit-scale ((proc process) (stock float))
