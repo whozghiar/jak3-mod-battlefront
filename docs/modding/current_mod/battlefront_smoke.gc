@@ -826,17 +826,43 @@
 (define *smoke-team* 0)
 
 (defbehavior smoke-go-near process ((team int))
-  "Round 16: units come by their side's transports, at its base first, and the two armies meet
-   later. Take Jak to side TEAM's base (2 m up) and wait, 15 s at most, for a guard of that side
-   within 150 m."
-  (let ((at (vector-copy! (new 'stack-no-clear 'vector) (-> *bf* points team pos))))
-    (+! (-> at y) (meters 2))
-    (move-to-point! (-> *target* control) at)
+  "Take Jak where guards of side TEAM are and wait, 40 s at most, for one within 150 m. His own side:
+   his base (2 m up). The other side (round 17: its base is across the city, in a section not
+   loaded): the control point nearest his base is given to it, so its troop transports bring its
+   units there, and Jak stands 25 m off it toward his base."
+  (cond
+    ((= team (-> *bf* team))
+     (let ((at (vector-copy! (new 'stack-no-clear 'vector) (-> *bf* points team pos))))
+       (+! (-> at y) (meters 2))
+       (move-to-point! (-> *target* control) at)
+       )
+     )
+    (else
+      (let ((best 2)
+            (base (-> *bf* points (-> *bf* team) pos))
+            )
+        (dotimes (k BF_CONTROL_POINTS)
+          (if (< (vector-vector-xz-distance (-> *bf* points (+ k 2) pos) base)
+                 (vector-vector-xz-distance (-> *bf* points best pos) base)
+                 )
+              (set! best (+ k 2))
+              )
+          )
+        (set! (-> *bf* points best owner) team)
+        (let ((at (vector-! (new 'stack-no-clear 'vector) base (-> *bf* points best pos))))
+          (set! (-> at y) 0.0)
+          (vector-normalize! at (meters 25))
+          (vector+! at at (-> *bf* points best pos))
+          (+! (-> at y) (meters 2))
+          (move-to-point! (-> *target* control) at)
+          )
+        (format 0 "SMOKE point ~D given to side ~D for the test~%" best team)
+        )
+      )
     )
   (set! *smoke-team* team)
-  (smoke-wait-for 15.0 (lambda () (smoke-near-unit *smoke-team* (the-as process #f) 'crimson-guard)))
-  (format 0 "SMOKE at the base of side ~D, a guard of it near: ~A~%" team
-          (if (smoke-near-unit team (the-as process #f) 'crimson-guard) #t #f))
+  (smoke-wait-for 40.0 (lambda () (smoke-near-unit *smoke-team* (the-as process #f) 'crimson-guard)))
+  (format 0 "SMOKE near side ~D's guards: ~A~%" team (if (smoke-near-unit team (the-as process #f) 'crimson-guard) #t #f))
   0
   )
 
@@ -847,7 +873,8 @@
    health. The invulnerable secret is lifted for it (a save may have it on), then put back as it
    was; his health back to full after."
   (smoke-step "blows on the player")
-  (smoke-go-near (-> *bf* team))
+  ;; behind the shield (5 s), where the foes are already: an ally there or none
+  (smoke-go-near (if shield? (bf-other-team (-> *bf* team)) (-> *bf* team)))
   (let ((invuln? (logtest? (-> *game-info* secrets) (game-secrets invulnerable)))
         (ally (smoke-near-unit (-> *bf* team) (the-as process #f) 'crimson-guard))
         (foe-found? #f)
@@ -886,7 +913,7 @@
           )
         )
       )
-    (smoke-check "a guard of each side found for the blows" (and ally foe-found?))
+    (smoke-check "a guard of each side found for the blows (the foe's alone behind the shield)" (and (or shield? ally) foe-found?))
     (smoke-wait 1.0)
     (if invuln?
         (logior! (-> *game-info* secrets) (game-secrets invulnerable))
@@ -1098,6 +1125,9 @@
    shield drops after 5 s and does not come back at once (25 s); R2 rolls as a ball until R2 again,
    as far as the player goes. Its shot takes 4 points."
   (smoke-step "robot shield")
+  ;; round 17: the foes first (their transports bring them to a point near the player's base), the
+  ;; shield's 5 s then go to the foe's blow
+  (smoke-go-near (bf-other-team (-> *bf* team)))
   (smoke-press (pad-buttons circle) 0.5)
   (let ((up (-> (smoke-av) shield-time))
         (from (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans))))
@@ -2204,6 +2234,8 @@
      (smoke-player-hits #f)
      (smoke-unit-damage)
      (smoke-hatred-check)
+     ;; the jetpack's boost from the base, in the open (25 m off a control point it met a wall)
+     (smoke-go-near (-> *bf* team))
      (smoke-change-class 1 "blue jetpack")
      (smoke-hp-check BF_CLASS_BLUE_JETPACK)
      (smoke-invulnerable #t)
