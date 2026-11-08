@@ -53,10 +53,9 @@ started). X selects, Circle goes back. The texts are French when the game langua
 English otherwise.
 
 Every page is drawn on black: the world is not drawn under it. The war zone and side pages show,
-in the right frame, the whole city on the game's own minimap textures (dark gray ground, white
-streets, blue water; Jak 3's ruined center has no minimap texture and stays black), the Freedom
-League's base in blue, the Krimzon Guard's in red, the control points in gray, and Jak in white.
-North is up, as on the minimap.
+in the right frame, the whole city as the START menu's map draws it (white streets, blue water,
+the ruined center and the stadium included), the Freedom League's base in blue, the Krimzon
+Guard's in red, the control points in gray, and Jak in white. North is up, as on the minimap.
 
 The battlefield is the whole of Haven City (round 17; until round 16 a battle held one district,
 its sections kept loaded behind a force field). The war zone page lists Haven City, and Spargus
@@ -173,7 +172,7 @@ board, Dark Jak and Light Jak are off while a class is played.
 | `goal_src/jak3/pc/features/battlefront/battlefront-player.gc` (new, GAME) | `bf-avatar`: the class model drawn in Jak's place, its moves, weapons, salvos, dodges, ammo, gauges and the robotguard's shield (`bf-shield`); `bf-cam-rig`: the third-person camera; `bf-icon`: a class model drawn over the game (class page preview). | See §2.4 and §2.6. |
 | `goal_src/jak3/pc/features/battlefront/battlefront.gc` (new, GAME) | `bf-director` (battle life cycle, menu pages, HUD, force field, pickups); the code of Jak's `target-death` state during a fight (`bf-target-death`); wrappers of `target-attacked`, `game-info` `initialize!`, the START menu's ring options, `progress` `set-menu-options` and `game-text-info` `lookup-text!`; the START menu's Gamemode pages; the Mods menu entry. | The director lives in `*pc-pool*` so it outlives level changes and deaths; it owns the battle's settings. |
 | `docs/modding/current_mod/battlefront_smoke.gc`, `battlefront_tests.md` (new) | The smoke test scenarios and their notebook (§3). | Never in a build: `smoke_test.py install` copies a scenario into GAME for a run. |
-| `goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc` (new, GAME, generated) | The whole city's map: every minimap cell with a texture, 256 texels on the long side, one palette, its world corner. | The zone pages show each district on the game's own minimap textures, loaded by the game only with their city section (§2.6). |
+| `goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc` (new, GAME, generated) | The whole city's map: the START menu's map of Haven City inside the city's outline, 384 texels high, one palette, its world corner. | The zone pages show the whole city wherever the player stands (§2.6). |
 | `goal_src/jak3/levels/city/battlefront/battlefront-city.gc` (new, CWI) | Attack-controller hatred edits, periodic faction commands, the troop transports' dispatch, the units' routes to their points (their lane callback), the release of the default nav mesh before a reset, `bf-keep-unit?`, the player's grenade throw; installs `*bf-city-hook*` and `*bf-city-grenade*`. | These need Haven City's types (the grenade is `vehicle-grenade-deflect`, a lane is a `nav-branch`, a unit a `citizen`), only known in CWI. |
 | `goal_src/jak3/engine/nav/nav-mesh.gc` | The engine's `*default-nav-mesh*` gets 255 nav-controls and users, not 128. | Every new traffic unit takes one there until it is first woken; a far respawn's reset made the traffic spawn its pools again and overflowed 128 (§2.9). |
 | `goal_src/jak3/levels/city/battlefront/bf-transport.gc` (new, CWI) | `bf-transport`: the troop transport that brings a side's units (§2.9). | Ported from the mod Haven City: New Dawn; it wakes traffic units, CWI types. |
@@ -189,7 +188,7 @@ board, Dark Jak and Light Jak are off while a class is played.
 | `goal_src/jak3/dgos/ctypesc.gd` | `bf-hover-red-ag.go`, `bf-hover-blue-ag.go`; art groups sorted by decreasing size. | Jetpack guards are flying-turret processes, whose level is CTYPESC. |
 | `goal_src/jak3/game.gp` | Six `build-actor` steps (the four units' at `:framerate 15.0`, the two transports'), and the six art groups pre-marked in `*file-entry-map*` before `cgo-file "game.gd"`. | Without the pre-mark, `cgo-file` also adds a copy step from the decompiler output for the same `.go` and the build stops ("multiple ways to make output"). |
 | `custom_assets/jak3/models/models.jsonc` (new) | The six models' recipe for master-dev's `mod_models` (`task modding-models`; at an install, the extractor runs it): the four units, and the Jak 2 troop transport from `FOB.DGO`, red as ripped and blue through a `recolor` rule. | §2.3, §2.9. |
-| `scripts/battlefront/make_minimaps.py` (new) | Writes `battlefront-minimaps.gc` from the decompiled minimap textures. | §2.6. |
+| `scripts/battlefront/make_minimaps.py` (new) | Writes `battlefront-minimaps.gc` from the START menu's maps (`iso_data/jak3/STR/WOMAP.STR`), or from the decompiled minimap textures for a zone of a few sections. | §2.6. |
 | `custom_assets/jak3/models/custom_levels/bf-*.glb`, `custom_assets/jak3/models/ctypesa/bf-red-guard*-lod0.glb`, `custom_assets/jak3/models/ctypesc/bf-hover-*-lod0.glb` (made, ignored by git) | The models `mod_models` writes (same content in both folders). | `custom_levels/` is read by `build-actor`; `<level>/` is baked into that level's `.fr3` by `task extract`. |
 
 ### 2.2 Units: everything runs on stock code
@@ -627,26 +626,25 @@ as the stock progress menu's "menu mode" does) to the foreground renderers only 
 flag on exactly those when the page closes. The screen behind is black, with the class preview
 alone.
 
-**Zone map.** The zone and side pages draw the zone's whole district on the game's minimap
-textures. Haven City's minimap is a grid of 5 x 7 cells of 384 m, each naming a texture that covers
-1024 m around its cell: 256 x 256 texels of 4 m, or 256 x 128 on the city's south edge, 8 m tall
-(`engine/ui/minimap.gc` `*minimap-texture-name-array*` and `*minimap-corner-array*`). A level lists
-the cells it covers in its `city-map-bits` (`level-info.gc`). The textures live in each city
-section's own minimap texture page, loaded only with the section, and the menu needs every zone's
-wherever the player stands: the mod carries them. `scripts/battlefront/make_minimaps.py` builds each
-zone's map over the bounding box of its sections' cells, at most 256 texels on a side: a texel of a
-cell of the zone takes its cell's texture, sampled at that texture's own size; a texel of a cell of
-another level is black; the width is padded to a multiple of 64. It writes
-`battlefront-minimaps.gc`: 8-bit texels, one palette of 34 colors in the PS2 order (entry i at i
-with bits 3 and 4 swapped), each map's stored and drawn size, its world corner and texel size, and
-its `tex0`. `bf-zone-view!` fits the whole map in the right frame, its shape kept (a texel is
+**Zone map.** The zone and side pages draw the whole city as the START menu's map shows it.
+`scripts/battlefront/make_minimaps.py` reads it from `iso_data/jak3/STR/WOMAP.STR`, which starts
+with a table of sector numbers (2048 bytes): the map of `bigmap-id` i (`level-h.gc`, city 0) is at
+sector i, a header (palette offset, texel offset, width, height) then a 256-entry ct32 palette and
+8-bit texels in strips 256 wide. The city's is 512 x 832 texels of 4 m, texel 0 at world x -640 m,
+z -1088 m (`bigmap.gc` `*bigmap-info-array*`). The script keeps its part inside the city's outline
+(texels 32 to 464 across, 60 to 804 down), resamples it to 384 texels high (7.75 m a texel) and
+reduces it to 255 colors. The game's minimap textures, used before, cover only the sections with a
+minimap page: Jak 3's center and stadium (map-ctygena, map-ctypala and four others) have none, so
+the map had black holes there. For a zone of a few sections the script can still build the map
+from those textures (`city-map-bits`, `engine/ui/minimap.gc` `*minimap-texture-name-array*`). It
+writes `battlefront-minimaps.gc`: 8-bit texels, one palette in the PS2 order (entry i at i with
+bits 3 and 4 swapped), each map's stored and drawn size, its world corner and texel size, and its
+`tex0`. `bf-zone-view!` fits the whole map in the right frame, its shape kept (a texel is
 `0.923 relative-x-scale` times wider than tall in screen units); `bf-draw-zone-minimap` uploads the
 zone's texels as the START menu's map does (`pc-upload-map-texture` into the texture at tbp 8) and
 draws them as one sprite in its own bucket (`bf-map-sprite`, the stock `sprite-dma` with the view's
 texels and box), then marks the default level's VRAM dirty, as the START menu's map does.
-`bf-draw-zone-marks` draws the frame, the spawns and Jak over it with the same projection. The START
-menu's own map, used before, has the same streets over a textured ground: it did not look like the
-minimap.
+`bf-draw-zone-marks` draws the frame, the spawns and Jak over it with the same projection.
 
 **Reserves.** `bf-draw-reserves` draws them top middle, after the reinforcement meter of Star
 Wars Battlefront (2004) (its manual: "the numbers and bars represent the strength of
@@ -825,17 +823,25 @@ reaches its exit point:
 | Before each drop | The nav mesh under it must have room for the unit (`bf-transport-mesh-room?`). |
 | Each drop on a control point | Every other unit is posted there (`*bf-posts*`, `bf-post-point`): it guards the point while its side holds it. |
 
-**Routes to the points.** A unit walks its lane and, at its end, asks its controller's
-`choose-branch-callback` which lane to take next (vehicle-control.gc, method 14; the stock pick is
-a random lane, method 15). `bf-city-steer` gives the battle's units `bf-city-choose-branch`: the
-first lane of the way to the unit's point (`bf-city-unit-goal`: the point it is posted on; else one
-in two, odd process id, the nearest control point its side holds in a loaded section; else the
-nearest it does not hold), found by a search breadth first over the lanes its faction may walk,
-256 nodes at most, through every loaded section (`bf-city-route`). At its point it keeps turning
-back across it. Two earlier tries failed: putting units on a lane every half second
-(`citizen-method-199` starts a unit over at the lane's first vertex, so they never got anywhere),
-and taking at each junction the lane ending nearest the goal (dead ends and detours left the
-defenders 140 to 200 m off).
+**Routes to the points.** Each unit has a point (`bf-city-unit-goal`): the one it is posted on;
+else one in two, odd process id, the nearest control point its side holds in a loaded section;
+else the nearest it does not hold. The city's walking lanes cannot take it there: they are loops
+within a section. The Freedom League's base, in ctyslumc, has 138 lane nodes and no lane out of the
+section; 173 of ctyslumb's 177 nodes have one lane out or none, and a citizen at a dead end jumps
+to any lane 20 to 120 m behind it (`citizen-method-208`). Routed by the lanes alone, the guards
+circled 140 to 290 m from Freedom HQ's point and never reached it. So a unit more than 12 m from
+its point marches there over the nav meshes, which join the sections:
+
+| Twice a second, `bf-march-plan` (from `bf-city-steer`) | Every frame, `bf-march-apply` |
+|---|---|
+| For each unit walking its lanes (`'active`) away from its point in a loaded section: on the point's mesh (`find-nearest-nav-mesh`), the point; else a search breadth first over the meshes' links (`nav-mesh` `link-array`, 96 meshes at most) for the way through the fewest meshes, and a spot 2 m past the link poly that starts it, toward the next mesh's own link poly (`bf-march-through`). | The unit's controller `dest-point` set to that spot: the citizen's `'active` post gives it to the nav control each frame, which finds the way across the mesh. Standing on the link poly, the unit moves onto the next mesh (`nav-enemy-method-188`); the next plan sends it on. The march runs (`speed-run`) and skips the idle stops (`wait-time`). |
+
+The lanes set `dest-point` again at a lane's end; the next frame puts it back, and the lane
+callback (`bf-city-choose-branch`) answers a marching unit with the stock random lane, cheap. Near
+its point (12 m) a unit walks the lanes again at walking pace: the first lane of the way to its
+point within 256 nodes (`bf-city-route`), turning back across it. A first march aimed at the link
+poly's centroid: the units stopped 4 m short of it (the post's lane-end distance), went back to
+their lanes, and piled up there until the game ran out of touching-prims entries.
 
 **Spawn shield.** At a deployment and every respawn, `bf-spawn-shield` makes Jak invulnerable
 for 3 s (`target-timed-invulnerable`) and sets `*bf*` flicker-until: the class model blinks
@@ -878,7 +884,7 @@ Freedom League's headquarters (`cty-elevator-2`) `'go-dormant`: only a `'trigger
 
    | Check | Expected |
    |---|---|
-   | Zone and side pages | black screen; the whole district on its minimap (dark gray ground, white streets, blue water), the other districts black, blue and red spawns |
+   | Zone and side pages | black screen; the whole city as the START menu's map draws it, the blue and red bases, the gray control points |
    | Class page, deployment | right after the side page, black, "Loading the war zone..." while the zone loads under it; the preview turns once the models are in; then the game pauses and "Deploy" shows |
    | Class page | two Freedom League classes, four Krimzon Guard ones; the class under the cursor stands in the right frame and turns; X deploys, HUD with 500 / 500 |
    | Camera | over the class's right shoulder, the crosshair in the middle; the right stick pushed right turns right, pushed up looks up; the class faces where it aims and walks sideways and backward |
@@ -1209,9 +1215,11 @@ code (its name cannot be printed); the object is sound.
 - **Units are only where the player is.** Haven City holds two sections with their units at
   most: the points away from him are fought for without units (§2.9, a simple rule on the points
   next to them), and a side's units come only by its transports, to a held point nearest him.
-- **Defenders patrol, they do not stand.** A point's guards walk its lanes back and forth: in the
-  runs up to 4 of them were within 30 m while their ship dropped, then 0 to 1 within 15 m. They
-  fight what comes; a determined attack can still take the point.
+- **Defenders patrol close by.** A point's guards walk the lanes within about 12 m of it and march
+  back when they stray: in the runs they were on it (15 m) in 32 of 35 counts. They fight what
+  comes; a determined attack can still take the point.
+- **Marching is slow at first.** From the Freedom League's base, 240 m from Freedom HQ's point,
+  the first guards reached it 60 s into the battle, and 14 walked onto it within 65 s.
 - **A far respawn reloads the area.** It goes through a reset at the point's continue point: the
   units around the player are spawned again there, as at a battle's start.
 - **Some guards find no ground behind a hatch:** about 16 units a run go back to sleep after 8 s
