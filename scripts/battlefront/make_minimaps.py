@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Write the Battlefront mod's zone minimaps: for each war zone, the in-game minimap of its levels (or,
-for the whole city, of every minimap cell with a texture), as the zone and side pages of the battle
+for the whole city, the START menu's map of Haven City), as the zone and side pages of the battle
 menu and the respawn page show it.
 
     python scripts/battlefront/make_minimaps.py [--png <folder>]
@@ -10,6 +10,7 @@ Inputs:
     goal_src/jak3/engine/level/level-info.gc       each district level's `city-map-bits`
     decompiler_out/jak3/textures/*-minimap/*.png   the city sections' minimap textures, written by
                                                    `task extract` (map-ctyporta, map-ctyinda...)
+    iso_data/jak3/STR/WOMAP.STR                    the START menu's maps (bigmap.gc "world-map")
 
 Output:
     goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc
@@ -23,6 +24,15 @@ the cells it covers in its `city-map-bits` (level-info.gc). A zone's map covers 
 its levels' cells, at most 256 texels a side: a texel of a cell of the zone takes the texture of
 its cell (or, for a cell with none, of another cell of the zone covering it); a texel of a cell out
 of the zone is black.
+
+The whole city's map is the START menu's (bigmap.gc): the minimap has no texture for the centre's
+cells (map-ctygena, map-ctypala... are in no texture page), so a map made of minimap tiles left them
+black. WOMAP.STR starts with a table of sector numbers (2048 bytes), the map of `bigmap-id` i
+(level-h.gc, city 0) at sector i: a header (palette offset, texel offset, width, height, 32-bit
+words each), then its data: a 256-entry ct32 palette in the PS2 order, and 8-bit texels in strips
+256 wide, each strip its full height. Its texel 0 is at world x and z `*bigmap-info-array*` 0
+(bigmap.gc: -640 m, -1088 m), 4 m a texel. The map keeps its part inside the city's outline,
+resampled to WORLD_SIDE texels high and its colors reduced to 255.
 
 The maps are 8-bit images with one shared palette, in the form the PC port's map texture upload
 reads (bigmap.gc `pc-upload-map-texture`): mt8 texels, and a 16 x 16 ct32 palette in the PS2 order,
@@ -51,6 +61,12 @@ OUT = ROOT / "goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc"
 ZONES = [
     ("Haven City", None),
 ]
+
+WOMAP = ROOT / "iso_data/jak3/STR/WOMAP.STR"
+WORLD_CORNER = (-2621440.0, -4456448.0)  # *bigmap-info-array* 0 (bigmap.gc): world x, z of texel 0
+WORLD_TEXEL = 16384.0                    # 4 m a texel
+WORLD_CROP = (32, 60, 464, 804)          # the city's outline in the map's texels: left, top, right, bottom
+WORLD_SIDE = 384                         # texels high of the city's map in the menu
 
 # engine/ui/minimap.gc *minimap-texture-name-array*, 5 columns by 7 rows
 CELLS = [
@@ -100,14 +116,40 @@ def tex0(w: int, h: int) -> int:
     return 8 | ((w // 64) << 14) | (0x13 << 20) | (tw << 26) | (th << 30) | (1 << 61)
 
 
+def world_map():
+    """The whole city: the START menu's map of Haven City (WOMAP.STR, bigmap-id city), inside the
+    city's outline, WORLD_SIDE texels high: its image and the same tuple as `zone_map`."""
+    data = WOMAP.read_bytes()
+    base = struct.unpack_from("<I", data, 0)[0] * 2048
+    clut_off, img_off, w, h = struct.unpack_from("<4I", data, base)
+    pal = [struct.unpack_from("<I", data, base + 16 + clut_off + 4 * swizzle(i))[0] for i in range(256)]
+    src = Image.new("RGB", (w, h))
+    px = src.load()
+    for strip in range((w + 255) // 256):
+        for y in range(h):
+            row = base + 16 + img_off + (strip * h + y) * 256
+            for x in range(min(256, w - strip * 256)):
+                c = pal[data[row + x]]
+                px[strip * 256 + x, y] = (c & 255, (c >> 8) & 255, (c >> 16) & 255)
+    left, top, right, bottom = WORLD_CROP
+    h = WORLD_SIDE
+    texel = (bottom - top) * WORLD_TEXEL / h
+    w_valid = round((right - left) * WORLD_TEXEL / texel)
+    w = math.ceil(w_valid / 64) * 64
+    city = src.crop(WORLD_CROP).resize((w_valid, h), Image.LANCZOS).quantize(colors=255).convert("RGB")
+    img = Image.new("RGBA", (w, h), BLACK)
+    img.paste(Image.merge("RGBA", (*city.split(), Image.new("L", city.size, 128))), (0, 0))
+    x0 = WORLD_CORNER[0] + left * WORLD_TEXEL
+    z0 = WORLD_CORNER[1] + top * WORLD_TEXEL
+    return img, (x0, z0, texel, w, h, w_valid, ["world-map"]), []
+
+
 def zone_map(levels):
-    """The map of a zone made of LEVELS (None: every cell with a texture, the whole city): its image
-    and (x0, z0, texel, width, height, valid width, texture names)."""
+    """The map of a zone made of LEVELS (None: the whole city, `world_map`): its image and (x0, z0,
+    texel, width, height, valid width, texture names)."""
     if levels is None:
-        # the stadium's texture page is not among the extracted ones: its cell stays black
-        cells = [c for c in range(len(CELLS)) if CELLS[c] and any(TEXTURES.glob(f"cty*-minimap/{CELLS[c]}.png"))]
-    else:
-        cells = sorted({c for lev in levels for c in level_cells(lev)})
+        return world_map()
+    cells = sorted({c for lev in levels for c in level_cells(lev)})
     cols = [c % 5 for c in cells]
     rows = [c // 5 for c in cells]
     x0 = CELL_ORIGIN + min(cols) * CELL
