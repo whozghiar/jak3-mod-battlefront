@@ -2,7 +2,7 @@
 
 - **Game:** Jak 3
 - **Repository:** `whozghiar/jak3-mod-battlefront` (prepared locally as `mods/jak3-mod-battlefront`, not published yet)
-- **Status:** In development, no release. Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
+- **Status:** In development, no release. Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
 
 This is the developer and agent documentation of the mod: what it changes, how it works, how to
 test it, its limits, and its change log. Players read the root [`README.md`](../../../README.md).
@@ -59,7 +59,8 @@ League's base in blue, the Krimzon Guard's in red, the control points in gray, a
 North is up, as on the minimap.
 
 The battlefield is the whole of Haven City (round 17; until round 16 a battle held one district,
-its sections kept loaded behind a force field). The war zone page has one entry, Haven City.
+its sections kept loaded behind a force field). The war zone page lists Haven City, and Spargus
+greyed ("coming soon"), which X refuses.
 
 | Point | Continue point (its levels for a respawn) | Place |
 |---|---|---|
@@ -796,14 +797,15 @@ respawns in a row left it at 17 of 255.
 **Troop transports.** `bf-transport.gc` is the Haven City: New Dawn port of Jak 2's drop-ship:
 `bf-transport-red` and `bf-transport-blue` are the same rip (`FOB.DGO`), the blue one recolored by
 `mod_models` (`recolor`: hues -15 to 15 turned by 217 degrees). Twice a second
-`bf-city-transports` sends one to the held point nearest the player whose section is loaded and
-that has none, two per side at most, when the side's units awake plus those its ships still carry
-fall 3 or more short of its caps (`*bf-team-caps*`: Freedom League 14 guards and 6 jetpacks;
-Krimzon Guard 8 guards, 4 jetpacks, 4 robotguards, 4 spiders). It comes down over the point, or
-over the first spot 10 then 20 m around it with ground at the point's height, a nav mesh, and
-nothing above up to 60 m (`bf-transport-spot`, `bf-transport-sky?`: a 6 m sphere swept up), so
-it never goes through a roof or a bridge. It drops up to 8 units, one at a time, each of the kind
-its side lacks most (`bf-transport-next-kind`), then flies off. A unit is the traffic's own, woken
+`bf-city-transports` (round 18) looks at every point in a loaded section:
+
+| The point | What happens |
+|---|---|
+| Not moved yet | It moves onto the open ground nearest it, the first spot of it, then 10 and 20 m around it, with ground at its height, a nav mesh and nothing above up to 60 m (`bf-transport-spot`, `bf-transport-sky?`: a 6 m sphere swept up). Measured: the Freedom League's base moved 10 m, Freedom HQ's point 1 m. |
+| Held, no ship | A ship of its holder comes down right over it and stays there (stationed): it drops a unit whenever its side lacks one of its caps (`*bf-team-caps*`: Freedom League 14 guards and 6 jetpacks; Krimzon Guard 8 guards, 4 jetpacks, 4 robotguards, 4 spiders), each of the kind its side lacks most (`bf-transport-next-kind`). |
+| Taken by the other side, or its section unloaded | Its ship leaves (`'leave`: it climbs and goes); the new holder's comes once it has gone (`old-ship`). |
+
+Until round 17 ships came on demand, two per side, and flew off after their drops. A unit is the traffic's own, woken
 with `'activate-object` (no want-count check) and traffic behavior 6, its exit-transport state,
 with the ship's handle: a guard walks out and jumps down (guard-type 11 keeps its weapon), a
 robotguard falls as a ball, a spider drops, a jetpack flies out. A pool holds both sides' units of
@@ -835,8 +837,17 @@ back across it. Two earlier tries failed: putting units on a lane every half sec
 and taking at each junction the lane ending nearest the goal (dead ends and detours left the
 defenders 140 to 200 m off).
 
-**Aim.** A guard class turns its upper body toward the aim while it fires (`bf-avatar-aim-torso`,
-`battlefront-player.gc`): the stock guards' own aim (`crimson-guard-method-259` and 260), a
+**Spawn shield.** At a deployment and every respawn, `bf-spawn-shield` makes Jak invulnerable
+for 3 s (`target-timed-invulnerable`) and sets `*bf*` flicker-until: the class model blinks
+meanwhile, hidden a tenth of a second in two (`bf-avatar-blink`), then shows steady.
+
+**Live units on the respawn page.** Twice a second `bf-city-steer` writes the units awake, their
+places and sides, into `*bf-unit-dots*` (64 at most); `bf-draw-respawn-pick` draws them as small
+dots of their side's color over the city's map, with the points.
+
+**Aim.** Every class that shoots (guards, jetpacks, robotguard) turns its upper body toward the aim
+while it fires (`bf-avatar-aim-torso`, `battlefront-player.gc`; node 4 is the guard's `swivelMe`
+and the jetpack guard's and robotguard's `chest`): the stock guards' own aim (`crimson-guard-method-259` and 260), a
 `polar-look-at` joint-mod on node 4 (`swivelMe`) turned about the model's x and y axes, 80 degrees
 at most each, eased at 5 a second, eased back 0.3 s after the last shot. The avatar's `relocate`
 moves this joint-mod with the process, as the `gun-jm` of §2.8.
