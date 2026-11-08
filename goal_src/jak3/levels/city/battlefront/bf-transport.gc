@@ -287,6 +287,7 @@
              (set! (-> *bf-posts* point k) (-> this point))
              (set! (-> *bf-posts* next) (mod (+ k 1) BF_POST_MAX))
              )
+           (format 0 "battlefront: side ~D unit dropped to guard control point ~D~%" (-> this team) (-> this point))
            )
          (when (< (-> this count-units) BF_TRANSPORT_MAX_UNITS)
            (set! (-> this drops (-> this count-units)) (process->handle (-> params proc)))
