@@ -122,7 +122,8 @@ doors to the interiors stay shut and no car is parked.
   Jak running or jumping into a unit takes nothing from it. Every close attack plays Jak's punch
   sound ("punch-hit").
 - **Targeting:** twice a second each unit takes again the foe it sees best, the nearest within
-  50 m (its current foe counting double), and with none that near goes on to its point; the other side turns onto the player within 50 m of him; his own side never takes him as a target (§2.8).
+  100 m (its current foe counting double); with one within 40 m it stops its march and fights it,
+  else it goes on to its point; the other side turns onto the player within 50 m of him; his own side never takes him as a target (§2.8).
   No guard of the battle carries the tazer: a blue guard the squad gives it gets the rifle or the
   grenade launcher instead (by its process id, for good), the red guards the weapon their model
   holds.
@@ -895,16 +896,19 @@ reaches its exit point:
 
 **Routes to the points.** Each unit has a point (`bf-city-unit-goal`), as Star Wars Battlefront's
 units take the command posts: first a contested point within 250 m, one with units of the other
-side in its capture radius while its own side holds it or has units there too
-(`bf-city-contested-point`), to clear it so the capture can go on; else the one it is posted on;
+side in its zone, 60 m around it (`*bf-zone-near*`, counted twice a second), while its own side
+holds it or has units there too (`bf-city-contested-point`), to clear it so the capture can go on
+(with the 15 m capture radius alone, no point was fought over in 10 minutes: the attackers took
+them empty); else the one it is posted on;
 else the nearest point its side does not hold, to conquer it; with every control point held, the
 nearest one. Both sides start at their base: the Freedom League takes Freedom HQ and then the Slums,
 the Krimzon Guard the Port and then the Industrial Zone, and the first fight breaks out between the
 Slums and the Industrial Zone. Twice a second every unit also takes again the foe it sees best
 (`bf-city-retarget`, the controller's own choice: the battle's hatred scores a foe by its distance,
-0 beyond 50 m, its current foe counting double), so it attacks what it meets on its way and marches
-on with no foe that near (at 120 m, the Freedom League's 40 guards stayed at their base shooting at
-two Krimzon Guard jetpacks there, none of them marching). The city's walking lanes cannot take it there: they are loops
+0 beyond 100 m, its current foe counting double), so it attacks what it meets on its way; a unit
+with a foe within 40 m stops its march (`*bf-engaged*`) and the stock guard's attack takes over,
+else it marches on. At 50 m the armies passed each other (8 losses in 6 minutes); stopped by any
+foe up to 100 m, the units stood and the pushes died away. The city's walking lanes cannot take it there: they are loops
 within a section. The Freedom League's base, in ctyslumc, has 138 lane nodes and no lane out of the
 section; 173 of ctyslumb's 177 nodes have one lane out or none, and a citizen at a dead end jumps
 to any lane 20 to 120 m behind it (`citizen-method-208`). Routed by the lanes alone, the guards

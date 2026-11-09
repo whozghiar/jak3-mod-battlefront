@@ -41,12 +41,43 @@
 (defconstant BF_CTT_JAK 0)
 (define *bf-ctt* (new 'static 'array int32 8 0 3 4 5 9 10 11 12))
 
-(defconstant BF_HATE_REACH (meters 50))    ;; a foe beyond this scores 0: never chosen (120 m kept 40 guards
-                                           ;; at their base shooting two jetpacks, none marching)
+(defconstant BF_HATE_REACH (meters 100))   ;; a foe beyond this scores 0: never chosen (at 50 m the armies
+                                           ;; passed each other: 8 losses in 6 minutes)
 (defconstant BF_HATE_LOST (meters 150))    ;; a unit whose foe got this far looks again
 (defconstant BF_HATE_PLAYER (meters 50))   ;; the other side turns onto the player this close
 (defconstant BF_GUARD_RUN (* 1.5 (meters 12))) ;; a guard's run during a battle: 1.5 times the stock 12 m/s
 (defconstant BF_CONTEST_REACH (meters 250)) ;; a unit this close to a contested point goes to clear it
+(defconstant BF_ZONE_REACH (meters 60))     ;; a point's zone: the other side's units this close contest it
+(defconstant BF_ENGAGE_REACH (meters 40))   ;; a unit with a foe this close stops its march to fight
+
+;; Each side's units in each battle point's zone (BF_ZONE_REACH), counted twice a second from
+;; `*bf-unit-dots*` (`bf-city-steer`): index BF_POINT_MAX side + point.
+(define *bf-zone-near* (new 'static 'array int32 12))
+
+;; The units with a foe within BF_ENGAGE_REACH at the last retarget (`bf-city-retarget`): they fight
+;; instead of marching (`bf-march-plan`). Stopped by a foe up to BF_HATE_REACH (100 m), the units
+;; stood and the armies' pushes died away (7 and 14 losses in 10 minutes, no point fought over).
+(deftype bf-engaged (structure)
+  ((count  int32)
+   (unit   handle 128)
+   )
+  )
+
+(define *bf-engaged* (new 'static 'bf-engaged))
+
+(defun bf-city-engaged? ((proc process))
+  "#t when unit PROC had a foe within BF_ENGAGE_REACH at the last retarget (`*bf-engaged*`)."
+  (let ((h (process->handle proc))
+        (e *bf-engaged*)
+        )
+    (dotimes (i (-> e count))
+      (if (= (-> e unit i) h)
+          (return #t)
+          )
+      )
+    )
+  #f
+  )
 
 (deftype bf-city-saved (structure)
   "Stock hatred indices overwritten during a battle, to write back at its end, and the battle's
@@ -177,6 +208,7 @@
    instead of one far away, and a unit with no foe that near goes on to its point. A unit of the other side within BF_HATE_PLAYER of the player, its foe
    farther than him, turns onto him (the player's hatred); a unit of the player's side never keeps
    him as its foe."
+  (set! (-> *bf-engaged* count) 0)
   (when (and (bf-city-controller?) *target* (not (focus-test? *target* dead)))
     (let* ((ctrl *cty-attack-controller*)
            (jak (-> ctrl target-attacker self-index))
@@ -212,6 +244,16 @@
                       )
                   (mission-squad-control-method-13 ctrl info)
                   )
+              ;; a foe in sight now: the unit fights it, no march (`bf-march-plan`)
+              (let ((nf (-> info enemy-index)))
+                (when (and (>= nf 0)
+                           (< (-> *bf-engaged* count) 128)
+                           (< (vector-vector-xz-distance pos (-> ctrl attacker-cache data nf pos)) BF_ENGAGE_REACH)
+                           )
+                  (set! (-> *bf-engaged* unit (-> *bf-engaged* count)) (-> info proc))
+                  (+! (-> *bf-engaged* count) 1)
+                  )
+                )
               )
             )
           )
@@ -446,8 +488,10 @@
 
 (defun bf-city-contested-point ((team int) (from vector))
   "The contested control point nearest FROM within BF_CONTEST_REACH for side TEAM: units of the other
-   side stand in its capture radius (`*bf*` points near, counted four times a second) while TEAM's
-   units stand there too or TEAM holds it. -1 for none."
+   side stand in its zone (BF_ZONE_REACH, `*bf-zone-near*`) while TEAM's units stand there too or
+   TEAM holds it: its defenders come as the attackers do, before the capture starts. With the
+   capture radius (15 m) alone, no point was ever fought over in 10 minutes: the attackers took
+   them empty. -1 for none."
   (let ((best -1)
         (best-d 0.0)
         (foe (bf-other-team team))
@@ -455,8 +499,8 @@
     (dotimes (i (-> *bf* point-count))
       (let ((pt (-> *bf* points i)))
         (when (and (not (-> pt base?))
-                   (> (-> pt near foe) 0)
-                   (or (> (-> pt near team) 0) (= (-> pt owner) team))
+                   (> (-> *bf-zone-near* (+ (* BF_POINT_MAX foe) i)) 0)
+                   (or (> (-> *bf-zone-near* (+ (* BF_POINT_MAX team) i)) 0) (= (-> pt owner) team))
                    )
           (let ((d (vector-vector-xz-distance (-> pt pos) from)))
             (when (and (< d BF_CONTEST_REACH) (or (< best 0) (< d best-d)))
@@ -924,14 +968,16 @@
   )
 
 (defun bf-march-plan ((unit citizen) (team int))
-  "In `bf-city-steer`: UNIT of side TEAM, walking its lanes ('active) more than BF_MARCH_NEAR from
+  "In `bf-city-steer`: UNIT of side TEAM, with no foe in sight (`bf-city-engaged?`: it fights that
+   one first), walking its lanes ('active) more than BF_MARCH_NEAR from
    its point (`bf-city-unit-goal`) in a loaded section, marches there: `*bf-march*` gets it with its
    waypoint (`bf-march-waypoint`) and its mesh now. A unit walking its lanes near its point walks
    again (its walking speed: a march runs)."
   (let ((w *bf-march*)
         (goal (bf-city-unit-goal unit team))
         )
-    (when (and (-> unit nav) (= (-> unit next-state name) 'active))
+    ;; a unit with a foe in sight fights it (the stock guard's own attack), no march
+    (when (and (-> unit nav) (= (-> unit next-state name) 'active) (not (bf-city-engaged? unit)))
       (cond
         ((and (>= goal 0) (< (-> w count) BF_MARCH_MAX) (-> w goal goal)
               (< BF_MARCH_NEAR (vector-vector-xz-distance (-> unit root trans) (-> *bf* points goal pos)))
@@ -1046,6 +1092,17 @@
     (set! (-> w count) 0)
     (dotimes (i (-> *bf* point-count))
       (set! (-> w goal i) (find-nearest-nav-mesh (-> *bf* points i pos) (meters 2)))
+      )
+    ;; each side's units in each point's zone (`bf-city-contested-point`)
+    (dotimes (k 12)
+      (set! (-> *bf-zone-near* k) 0)
+      )
+    (dotimes (d (-> *bf-unit-dots* count))
+      (dotimes (i (-> *bf* point-count))
+        (if (< (vector-vector-xz-distance (-> *bf-unit-dots* pos d) (-> *bf* points i pos)) BF_ZONE_REACH)
+            (+! (-> *bf-zone-near* (+ (* BF_POINT_MAX (-> *bf-unit-dots* team d)) i)) 1)
+            )
+        )
       )
     ;; the ways to the points over every loaded mesh, built again every 10 s
     (if (or (zero? (-> *bf-ways* count)) (time-elapsed? (-> *bf-ways* time) (seconds 10)))
@@ -1225,6 +1282,36 @@
     (format 0 " and ~M ~M ~M~%" (-> best-b x) (-> best-b y) (-> best-b z))
     )
   (none)
+  )
+
+(defun bf-city-send ((team int) (pt int) (n int))
+  "For the tests: N awake units of side TEAM moved onto battle point PT's nav mesh, around it within
+   10 m (`change-to`, `move-to-point!`). Returns how many moved."
+  (let ((te *traffic-engine*)
+        (mesh (find-nearest-nav-mesh (-> *bf* points pt pos) (meters 2)))
+        (done 0)
+        (at (new 'stack-no-clear 'vector))
+        )
+    (when (and te (nonzero? te) mesh)
+      (dotimes (ti 2)
+        (let ((tr (-> te tracker-array ti)))
+          (dotimes (i (-> tr active-object-count))
+            (let ((proc (handle->process (-> tr active-object-list i))))
+              (when (and proc (< done n) (type? proc crimson-guard) (= (bf-unit-team proc) team) (-> (the-as crimson-guard proc) nav))
+                (vector-copy! at (-> *bf* points pt pos))
+                (+! (-> at x) (* (meters 3) (the float (- (mod done 5) 2))))
+                (+! (-> at z) (* (meters 3) (the float (- (/ done 5) 1))))
+                (change-to mesh (the-as process-drawable proc))
+                (move-to-point! (-> (the-as crimson-guard proc) root) at)
+                (+! done 1)
+                )
+              )
+            )
+          )
+        )
+      )
+    done
+    )
   )
 
 (defun bf-city-march-count ((team int))
