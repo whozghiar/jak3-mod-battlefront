@@ -7,25 +7,29 @@
 
 ;; DECOMP BEGINS
 
+;; MOD battlefront -- 32 trees of each kind, not 11: each displayed level adds its trees with no
+;; bound (`draw` of drawable-tree-tfrag and the others), so a battle over the whole city (ctywide
+;; and six sections drawn: 17 tie trees) wrote past the lists, and the game crashed natively once
+;; the fifth section was displayed
 (deftype background-work (basic)
   "List of all things for the background renderer to draw."
   ((tfrag-tree-count        int32)
-   (tfrag-trees             drawable-tree-tfrag           11)
-   (tfrag-levels            level                         11)
+   (tfrag-trees             drawable-tree-tfrag           32)
+   (tfrag-levels            level                         32)
    (tfrag-trans-tree-count  int32)
-   (tfrag-trans-trees       drawable-tree-tfrag-trans     11)
-   (tfrag-trans-levels      level                         11)
+   (tfrag-trans-trees       drawable-tree-tfrag-trans     32)
+   (tfrag-trans-levels      level                         32)
    (tfrag-water-tree-count  int32)
-   (tfrag-water-trees       drawable-tree-tfrag-water     11)
-   (tfrag-water-levels      level                         11)
+   (tfrag-water-trees       drawable-tree-tfrag-water     32)
+   (tfrag-water-levels      level                         32)
    (shrub-tree-count        int32)
-   (shrub-trees             drawable-tree-instance-shrub  11)
-   (shrub-levels            level                         11)
+   (shrub-trees             drawable-tree-instance-shrub  32)
+   (shrub-levels            level                         32)
    (tie-tree-count          int32)
-   (tie-trees               drawable-tree-instance-tie    11)
-   (tie-levels              level                         11)
-   (tie-generic             basic                         11)
-   (tie-generic-trans       basic                         11)
+   (tie-trees               drawable-tree-instance-tie    32)
+   (tie-levels              level                         32)
+   (tie-generic             basic                         32)
+   (tie-generic-trans       basic                         32)
    (wait-to-vu0             uint32)
    )
   )

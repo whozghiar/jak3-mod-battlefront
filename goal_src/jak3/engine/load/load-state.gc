@@ -350,7 +350,15 @@
   0
   )
 
+;; MOD battlefront -- set by the Battlefront mode while a battle over the whole city holds its
+;; levels: rewrites the wanted levels before they are expanded (battlefront.gc `bf-whole-city-want`)
+(define *bf-want-hook* (the-as (function load-state none) #f))
+
 (defmethod add-borrow-levels ((this load-state))
+  ;; MOD battlefront -- the battle's levels in place of the game's
+  (if *bf-want-hook*
+      (*bf-want-hook* this)
+      )
   (dotimes (s5-0 10)
     (let ((a0-1 (-> this want s5-0 name)))
       (when a0-1

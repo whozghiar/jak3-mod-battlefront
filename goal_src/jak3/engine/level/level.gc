@@ -1001,6 +1001,11 @@
   (none)
   )
 
+;; MOD battlefront -- set by the Battlefront mode while a battle loads every street section of
+;; Haven City at once: returns the first of the two chunks a section LEV takes, -1 for the stock
+;; banks (battlefront.gc `bf-whole-city-chunk`)
+(define *bf-alloc-hook* (the-as (function level int) #f))
+
 (defmethod load-begin ((this level))
   "Start loading data of a level."
   (local-vars
@@ -1136,6 +1141,16 @@
                 )
           )
         (set! sv-56 0)
+        ;; MOD battlefront -- a battle over the whole city: a street section in two chunks of its own
+        ;; (16 pages; a PC page is 12 times the PS2's, so it holds a section several times over)
+        (let ((chunk (if *bf-alloc-hook* (*bf-alloc-hook* this) -1)))
+          (when (>= chunk 0)
+            (set! heap-size (* LEVEL_PAGE_SIZE 16))
+            (set! level-page-offset (if (< chunk 9) (* 8 chunk) (+ (* 8 chunk) 2)))
+            (set! sv-56 (ash 3 chunk))
+            (goto cfg-322)
+            )
+          )
         (case mem-mode
           (((level-memory-mode large))
            (case micro-mask

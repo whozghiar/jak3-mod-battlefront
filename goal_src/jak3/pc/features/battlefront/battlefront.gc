@@ -63,7 +63,7 @@
 (defconstant BF_REQ_REDEPLOY 5)
 (defconstant BF_REDEPLOY_CALM (seconds 30)) ;; out of combat this long, the player may redeploy
 
-(defconstant BF_DEPLOY_TIMEOUT (seconds 60))  ;; give up when the zone is not loaded by then
+(defconstant BF_DEPLOY_TIMEOUT (seconds 120)) ;; give up when the zone is not loaded by then (every street section, round 19)
 (defconstant BF_FALL_DEPTH (meters 20))       ;; that far below his last safe place, Jak fell out of
                                               ;; the zone (the game's fall death comes some 25 m down;
                                               ;; the city's walkways stand well under 20 m)
@@ -1416,6 +1416,8 @@
         ;; battle's skins. Rebuilding the traffic on its own in mid-game (ctywide-activate) left
         ;; process records broken: a later level change crashed the game deactivating an airlock.
         (set-continue! *game-info* (if (= team BF_TEAM_FF) ff kg) #f)
+        ;; every street section at once (`bf-whole-city-update`): the stock ones out first
+        (set! (-> *bf* city-load) BF_LOAD_DRAIN_IN)
         (bf-city-call BF_CITY_FREE_NAVS)
         (initialize! *game-info* 'life (the-as game-save #f) (the-as string #f) (the-as resetter-spec #f))
         )
@@ -1461,6 +1463,10 @@
     (when (bf-active?)
       ;; phase off first: the pools spawned again by the respawn below get the stock skins
       (bf-set-phase! BF_PHASE_OFF)
+      ;; the battle's sections out before the game loads its own (`bf-whole-city-update`)
+      (if (!= (-> *bf* city-load) BF_LOAD_OFF)
+          (set! (-> *bf* city-load) BF_LOAD_DRAIN_OUT)
+          )
       (bf-city-call BF_CITY_RESET)
       (bf-restore-player!)
       )
@@ -1482,9 +1488,184 @@
   (none)
   )
 
+(defun bf-whole-city-section? ((name symbol))
+  "#t when level NAME is one of the street sections a battle loads at once (`*bf-whole-city*`)."
+  (let ((l *bf-whole-city*))
+    (while (not (null? l))
+      (if (= (car l) name)
+          (return #t)
+          )
+      (set! l (cdr l))
+      )
+    )
+  #f
+  )
+
+(defun bf-whole-city-chunk ((lev level))
+  "`*bf-alloc-hook*` (level.gc `load-begin`): while the battle holds every street section
+   (BF_LOAD_WHOLE), the first of the two chunks of the level heap section LEV takes: the first pair
+   of 0-1, 2-3, 4-5, 12-13, 14-15 and 16-17 no other level uses (ctywide keeps 6 to 11, its
+   borrowed levels inside it). -1 for the stock banks: another level, or no battle."
+  (when (and (= (-> *bf* city-load) BF_LOAD_WHOLE) (bf-whole-city-section? (-> lev name)))
+    (let ((starts (new 'static 'array int32 6 0 2 4 12 14 16)))
+      (dotimes (k 6)
+        (let ((mask (ash 3 (-> starts k)))
+              (free? #t)
+              )
+          (dotimes (i 11)
+            (let ((other (-> *level* level i)))
+              (if (and (!= other lev) (logtest? (-> other memory-mask) mask))
+                  (set! free? #f)
+                  )
+              )
+            )
+          (when free?
+            (format 0 "battlefront: ~A in chunks ~D and ~D~%" (-> lev name) (-> starts k) (+ (-> starts k) 1))
+            (return (-> starts k))
+            )
+          )
+        )
+      )
+    )
+  -1
+  )
+
+(defun bf-whole-city-set-want ((ls load-state) (i int) (name symbol) (display symbol))
+  "Set slot I of the levels LS wants to level NAME, shown as DISPLAY (#f clears the slot)."
+  (set! (-> ls want i name) name)
+  (set! (-> ls want i display?) display)
+  (set! (-> ls want i force-vis?) #f)
+  (set! (-> ls want i force-inside?) #f)
+  (none)
+  )
+
+(defun bf-whole-city-want ((ls load-state))
+  "`*bf-want-hook*` (load-state.gc `add-borrow-levels`): while the battle holds the city's levels,
+   the levels LS wants become ctywide and the two unit levels (ctypesa, ctypesc) and, once every
+   other level is gone (BF_LOAD_WHOLE), every street section displayed: nine of the game's ten
+   level slots. The game's own requests (its load boundaries, doors, continue points, ctywide's
+   aliases and the cars and citizens they borrow) are left out: with a tenth level wanted,
+   `level-get-for-use` (level.gc) evicts a loaded one, a borrowed level whose units still live,
+   and the game crashes."
+  (when (!= (-> *bf* city-load) BF_LOAD_OFF)
+    (dotimes (i 10)
+      (bf-whole-city-set-want ls i #f #f)
+      )
+    (bf-whole-city-set-want ls 0 'ctywide 'display)
+    (bf-whole-city-set-want ls 1 'ctypesa 'special)
+    (bf-whole-city-set-want ls 2 'ctypesc 'special)
+    (when (= (-> *bf* city-load) BF_LOAD_WHOLE)
+      (let ((i 3)
+            (l *bf-whole-city*)
+            )
+        (while (not (null? l))
+          (bf-whole-city-set-want ls i (the-as symbol (car l)) 'display)
+          (+! i 1)
+          (set! l (cdr l))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-whole-city-drained? ()
+  "#t when no level but ctywide and the levels it borrows holds a chunk the street sections take
+   (0 to 5, 12 to 17)."
+  (dotimes (i 10)
+    (let ((lev (-> *level* level i)))
+      (if (and (!= (-> lev status) 'inactive) (logtest? (-> lev memory-mask) #x3f03f))
+          (return #f)
+          )
+      )
+    )
+  #t
+  )
+
+(defun bf-whole-city-foreign ()
+  "The first loaded level a battle over the whole city does not want (ctywide, ctypesa and ctypesc
+   are its own until the sections come): a stock section, or a car or citizen level the city
+   borrow manager (cty-borrow-manager.gc) keeps until its last traffic object is gone. #f once
+   every such level is out."
+  (dotimes (i 10)
+    (let ((lev (-> *level* level i)))
+      (when (and (!= (-> lev status) 'inactive)
+                 (not (or (= (-> lev name) 'ctywide) (= (-> lev name) 'ctypesa) (= (-> lev name) 'ctypesc)))
+                 )
+        (return lev)
+        )
+      )
+    )
+  (the-as level #f)
+  )
+
+(defun bf-whole-city-loaded? ()
+  "#t when every street section (`*bf-whole-city*`) is active."
+  (let ((l *bf-whole-city*))
+    (while (not (null? l))
+      (if (!= (level-status? *level* (the-as symbol (car l)) #f) 'active)
+          (return #f)
+          )
+      (set! l (cdr l))
+      )
+    )
+  #t
+  )
+
+(defun bf-whole-city-update ()
+  "Every frame, battle or not: a battle's start empties every level but ctywide and the unit levels
+   (BF_LOAD_DRAIN_IN, `bf-whole-city-foreign`), then loads every street section (BF_LOAD_WHOLE,
+   `bf-whole-city-want`, `bf-whole-city-chunk`); its end empties them (BF_LOAD_DRAIN_OUT), then
+   gives the game back its continue point's levels, as a respawn there does (target-death.gc
+   target-continue), which it loads in its own banks (a section left in two chunks would leave the
+   stock six nowhere: the game stops: level.gc, could not find free bank)."
+  (cond
+    ((= (-> *bf* city-load) BF_LOAD_DRAIN_IN)
+     (let ((lev (bf-whole-city-foreign)))
+       (cond
+         (lev
+           ;; what holds the battle back, every 2 s
+           (if (zero? (mod (-> *display* real-clock integral-frame-counter) 120))
+               (format 0 "battlefront: waiting for ~A (~A) to unload~%" (-> lev name) (-> lev status))
+               )
+           )
+         (else
+           (format 0 "battlefront: every other level gone, loading the whole city~%")
+           (set! (-> *bf* city-load) BF_LOAD_WHOLE)
+           (add-borrow-levels *load-state*)
+           )
+         )
+       )
+     )
+    ((= (-> *bf* city-load) BF_LOAD_DRAIN_OUT)
+     (when (bf-whole-city-drained?)
+       (format 0 "battlefront: battle sections gone, the game's levels back~%")
+       (set! (-> *bf* city-load) BF_LOAD_OFF)
+       (let ((cont (-> *game-info* current-continue))
+             (ls *load-state*)
+             )
+         (when cont
+           (dotimes (i 10)
+             (if (< i (-> cont want-count))
+                 (bf-whole-city-set-want ls i (-> cont want i name) (-> cont want i display?))
+                 (bf-whole-city-set-want ls i #f #f)
+                 )
+             )
+           )
+         (add-borrow-levels ls)
+         )
+       )
+     )
+    )
+  (none)
+  )
+
+(set! *bf-alloc-hook* (the-as (function level int) bf-whole-city-chunk))
+(set! *bf-want-hook* bf-whole-city-want)
+
 (defbehavior bf-zone-ready? bf-director ()
-  "#t once the player stands at his base with its levels (`bf-camp-loaded?`) and the unit levels
-   active. The battle's
+  "#t once the player stands at his base with its levels (`bf-camp-loaded?`), every street section
+   (`bf-whole-city-loaded?`) and the unit levels active. The battle's
    Haven City alias reloads ctywide and its collision: Jak must have stood on real ground (stance,
    not the stale on-surface flag of his continue state) after the first 2 seconds."
   (and *target*
@@ -1499,6 +1680,8 @@
        (= (level-status? *level* 'ctywide #f) 'active)
        (= (level-status? *level* 'ctypesa #f) 'active)
        (= (level-status? *level* 'ctypesc #f) 'active)
+       (= (-> *bf* city-load) BF_LOAD_WHOLE)
+       (bf-whole-city-loaded?)
        )
   )
 
@@ -2017,6 +2200,8 @@
   (when (and (-> self end-pending?) (not (and *target* (focus-test? *target* pilot))))
     (bf-end-battle!)
     )
+  ;; the battle's hold on the city's sections, battle or not (its end drains them)
+  (bf-whole-city-update)
   ;; the looks the pools give their new units follow the live counts (battlefront-h.gc)
   (if (bf-active?)
       (bf-count-looks!)

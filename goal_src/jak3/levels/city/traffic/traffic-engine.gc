@@ -49,6 +49,18 @@
   (the-as nav-graph #f)
   )
 
+;; MOD battlefront -- the city sections' street data the engine keeps: the stock two in
+;; level-data-array, then six more (level-data-extra) for a battle over the whole city
+(defconstant TRAFFIC_LEVEL_DATA_MAX 8)
+
+(defmacro traffic-level-data-ref (engine i)
+  "Entry I (0 to TRAFFIC_LEVEL_DATA_MAX - 1) of ENGINE's street data per section."
+  `(if (< ,i 2)
+       (-> ,engine level-data-array ,i)
+       (-> ,engine level-data-extra (- ,i 2))
+       )
+  )
+
 (defmethod for-all-active-processes ((this traffic-tracker) (arg0 (function process-focusable traffic-object-type-info none)))
   (let ((s4-0 (-> this traffic)))
     (countdown (s3-0 (-> this active-object-count))
@@ -449,8 +461,8 @@
   (reset-boxes (-> this suppressor))
   (set! (-> this object-hash object-count) 0)
   (clear-bucket-array (-> this object-hash))
-  (dotimes (s5-1 2)
-    (reset! (-> this level-data-array s5-1))
+  (dotimes (s5-1 TRAFFIC_LEVEL_DATA_MAX) ;; MOD battlefront -- every section's street data
+    (reset! (traffic-level-data-ref this s5-1))
     )
   (dotimes (s5-2 (-> *level* length))
     (let ((a1-9 (-> *level* level s5-2)))
@@ -576,8 +588,8 @@
       )
     )
   (let ((s4-1 (the-as traffic-level-data #f)))
-    (dotimes (v1-31 2)
-      (let ((a0-34 (-> this level-data-array v1-31)))
+    (dotimes (v1-31 TRAFFIC_LEVEL_DATA_MAX) ;; MOD battlefront -- every section's street data
+      (let ((a0-34 (traffic-level-data-ref this v1-31)))
         (if (zero? (-> a0-34 city-info))
             (set! s4-1 a0-34)
             )
@@ -626,8 +638,8 @@
 
 (defmethod level-unlink ((this traffic-engine) (arg0 level))
   (let ((s4-0 (-> arg0 bsp city-level-info nav-graph)))
-    (dotimes (v1-2 2)
-      (let ((a0-4 (-> this level-data-array v1-2)))
+    (dotimes (v1-2 TRAFFIC_LEVEL_DATA_MAX) ;; MOD battlefront -- every section's street data
+      (let ((a0-4 (traffic-level-data-ref this v1-2)))
         (when (= (-> a0-4 city-info) (-> arg0 bsp city-level-info))
           (set! (-> a0-4 city-info) (the-as city-level-info 0))
           0
@@ -842,8 +854,8 @@
   )
 
 (defmethod sphere-in-loaded-city-infos? ((this traffic-engine) (arg0 vector) (arg1 int))
-  (dotimes (s3-0 2)
-    (let ((v1-3 (-> this level-data-array s3-0)))
+  (dotimes (s3-0 TRAFFIC_LEVEL_DATA_MAX) ;; MOD battlefront -- every section's street data
+    (let ((v1-3 (traffic-level-data-ref this s3-0)))
       (when (nonzero? (-> v1-3 city-info))
         (if (sphere-in-grid? (-> v1-3 city-info) arg0 arg1)
             (return #t)
@@ -1279,8 +1291,8 @@
         )
       )
     )
-  (dotimes (s5-1 2)
-    (let ((s4-2 (-> this level-data-array s5-1)))
+  (dotimes (s5-1 TRAFFIC_LEVEL_DATA_MAX) ;; MOD battlefront -- every section's street data
+    (let ((s4-2 (traffic-level-data-ref this s5-1)))
       (when (nonzero? (-> s4-2 city-info))
         (dotimes (s3-2 (the-as int (-> s4-2 newly-active-cell-count)))
           (let ((a1-19 (-> s4-2 newly-active-cell-list s3-2)))
@@ -1361,8 +1373,8 @@
       -10000000000000000000000000000000000000.0
       1.0
       )
-    (dotimes (s4-0 2)
-      (let ((s3-0 (-> this level-data-array s4-0)))
+    (dotimes (s4-0 TRAFFIC_LEVEL_DATA_MAX) ;; MOD battlefront -- every section's street data
+      (let ((s3-0 (traffic-level-data-ref this s4-0)))
         (when (nonzero? (-> s3-0 city-info))
           (per-frame-cell-update s3-0)
           (add-box! s5-0 (-> s3-0 active-cell-box))
@@ -1374,8 +1386,8 @@
     )
   (when *cty-faction-manager*
     (let ((a1-2 0))
-      (dotimes (v1-22 2)
-        (let ((a0-17 (-> this level-data-array v1-22)))
+      (dotimes (v1-22 TRAFFIC_LEVEL_DATA_MAX) ;; MOD battlefront -- every section's street data
+        (let ((a0-17 (traffic-level-data-ref this v1-22)))
           (when (nonzero? (-> a0-17 city-info))
             (dotimes (a2-3 (the-as int (-> a0-17 active-cell-count)))
               (set! a1-2 (logior a1-2 (-> a0-17 active-cell-list a2-3 nav-territories)))
@@ -1409,8 +1421,8 @@
                                               (arg2 traffic-find-segment-struct)
                                               (arg3 (function traffic-find-segment-struct nav-segment none))
                                               )
-  (dotimes (s1-0 2)
-    (let ((v1-3 (-> this level-data-array s1-0)))
+  (dotimes (s1-0 TRAFFIC_LEVEL_DATA_MAX) ;; MOD battlefront -- every section's street data
+    (let ((v1-3 (traffic-level-data-ref this s1-0)))
       (if (nonzero? (-> v1-3 city-info))
           (callback-on-nav-segments-in-sphere (-> v1-3 city-info) arg0 arg1 arg2 arg3)
           )
@@ -1750,8 +1762,8 @@
   )
 
 (defmethod recompute-suppressions ((this traffic-engine))
-  (dotimes (s5-0 2)
-    (let ((v1-3 (-> this level-data-array s5-0)))
+  (dotimes (s5-0 TRAFFIC_LEVEL_DATA_MAX) ;; MOD battlefront -- every section's street data
+    (let ((v1-3 (traffic-level-data-ref this s5-0)))
       (if (nonzero? (-> v1-3 city-info))
           (update-suppressions-from-traffic-engine (-> v1-3 city-info) this)
           )

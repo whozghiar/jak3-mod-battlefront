@@ -291,6 +291,9 @@
    (danger-sphere-count     int8                              :offset 12656)
    (danger-sphere-array     traffic-danger-info       4 :inline)
    (allow-spawning?         symbol                            :offset 12928)
+   ;; MOD battlefront -- the street data of more sections, for a battle that loads every section of
+   ;; the city at once (`traffic-level-data-ref`: entries 0 and 1 are level-data-array's)
+   (level-data-extra        traffic-level-data        6 :inline)
    )
   (:methods
     (new (symbol type) _type_)

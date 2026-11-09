@@ -136,7 +136,7 @@
 
 (defun init-background ()
   "Reset lists of trees to draw for background rendering."
-  (dotimes (v1-0 8)
+  (dotimes (v1-0 32) ;; MOD battlefront -- every entry (background-h.gc), not the first 8
     (set! (-> *background-work* tfrag-trees v1-0) #f)
     (set! (-> *background-work* tfrag-trans-trees v1-0) #f)
     (set! (-> *background-work* tfrag-water-trees v1-0) #f)

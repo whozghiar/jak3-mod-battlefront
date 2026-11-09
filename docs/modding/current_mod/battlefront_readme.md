@@ -2,7 +2,7 @@
 
 - **Game:** Jak 3
 - **Repository:** `whozghiar/jak3-mod-battlefront` (prepared locally as `mods/jak3-mod-battlefront`, not published yet)
-- **Status:** In development, no release. Round 19 (2026-11-08: a side with no point near the player brings its units in from the edge of the loaded area, as Star Wars Battlefront's armies come from every command post; force fields at the ruins of the old town and at the Metal Head nest; every door shut) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T23). Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
+- **Status:** In development, no release. Round 19's whole city (2026-11-09: every street section of Haven City loaded during a battle, so both armies fight at every point at once) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T24). Round 19 (2026-11-08: a side with no point near the player brings its units in from the edge of the loaded area, as Star Wars Battlefront's armies come from every command post; force fields at the ruins of the old town and at the Metal Head nest; every door shut) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T23). Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
 
 This is the developer and agent documentation of the mod: what it changes, how it works, how to
 test it, its limits, and its change log. Players read the root [`README.md`](../../../README.md).
@@ -178,9 +178,13 @@ board, Dark Jak and Light Jak are off while a class is played.
 | `goal_src/jak3/engine/nav/nav-mesh.gc` | The engine's `*default-nav-mesh*` gets 255 nav-controls and users, not 128. | Every new traffic unit takes one there until it is first woken; a far respawn's reset made the traffic spawn its pools again and overflowed 128 (§2.9). |
 | `goal_src/jak3/levels/city/battlefront/bf-transport.gc` (new, CWI) | `bf-transport`: the troop transport that brings a side's units (§2.9). | Ported from the mod Haven City: New Dawn; it wakes traffic units, CWI types. |
 | `goal_src/jak3/engine/ui/hud-classes.gc` | `hud-health`'s `draw` calls `bf-hud-health-gauges` just before it draws its sprites. | During a battle, the class gauge takes one of the stock eco gauges, with its color (§2.6); a no-op otherwise. |
+| `goal_src/jak3/engine/level/level.gc` | `load-begin` asks `*bf-alloc-hook*` (`bf-whole-city-chunk`) for a street section's level heap chunks before the stock banks. | A battle over the whole city puts each of six sections in two chunks of its own (§2.9). |
+| `goal_src/jak3/engine/load/load-state.gc` | `add-borrow-levels` lets `*bf-want-hook*` (`bf-whole-city-want`) rewrite the wanted levels first. | During a battle the game's own requests (load boundaries, continue points, ctywide's aliases) would bring back the stock sections, cars and citizens (§2.9). |
+| `goal_src/jak3/levels/city/traffic/traffic-engine-h.gc` | `traffic-engine` gets `level-data-extra`, six more `traffic-level-data` after its fields. | The engine kept the street data of two sections (`level-data-array`); `traffic-level-data-ref` (`traffic-engine.gc`) reads the eight as one list. |
+| `goal_src/jak3/engine/gfx/background/background-h.gc`, `background.gc` | `background-work` holds 32 trees of each kind, not 11; `init-background` clears all 32, not 8. | Each displayed level adds its trees with no bound: ctywide and six sections drew 17 tie trees, past the 11, and the game crashed natively once the fifth section was displayed (§2.9). |
 | `goal_src/jak3/levels/city/traffic/traffic-manager.gc` | `traffic-manager-method-22` takes each pool size from `bf-want-count`. | It writes every traffic pool's `want-count` from the faction spawn levels every frame: the army caps must be applied there (§2.2). |
 | `game/graphics/opengl_renderer/foreground/Shadow2.cpp`, `Shadow2.h` | A shadow that no longer fits the frame's vertex or index buffers is dropped instead of stopping the game; the buffers are twice as large; the overflow skip loop tests `!=`. | A battle draws dozens of shadow casters: the stock buffers filled and the `alloc_verts` assertion closed the game (seen in the first deployment). Needs `task build-release-game`. |
-| `goal_src/jak3/levels/city/traffic/traffic-engine.gc` | `set-process-to-killed` calls `bf-unit-killed`; `activate-one-vehicle` takes the number of units of a type it may wake from `bf-wake-count` (none of a battle's during a fight: the transports and the edge reinforcements bring them, §2.9); the per-frame check of the awake pedestrians keeps a unit when `bf-keep-unit?` (`battlefront-city.gc`) says so. | The first is reached once per real unit death (recycled units never go there): the loss counter. The second replaces the squad controls' count, which starved the Port. The third keeps the units on the district's lanes awake out of the camera's cells (§2.2). |
+| `goal_src/jak3/levels/city/traffic/traffic-engine.gc` | `set-process-to-killed` calls `bf-unit-killed`; `activate-one-vehicle` takes the number of units of a type it may wake from `bf-wake-count` (none of a battle's during a fight: the transports and the edge reinforcements bring them, §2.9); the per-frame check of the awake pedestrians keeps a unit when `bf-keep-unit?` (`battlefront-city.gc`) says so; its loops over the sections' street data go through `traffic-level-data-ref`, eight sections. | The first is reached once per real unit death (recycled units never go there): the loss counter. The second replaces the squad controls' count, which starved the Port. The third keeps the units on the district's lanes awake out of the camera's cells (§2.2). |
 | `goal_src/jak3/levels/city/traffic/citizen/guard.gc` | `init-enemy!` takes its skeleton from `bf-guard-skel-name`; `crimson-guard-method-267` registers red guards as roboguards and takes its weapon from `bf-guard-weapon`, and method 270 compares the weapon that would give; `citizen-method-215` registers with `bf-attacker-type`; `citizen-method-194` clears a red guard's dark-guard flag (`bf-guard-flags`) and calls `bf-guard-activated`. | Red guards run the stock guard code (§2.2); no guard of a battle carries the tazer (§2.8). |
 | `goal_src/jak3/levels/city/protect/flying-turret.gc` | `init-enemy!` takes its skeleton from `bf-turret-skel-name` and its scale from `bf-unit-scale`; `citizen-method-215` registers with `bf-attacker-type`; `enemy-common-post` calls `bf-hover-animate`; `flying-turret-method-229` asks `bf-hover-nozzle!` where each thruster flame goes. | Jetpack guards run the stock flying-turret code (§2.2), their flames out of their jetpack's turbines (nodes 15 and 17) instead of the turret's spots under its root. |
 | `goal_src/jak3/dgos/game.gd` | `battlefront-h.o`, `battlefront-player.o`, `battlefront-minimaps.o`, `battlefront.o` at the end. | After the engine code they use (enemy, guard-projectile) and `mods-menu.o`. |
@@ -265,10 +269,8 @@ engine points each segment's branch there when the section links, `level-link`).
 walked onto the next section's lanes, which the game loads at the district's edge, goes back to its
 pool as in the stock game: no death, so the reserves keep it.
 
-**Sections loaded.** Haven City holds its base (ctywide) and two sections at most: the traffic
-engine has two `level-data-array` slots. Since round 17 the battle keeps the stock loading: the
-sections around the player load as he walks, and a respawn far away goes through a reset at the
-point's continue point (§2.9). A respawn waits until every level its continue point lists is active
+**Sections loaded.** Outside a battle Haven City holds its base (ctywide) and two sections, as in
+the stock game. During a battle it holds all six street sections (§2.9, the whole city). A respawn waits until every level its continue point lists is active
 (`target-death.gc` `target-continue`). The Port's war zone (`ctyport-warzone`) was the Krimzon
 Guard's camp at first: it stands on `ctyinda`'s ground, and after a death at the west docks the
 respawn there found `mhcitya` loaded instead and no ground; the base is `ctyport-bombbot`, on
@@ -768,7 +770,7 @@ both went with the district battles (the walls are in the Lisp wiki, jak3 4.42).
 **Respawn page, at every death.** After the 4 s spectator, `bf-target-death` opens the page (`*bf*`
 `respawn-pick`, the base first): the D-pad steps through the side's points (`bf-next-held-point`),
 the whole city's map shows them, X deploys. The point's continue point (`*bf-point-defs*`) says
-which levels it needs:
+which levels it needs (in a battle over the whole city, all loaded: the first row):
 
 | Its levels | The respawn |
 |---|---|
@@ -812,11 +814,32 @@ a kind, so the ship first moves a sleeping unit of its side to the head of the p
 (`bf-transport-pick`). With the transports there, the traffic wakes none of the battle's types by
 itself (`bf-wake-count`).
 
-**Reinforcements from the edge.** Star Wars Battlefront (2004) brings each side's units in at every
-command post it holds, all over the map. Haven City loads two sections around the player (the
-traffic keeps two sections' street data, `level-data-array`), so a side's units can only be real
-there, and at a battle's start the Krimzon Guard holds nothing near the Freedom League's base: no
-enemy came near the player. Twice a second `bf-city-edge-spawn` lets a side with no point in a
+**The whole city loaded.** Star Wars Battlefront (2004) brings each side's units in at every
+command post it holds, all over the map. During a battle Haven City keeps every street section
+loaded (`*bf-whole-city*`: ctysluma, ctyslumb, ctyslumc, ctyinda, ctyindb, ctyport), so every
+point is live and each side's ships bring its units at all its points at once. `*bf*` `city-load`
+steps through four states, run every frame by `bf-whole-city-update`:
+
+| State | Levels |
+|---|---|
+| `BF_LOAD_OFF` | The stock game's. |
+| `BF_LOAD_DRAIN_IN` (the battle starts) | Only ctywide, ctypesa and ctypesc wanted (`bf-whole-city-want`, through `add-borrow-levels`), until no other level is loaded (`bf-whole-city-foreign`): the stock sections, citycast, and the cars and citizens (ctycara, ctycarb, ctypepa), which the city borrow manager lets go once their traffic objects are gone. About 3 s. |
+| `BF_LOAD_WHOLE` | The three, and the six sections displayed: nine of the game's ten level slots. Each section takes two chunks of the level heap (`bf-whole-city-chunk`: 0-1, 2-3, 4-5, 12-13, 14-15, 16-17; ctywide keeps 6 to 11), 24 MB with the PC's pages, for about 6 MB used. About 2 s. |
+| `BF_LOAD_DRAIN_OUT` (the battle ends) | Only the three again, until no section is left in those chunks; then the game gets its continue point's levels, as a respawn there does (`target-continue`), in its own banks. |
+
+Three engine limits gave way. A tenth wanted level made `level-get-for-use` (level.gc) evict a
+loaded one, a borrowed level whose units still lived: the drain keeps the battle at nine. The
+traffic engine kept the street data of two sections: it has eight (`level-data-extra`). The
+background's lists of trees to draw held 11 of each kind and grew with no bound: ctywide and six
+sections drew 7 tfrag, 6 shrub and 17 tie trees, and the game crashed natively (`0xC0000005`, no
+GOAL message) once the fifth section was displayed; they hold 32. The ruins of the old town (ctygenb) and the
+Metal Head nest (mhcitya, mhcityb) are not loaded: force fields close them, and the slots would not
+hold them. ctyfarma and ctyfarmb are not either: no continue point names them, and no run ever saw
+the game load them.
+
+**Reinforcements from the edge.** Before the whole city was loaded, Haven City held two sections
+around the player, and at a battle's start the Krimzon Guard held nothing near the Freedom League's
+base: no enemy came near the player. Twice a second `bf-city-edge-spawn` lets a side with no point in a
 loaded section (`bf-city-team-live?`) bring one of its units in, while it lacks one against its caps
 (`bf-transport-next-kind`, its sleeping unit first in the pool): on the pedestrian street of the
 loaded area furthest toward its nearest held point, 60 to 220 m from the player (from 30 m when
@@ -826,7 +849,9 @@ units from its ship there. Each side keeps 20 units at most. A first version too
 street in a 600 m sphere: 540 m off, the street's nav mesh was not loaded, the traffic woke the unit
 without one (`get-nav-mesh` #f), the unit kept its default nav mesh's nav-control, and a far
 respawn's reset overflowed that mesh (96 taken before it, a crash); the search now wants the
-street's mesh loaded (`get-nav-mesh`) and 220 m at most, and the mesh stays near 40.
+street's mesh loaded (`get-nav-mesh`) and 220 m at most, and the mesh stays near 40. With every
+section loaded each side's base is live, so the edge reinforcements no longer come; the default nav
+mesh held 110 of 255 for the whole battle, the six sections' share.
 
 A guard leaves the hatch only onto free nav mesh 4 to 6 m behind it (`crimson-guard-method-266`,
 crowds included), pinned to the ship until then (method 265), and a jetpack hovers until it
@@ -1241,25 +1266,22 @@ code (its name cannot be printed); the object is sound.
   4.35), so this does not explain it.
 - **Zones are Haven City districts only.** Spargus would need the city's unit code and art in WWD
   (the battle-of-spargus mod does it for the guards).
-- **A two-section district holds its own sections only.** In the Industrial Zone and Freedom HQ
-  no other section, interior or mission level loads during a battle (Haven City holds two
-  sections at most): a continue point whose list names another level cannot be a camp there (a
-  respawn would wait for ever).
-- **Units are only where the player is.** Haven City holds two sections with their units at
-  most: the points away from him are fought for without units (§2.9, a simple rule on the points
-  next to them), and a side's units come only by its transports, to a held point nearest him.
+- **No cars or citizens during a battle.** The battle takes nine of the game's ten level slots:
+  ctywide, the two unit levels and the six street sections (§2.9). No interior or mission level
+  loads; a continue point whose list names another level cannot be a camp (a respawn would wait
+  for ever).
+- **A crowd at the battle's start.** For about the first 30 s the units piled at their ships fill
+  the engine's touching-prims entry pool: 3,895 failed allocations in the whole-city run
+  (`touching-prims-entry-pool::alloc-node() failed!`), those touches dropped, no crash, none after.
 - **Defenders patrol close by.** A point's guards walk the lanes within about 12 m of it and march
   back when they stray: in the runs they were on it (15 m) in 32 of 35 counts. They fight what
   comes; a determined attack can still take the point.
-- **Reinforcements near the player only.** A side's units come in at the edge of the two loaded
-  sections, 60 to 220 m from the player: the rest of the city has no unit (its points change
-  hands by a rule).
 - **A point far from its holder's base falls.** Its defenders are the ones its ship drops: at the
   Port, 400 m from the Krimzon Guard's base, the Freedom League's held it 105 to 115 s.
 - **Marching is slow at first.** From the Freedom League's base, 240 m from Freedom HQ's point,
   the first guards reached it 60 s into the battle, and 14 walked onto it within 65 s.
-- **A far respawn reloads the area.** It goes through a reset at the point's continue point: the
-  units around the player are spawned again there, as at a battle's start.
+- **The battle's start waits for the city.** About 3 s for the stock levels to leave and 2 s for
+  the six sections, under the class page.
 - **Some guards find no ground behind a hatch:** about 16 units a run go back to sleep after 8 s
   at it (§2.9).
 - **The transports are silent:** their engine sounds are Jak 2's.

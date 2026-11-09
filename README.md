@@ -21,9 +21,9 @@ Battlefront for Jak 3: the Freedom League and the Krimzon Guard fight over a war
 - **Repository:** [`whozghiar/jak3-mod-battlefront`](https://github.com/whozghiar/jak3-mod-battlefront), created from the modding base [`whozghiar/jak-project`](https://github.com/whozghiar/jak-project)
 
 ## Key Features
-- **Battles over the whole of Haven City:** pick a side and a class; the battlefield is the whole city. Force fields close the ruins of the old town (toward the stadium) and the Metal Head nest, and every door to an interior or the sewers stays shut. Each side starts with 500 units; every death takes one, and the first side down to 0 loses. Up to 20 units per side fight at once around you, and they stay on the battlefield wherever you look.
+- **Battles over the whole of Haven City:** pick a side and a class; the battlefield is the whole city. Force fields close the ruins of the old town (toward the stadium) and the Metal Head nest, and every door to an interior or the sewers stays shut. Each side starts with 500 units; every death takes one, and the first side down to 0 loses. Up to 20 units per side fight at once, all over the city, and they stay on the battlefield wherever you look.
 - **Battle points:** each side has a base (the Freedom League's at the entrance of its headquarters, the Krimzon Guard's on the Port's east docks), and each district has a control point: the Port, the Industrial Zone, the Slums and Freedom HQ. They are neutral at the start, each a beam of light in its holder's color (white while neutral). A side with more units than the other within 15 m of a point for 30 seconds captures it. Units run there on foot, across the districts: half of them guard a point their side holds, the others march on the nearest one it does not hold. Far from you, where no unit is drawn, the points still change hands: a side fights for a point from the points next to it.
-- **Armies everywhere you fight:** as in Star Wars Battlefront, each side's units come in from its command posts: from the ship over each point it holds near you, or, when it holds none near you, from the streets at the edge of the area around you, on the side of its territory. About 20 units per side fight at once.
+- **Armies everywhere:** as in Star Wars Battlefront, each side's units come in from its command posts: the ship over each point it holds, wherever it is. During a battle every street district of Haven City stays loaded, so the units fight at every point at once, near you or not. About 20 units per side fight at once. No traffic cars or citizens fill the streets during a battle.
 - **Troop transports:** each side's units arrive by the A-G troop transport of Jak 2, red for the Krimzon Guard and blue for the Freedom League. A transport of its holder hovers over every point near you, base or control point, right above it (each point stands on open ground, nothing above it): when a point changes hands, its ship flies off and the new holder's takes its place. Its units leave it each their own way: a guard jumps down from the hatch, a robotguard rolls out as a ball, a spider robot drops, a jetpack guard flies out.
 - **Two armies:** the Freedom League (blue guards, jetpack guards) against the Krimzon Guard (red Krimzon Guards from Jak 2, jetpack guards, robotguards, spider robots).
 - **Play any class:** each of the six classes has its own model, moves and weapons, previewed turning on the class page with what it does and its own buttons, shown as the pad's icons: switch between tazer, rifle and grenade launcher, roll and strafe as a guard, fly as long as you like and boost on dark eco with the jetpack, roll as a ball and raise a red shield as a robotguard, or leap 11 m high and sprint on blue eco as a spider robot.
@@ -46,9 +46,9 @@ Battlefront for Jak 3: the Freedom League and the Krimzon Guard fight over a war
 1. In game, open the Mods menu with **L3 + SELECT**, then switch on **battlefront > Battlefront mode**.
 2. Open the START menu: **Options > Gamemode > Battlefront > New battle**.
 3. Choose the war zone: Haven City (Spargus is listed, greyed, for a later version), then your side; the whole city is shown on its map, with both bases and the control points.
-4. The class page follows at once, while your side's spawn loads behind it: the class under the cursor turns in a frame next to the list as soon as the models are in, its health, what it does and its buttons under the list. Once "Loading the war zone..." gives way to "Deploy", X deploys you with fresh ammo.
+4. The class page follows at once, while the whole city loads behind it (about 5 seconds): the class under the cursor turns in a frame next to the list as soon as the models are in, its health, what it does and its buttons under the list. Once "Loading the war zone..." gives way to "Deploy", X deploys you with fresh ammo.
 5. The reserves of both sides are shown at the top of the screen: your side's bar and count in green, the enemy's in red. Under them, the control points A (Port), B (Industrial Zone), C (Slums) and D (Freedom HQ) in their holder's color, with the capture under way in percent.
-6. When you fall, you watch the battle for 4 seconds, then the D-pad picks your base or one of the control points your side holds on the city's map, and X deploys you there (the game loads that district first when it is far). You keep your class and get fresh ammo.
+6. When you fall, you watch the battle for 4 seconds, then the D-pad picks your base or one of the control points your side holds on the city's map, and X deploys you there. You keep your class and get fresh ammo.
 7. During a battle, the same START page has **Change class** (the battle goes on), **Restart the battle**, **Quit the battle**, and **Redeploy** once you have been out of combat for 30 seconds.
 8. Switching the mode off in the Mods menu during a battle loads your last save.
 
@@ -61,7 +61,7 @@ When a side's reserve reaches 0, the result page shows the winner and the losses
 
 ### The battlefield
 
-The whole of Haven City. The game loads the city's sections around you as it does outside a battle; the units are where you are, and the points away from you are fought for without them.
+The whole of Haven City. Every street district stays loaded during a battle, the units with it; the ruins of the old town and the Metal Head nest stay closed. After the battle the game loads the city around you as usual.
 
 | Point | Where |
 |---|---|

@@ -60,6 +60,19 @@
 (defconstant BF_PHASE_FIGHT 2)        ;; fighting
 (defconstant BF_PHASE_OVER 3)         ;; one side ran out of units: result screen
 
+;; The battle's hold on Haven City's loaded sections (`*bf*` city-load, battlefront.gc
+;; `bf-whole-city-update`): every street section at once during a battle, two chunks of the level
+;; heap each, the stock layout (two sections, six chunks each) emptied before and after.
+(defconstant BF_LOAD_OFF 0)       ;; the stock game's levels
+(defconstant BF_LOAD_DRAIN_IN 1)  ;; a battle starts: ctywide and the unit levels alone, until every other level is gone
+(defconstant BF_LOAD_WHOLE 2)     ;; every street section (`*bf-whole-city*`), two chunks each
+(defconstant BF_LOAD_DRAIN_OUT 3) ;; the battle is over: ctywide and the unit levels alone, until no battle section is left
+
+;; Haven City's street sections a battle loads at once: everywhere the player can walk but the
+;; interiors, the ruins of the old town (ctygenb) and the Metal Head nest (mhcitya, mhcityb), both
+;; closed by a force field (battlefront-city.gc).
+(define *bf-whole-city* '(ctysluma ctyslumb ctyslumc ctyinda ctyindb ctyport))
+
 ;; Weapons of the two guard classes (D-pad: left tazer, down rifle, up grenade launcher).
 (defconstant BF_WEAPON_RIFLE 0)
 (defconstant BF_WEAPON_TAZER 1)
@@ -218,6 +231,7 @@
    (respawn-at    int32)          ;; the point a far respawn's reset brings the player to, -1 none
    (redeploy-ok?  symbol)         ;; the player may redeploy now (the director's clock; the START menu reads it)
    (flicker-until time-frame)     ;; the player's spawn shield blinks his class model until then (game clock)
+   (city-load     int32)          ;; BF_LOAD_*: the battle's hold on the city's loaded sections (battlefront.gc)
    (deaths        int32)          ;; the player's deaths in this battle
    (bag-deaths    int32)          ;; unit deaths left in the pickup bag (`bf-queue-drop`), 0 for a new bag
    (bag-drops     int32)          ;; pickups left in it
