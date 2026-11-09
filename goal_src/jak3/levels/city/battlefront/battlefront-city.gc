@@ -63,11 +63,13 @@
                                   )
   )
 
-(defun bf-city-unit-pace ((unit citizen))
-  "Unit UNIT of the battle at BF_UNIT_PACE times its kind's stock walk and run speeds and clip
-   grounds (`*bf-unit-stock-pace*`): written each time, so a unit woken again (its init sets the
-   stock values back) is paced within half a second."
-  (let ((k (bf-unit-kind unit)))
+(defun bf-city-unit-pace ((proc process))
+  "Unit PROC of the battle (a citizen) at BF_UNIT_PACE times its kind's stock walk and run speeds
+   and clip grounds (`*bf-unit-stock-pace*`): written each time, so a unit woken again (its init
+   sets the stock values back) is paced within half a second."
+  (let ((k (bf-unit-kind proc))
+        (unit (the-as citizen proc))
+        )
     (when (>= k 0)
       (let ((base (* 4 k)))
         (set! (-> unit speed-walk) (* BF_UNIT_PACE (-> *bf-unit-stock-pace* base)))
@@ -1165,6 +1167,21 @@
   (none)
   )
 
+(defun bf-city-unit-stock-stride ((proc process))
+  "For the tests: unit PROC's (a citizen) walk and run clips back to the ground the stock game gives
+   them, its speeds kept: the stride before round 22, its legs as fast as its speed. Twice a second
+   `bf-city-unit-pace` gives the round's back."
+  (let ((k (bf-unit-kind proc))
+        (unit (the-as citizen proc))
+        )
+    (when (>= k 0)
+      (set! (-> unit dist-walk-anim) (-> *bf-unit-stock-pace* (+ (* 4 k) 2)))
+      (set! (-> unit dist-run-anim) (-> *bf-unit-stock-pace* (+ (* 4 k) 3)))
+      )
+    )
+  (none)
+  )
+
 (defun bf-city-steer ()
   "Twice a second, each unit of the battle: BF_UNIT_PACE times the stock speed
    (`bf-city-unit-pace`); away from its point it marches there over the nav meshes (`bf-march-plan`), and near it
@@ -1201,7 +1218,7 @@
             (let ((proc (handle->process (-> tr active-object-list i))))
               (when (and proc (>= (bf-unit-team proc) 0))
                 (if (type? proc citizen)
-                    (bf-city-unit-pace (the-as citizen proc))
+                    (bf-city-unit-pace proc)
                     )
                 ;; roboguard-city is CTYPESC's type, unknown here: told by its name
                 (if (= (-> proc type symbol) 'roboguard-city)

@@ -3094,6 +3094,51 @@
   )
 
 
+(define-extern bf-city-unit-stock-stride (function process none))
+(define-extern bf-city-unit-pace (function process none))
+
+(defbehavior smoke-clip-pace process ((h handle) (old? symbol) (frames int))
+  "Unit H's walk/run clip pace over FRAMES frames: its frames a game frame on average (the frames
+   where the loop wrapped left out), with its speed over the ground. OLD?: its stride set back to
+   the stock one before each frame (`bf-city-unit-stock-stride`). Printed; returns the pace."
+  (let ((sum 0.0)
+        (n 0)
+        (dist 0.0)
+        )
+    (dotimes (f frames)
+      (let ((p (the-as process-drawable (handle->process h))))
+        (when p
+          (if old?
+              (bf-city-unit-stock-stride p)
+              (bf-city-unit-pace p)
+              )
+          (let ((f0 (-> p skel root-channel 0 frame-num))
+                (p0 (vector-copy! (new 'stack-no-clear 'vector) (-> p root trans)))
+                )
+            (suspend)
+            (let ((q (the-as process-drawable (handle->process h))))
+              (when q
+                (let ((d (- (-> q skel root-channel 0 frame-num) f0)))
+                  (when (< 0.0 d)
+                    (+! sum d)
+                    (+! n 1)
+                    (+! dist (vector-vector-xz-distance (-> q root trans) p0))
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    (let ((pace (if (> n 0) (/ sum (the float n)) 0.0)))
+      (format 0 "SMOKE pace ~S stride: ~f clip frames a frame over ~D frames, at ~M a second~%" (if old? "stock" "round 22") pace n
+              (if (> n 0) (/ (* 60.0 dist) (the float n)) 0.0))
+      pace
+      )
+    )
+  )
+
 (defbehavior smoke-scenario process ()
   (format 0 "SMOKE start scenario ~D~%" SMOKE_SCENARIO)
   (smoke-boot)
@@ -3835,11 +3880,40 @@
            (suspend)
            )
          (smoke-rec-stop)
+         ;; the same guard's clip pace with the stock stride (as before round 22: 18 m/s, its legs
+         ;; as fast) and with the round's, against the player's guard running
+         (let ((new0 (smoke-clip-pace h #f 20))
+               (old (smoke-clip-pace h #t 20))
+               (new1 (smoke-clip-pace h #f 20))
+               )
+           (smoke-stick 128 0 128 128)
+           (smoke-wait 1.0)
+           (let ((f0 (-> (smoke-av) skel root-channel 0 frame-num)))
+             (suspend)
+             (let ((mine (- (-> (smoke-av) skel root-channel 0 frame-num) f0)))
+               (smoke-stick 128 128 128 128)
+               (format 0 "SMOKE pace: the AI guard ~f (round 22) and ~f (stock stride), the player's guard ~f clip frames a frame~%"
+                       (* 0.5 (+ new0 new1)) old mine)
+               (smoke-check "an AI guard's legs at the player's guard's pace (within 20 %), 1.5 times faster with the stock stride"
+                            (and (< 0.0 mine)
+                                 (< (fabs (- (* 0.5 (+ new0 new1)) mine)) (* 0.2 mine))
+                                 (< (* 1.3 mine) old)
+                                 )
+                            )
+               )
+             )
+           )
+         )
+       ;; the player's guard running the street the guard ran, filmed from behind
+       (let ((p (the-as process-drawable (handle->process h))))
+         (if p
+             (set! (-> *bf* view-yaw) (vector-y-angle (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> p root quat))))
+             )
          )
        )
-     ;; the player's guard running ahead, filmed from behind
+     (smoke-wait 0.5)
      (smoke-stick 128 0 128 128)
-     (smoke-wait 1.0)
+     (smoke-wait 0.5)
      (smoke-rec-start "player-run" 2)
      (smoke-wait 2.5)
      (smoke-rec-stop)
