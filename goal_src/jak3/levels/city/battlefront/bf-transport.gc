@@ -83,7 +83,7 @@
   )
 
 
-;; The guards of the control points: every other unit a troop transport drops on a control point
+;; The guards of the control points: one unit in four a troop transport drops on a control point
 ;; its side holds stays on it (battlefront-city.gc `bf-city-unit-goal`) while the side holds it.
 (defconstant BF_POST_MAX 64)
 
@@ -227,8 +227,56 @@
       )
   )
 
+;; The point whose ship drops each side's next unit (`bf-transport-my-turn?`), -1 to draw again.
+(define *bf-drop-turn* (new 'static 'array int32 2 -1 -1))
+
+;; Units dropped at each point, side by side (8 points a side: index 8 team + point), for the tests
+;; (docs/modding/current_mod/battlefront_smoke.gc reads and clears it).
+(define *bf-drops-at* (new 'static 'array int32 16))
+
+(defun bf-transport-my-turn? ((this bf-transport))
+  "#t when ship THIS is over the point where its side's next unit comes down: one drawn at random
+   among the side's points with a ship of its own over them (`*bf*` points ship), again after each
+   try of that ship (`drop-unit`), so a side's units appear at all its points, at random, as Star
+   Wars Battlefront's come out of any command post. Before, every ship dropped whenever its side
+   lacked a unit, and the base's, there first and on screen sooner, brought most of them."
+  (let* ((team (-> this team))
+         (turn (-> *bf-drop-turn* team))
+         )
+    ;; no point drawn, or it changed hands or lost its ship: draw again
+    (when (or (< turn 0)
+              (>= turn (-> *bf* point-count))
+              (!= (-> *bf* points turn owner) team)
+              (not (handle->process (-> *bf* points turn ship)))
+              )
+      (let ((n 0))
+        (dotimes (i (-> *bf* point-count))
+          (if (and (= (-> *bf* points i owner) team) (handle->process (-> *bf* points i ship)))
+              (+! n 1)
+              )
+          )
+        (set! turn -1)
+        (when (> n 0)
+          (let ((k (rand-vu-int-count n)))
+            (dotimes (i (-> *bf* point-count))
+              (when (and (= (-> *bf* points i owner) team) (handle->process (-> *bf* points i ship)))
+                (if (zero? k)
+                    (set! turn i)
+                    )
+                (+! k -1)
+                )
+              )
+            )
+          )
+        (set! (-> *bf-drop-turn* team) turn)
+        )
+      )
+    (= turn (-> this point))
+    )
+  )
+
 (defmethod drop-unit ((this bf-transport))
-  "Jak 2's transport-method-33, once the delay is over: wake a unit of the ship's side, of the kind it
+  "Jak 2's transport-method-33, once the delay is over and its point's turn has come (`bf-transport-my-turn?`): wake a unit of the ship's side, of the kind it
    lacks most (`bf-transport-next-kind`), with the traffic's 'activate-object: behavior 6 (each kind's
    exit-transport), on the nav mesh of the ground under the ship. A guard comes in at the hatch (2 m
    above the ship's origin; its method 265 puts it inside, on spawn-side, and walks it out); the
@@ -237,7 +285,9 @@
    weapon the squad gave. Next try 1 s later after a unit (2 s off
    screen), 0.5 s after none. Side effects: a unit on the street, kept in drops; the pool's order,
    spawn-side, count-units, next-drop-time, last-drop-time."
-  (when (>= (current-time) (-> this next-drop-time))
+  (when (and (>= (current-time) (-> this next-drop-time)) (bf-transport-my-turn? this))
+    ;; the next unit of its side comes down at a point drawn again, whatever this try gives
+    (set! (-> *bf-drop-turn* (-> this team)) -1)
     (let ((params (new 'stack 'traffic-object-spawn-params))
           (on-screen (logtest? (-> this draw status) (draw-control-status on-screen)))
           (kind (bf-transport-next-kind (-> this team)))
@@ -280,8 +330,8 @@
         )
       (cond
         ((-> params proc)
-         ;; every other unit dropped on a control point guards it
-         (when (and (not (-> *bf* points (-> this point) base?)) (zero? (logand (-> this count-units) 1)))
+         ;; one unit in four dropped on a control point guards it
+         (when (and (not (-> *bf* points (-> this point) base?)) (zero? (logand (-> this count-units) 3)))
            (let ((k (-> *bf-posts* next)))
              (set! (-> *bf-posts* unit k) (process->handle (-> params proc)))
              (set! (-> *bf-posts* point k) (-> this point))
@@ -289,6 +339,7 @@
              )
            (format 0 "battlefront: side ~D unit dropped to guard control point ~D~%" (-> this team) (-> this point))
            )
+         (+! (-> *bf-drops-at* (+ (* 8 (-> this team)) (-> this point))) 1)
          (let ((slot (mod (the-as int (-> this count-units)) BF_TRANSPORT_MAX_UNITS)))
            (set! (-> this drops slot) (process->handle (-> params proc)))
            (set-time! (-> this drop-at slot))

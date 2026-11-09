@@ -91,6 +91,9 @@
 (defconstant BF_GRENADES 5.0)               ;; grenades carried (Jak's red ammo), no magazine
 (defconstant BF_SPIDER_WALK (meters 4))     ;; ground the spider's walk and run clips cover at rate 1
 (defconstant BF_SPIDER_RUN (meters 8))      ;; (spydroid.gc walk-travel-speed, run-travel-speed)
+;; The guard classes run 1.5 times as fast as they did (their speed 1.425, 0.95 before), their walk
+;; and run clips 1.5 times as fast too, so their legs keep pace (`bf-avatar-loop-rate`)
+(defconstant BF_GUARD_PACE 1.5)
 
 (deftype bf-class-art (structure)
   "How one class is drawn and fights. Indices are art-group indices of its model."
@@ -120,7 +123,7 @@
     ;; blue guard: crimson-guard-ag idle 4, walk 5, run 6, jump-high 38, gun-attack 26; blast joint 14
     (new 'static 'bf-class-art :skel "skel-crimson-guard" :level 'ctypesa
          :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
-         :ammo BF_AMMO_YELLOW :speed 0.95 :height 3.8 :fire-delay (seconds 0.5))
+         :ammo BF_AMMO_YELLOW :speed 1.425 :height 3.8 :fire-delay (seconds 0.5))
     ;; blue jetpack: bf-hover-blue (battlefront-h.gc order); gun tips 9 and 11
     (new 'static 'bf-class-art :skel "skel-bf-hover-blue" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
@@ -137,7 +140,7 @@
     ;; red guard: same clip indices as the blue guard (custom_assets/jak3/models/models.jsonc)
     (new 'static 'bf-class-art :skel "skel-bf-red-guard" :level 'ctypesa
          :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
-         :ammo BF_AMMO_YELLOW :speed 0.95 :height 3.8 :fire-delay (seconds 0.5))
+         :ammo BF_AMMO_YELLOW :speed 1.425 :height 3.8 :fire-delay (seconds 0.5))
     ;; red jetpack
     (new 'static 'bf-class-art :skel "skel-bf-hover-red" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
@@ -1073,8 +1076,9 @@
    turns toward the aim point, so the shooting clip points the weapon where the crosshair is;
    otherwise it eases back. The stock guards' own aim, copied (guard.gc crimson-guard-method-259 and 260): a
    polar-look-at joint-mod on node 4 (swivelMe) turned in world space about the model's x and y
-   axes, 80 degrees at most each, from 2 m up and 0.5 m to the side (the gun's shoulder), eased
-   at 5 a second. Does nothing without the joint-mod."
+   axes, 80 degrees at most each, from 2 m up and 0.5 m to the side (the gun's shoulder): at once
+   for 0.15 s from a shot, so the weapon points at the crosshair as it fires, else eased at 5 a
+   second. Does nothing without the joint-mod."
   (let ((jm (-> self aim-jm)))
     (when jm
       (cond
@@ -1106,7 +1110,12 @@
              (quaternion-vector-angle! q x-axis pitch)
              (quaternion-vector-angle! qy y-axis yaw)
              (quaternion*! q qy q)
-             (quaternion-slerp! (-> jm quat) (-> jm quat) q (fmin 1.0 (* 5.0 (seconds-per-frame))))
+             ;; at a shot, at once: the shooting clip points the weapon at the crosshair as it fires
+             (quaternion-slerp! (-> jm quat) (-> jm quat) q (if (time-elapsed? (-> self fire-time) (seconds 0.15))
+                                                                (fmin 1.0 (* 5.0 (seconds-per-frame)))
+                                                                1.0
+                                                                )
+                                )
              )
            )
          )
@@ -1424,7 +1433,8 @@
   )
 
 (defbehavior bf-avatar-loop-rate bf-avatar ()
-  "Rate the looping clip plays at: 1; for a jetpack, BF_HOVER_RATE, its clips' own pace; for the
+  "Rate the looping clip plays at: 1; for a guard walking or running, BF_GUARD_PACE, its pace at its
+   speed; for a jetpack, BF_HOVER_RATE, its clips' own pace; for the
    spider walking or running, the ground it covers over the ground its clip covers
    (`BF_SPIDER_WALK`, `BF_SPIDER_RUN`), so its legs step at its speed (Jak's speed times 1.5, or 2
    more while it boosts, played at rate 1, its legs slid over the ground), from 0.5 to 4."
@@ -1440,6 +1450,9 @@
                   )
                  ((or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
                   BF_HOVER_RATE
+                  )
+                 ((and walking? (bf-guard-class? (-> self class)))
+                  BF_GUARD_PACE
                   )
                  (else
                    1.0

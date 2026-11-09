@@ -2,7 +2,7 @@
 
 - **Game:** Jak 3
 - **Repository:** `whozghiar/jak3-mod-battlefront` (prepared locally as `mods/jak3-mod-battlefront`, not published yet)
-- **Status:** In development, no release. Round 19's whole city (2026-11-09: every street section of Haven City loaded during a battle, so both armies fight at every point at once) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T24). Round 19 (2026-11-08: a side with no point near the player brings its units in from the edge of the loaded area, as Star Wars Battlefront's armies come from every command post; force fields at the ruins of the old town and at the Metal Head nest; every door shut) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T23). Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
+- **Status:** In development, no release. Round 20 (2026-11-09: START opens the battle's own pause page over the city's live map; R3 shows the kills, the deaths and the whole map; 40 units a side, each brought by a ship over one of its side's points picked at random; guards 1.5 times as fast; units take the nearest point their side does not hold, a contested one near them first, and turn onto the foe they see best; the minimap's marks in each side's color and the points as black discs; maps with units as discs and view cones; no frame of Jak at the deploy; the class model facing the crosshair as it fires) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T25, T26). Round 19's whole city (2026-11-09: every street section of Haven City loaded during a battle, so both armies fight at every point at once) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T24). Round 19 (2026-11-08: a side with no point near the player brings its units in from the edge of the loaded area, as Star Wars Battlefront's armies come from every command post; force fields at the ruins of the old town and at the Metal Head nest; every door shut) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T23). Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
 
 This is the developer and agent documentation of the mod: what it changes, how it works, how to
 test it, its limits, and its change log. Players read the root [`README.md`](../../../README.md).
@@ -30,11 +30,15 @@ playable any more.
 ### Switching it on
 
 Open the Mods menu (**L3 + SELECT**, as every mod, works in a retail boot), then `battlefront` >
-**Battlefront mode**: the mode's switch, off at every boot. On, it adds a **Gamemode** entry to
-START > Options; off during a battle, it loads the last save (the slot last loaded or saved), or,
+**Battlefront mode**: the mode's switch, off at every boot. On, START opens the battle's own pause
+page (§2.5, START: the battle's pause page), and the game's START menu, reached from its last entry, gets a **Gamemode**
+entry in Options; off during a battle, it loads the last save (the slot last loaded or saved), or,
 with no save since the boot, ends the battle at the side's spawn.
 
-START > Options > Gamemode > Battlefront:
+The pause page lists Resume, New battle, Change class, Redeploy, Restart the battle, Quit the
+battle and Game menu (the game's own START menu), the ones that do not apply grey, and shows the
+city's map as it stands in the right frame. START > Options > Gamemode > Battlefront in the game's
+menu keeps the same entries:
 
 | Entry | Effect |
 |---|---|
@@ -55,7 +59,13 @@ English otherwise.
 Every page is drawn on black: the world is not drawn under it. The war zone and side pages show,
 in the right frame, the whole city as the START menu's map draws it (white streets, blue water,
 the ruined center and the stadium included), the Freedom League's base in blue, the Krimzon
-Guard's in red, the control points in gray, and Jak in white. North is up, as on the minimap.
+Guard's in red, the control points in gray, and Jak in white. North is up, as on the minimap. On
+the maps of a battle (the respawn page, R3, the pause page; `bf-draw-city-map`) each point is a
+black disc ringed in its holder's color, larger than a unit, each unit awake a disc with its view
+cone (60 degrees, toward its heading) in its side's color, as the game's minimap marks a guard, and
+Jak a white one looking where the battle camera looks. On the game's minimap, each unit has its
+side's mark (the guard's blue one for the Freedom League, the robot's red one for the Krimzon
+Guard) and each battle point a black disc (§2.9).
 
 The battlefield is the whole of Haven City (round 17; until round 16 a battle held one district,
 its sections kept loaded behind a force field). The war zone page lists Haven City, and Spargus
@@ -80,9 +90,10 @@ doors to the interiors stay shut and no car is parked.
 
 ### During a battle
 
-- **Armies:** at most 20 units per side on the street at once. Freedom League: 14 blue guards, 6
-  blue jetpack guards. Krimzon Guard: 4 red riflemen, 4 red grenadiers, 4 red jetpack guards, 4
-  robotguards, 4 spider robots. Every unit arrives by its side's troop transport (§2.9). A unit
+- **Armies:** at most 40 units per side on the street at once. Freedom League: 28 blue guards, 12
+  blue jetpack guards. Krimzon Guard: 8 red riflemen, 8 red grenadiers, 8 red jetpack guards, 8
+  robotguards, 8 spider robots. Every unit arrives by its side's troop transport (§2.9). The guards
+  run 1.5 times as fast as the game's, at 18 m/s; the player's guard classes too. A unit
   standing on the battlefield stays there wherever the camera looks (§2.2). No citizen walks or
   drives in the city during a battle.
 - **Battle points:** each side's base, and a control point in each district, neutral at the start,
@@ -93,8 +104,9 @@ doors to the interiors stay shut and no car is parked.
   them, and points away from the player are fought for without units (§2.9).
 - **HUD:** the reserves at the top middle, after the reinforcement meter of Star Wars Battlefront
   (2004): the player's side's bar runs left from the middle in green, the enemy's right in red, each
-  as long as its reserve, with both counts under them; the player's kills, small, on the left
-  ("Kills: n"); the crosshair in the middle (red when it is on a foe); top right, the stock gun HUD
+  as long as its reserve, with both counts under them; on R3, the player's kills and deaths where
+  the game shows its orb and skull gem counters, and the whole city's map, live (R3 again hides
+  them; R3's first-person view is off during a battle); the crosshair in the middle (red when it is on a foe); top right, the stock gun HUD
   showing the weapon in hand (yellow gun 1 for the rifle, blue gun 2 for the tazer, red gun 3 for
   the grenade launcher), under it the guard's own rounds: the rifle's magazine as 10 shells and
   "magazine/carried" (10/20), the grenades as 5 shells and their count, for the tazer no ammo, only
@@ -109,8 +121,8 @@ doors to the interiors stay shut and no car is parked.
   shot 6, a robotguard's shot 4. A side's own fire takes nothing from its units or from the player;
   Jak running or jumping into a unit takes nothing from it. Every close attack plays Jak's punch
   sound ("punch-hit").
-- **Targeting:** each unit fights the nearest foe and keeps it until one of them dies; the other
-  side turns onto the player within 50 m of him; his own side never takes him as a target (§2.8).
+- **Targeting:** twice a second each unit takes again the foe it sees best, the nearest within
+  50 m (its current foe counting double), and with none that near goes on to its point; the other side turns onto the player within 50 m of him; his own side never takes him as a target (§2.8).
   No guard of the battle carries the tazer: a blue guard the squad gives it gets the rifle or the
   grenade launcher instead (by its process id, for good), the red guards the weapon their model
   holds.
@@ -125,8 +137,7 @@ doors to the interiors stay shut and no car is parked.
   jetpack full and the light eco gauge lit).
 - **Death:** the player's side loses a unit; for 4 seconds the camera follows a living unit of his
   side ("YOU WERE KILLED", "Back in 4 ... 1"). Then, at every death, a page lets him pick his base
-  or a control point his side holds on the city's map (D-pad), and X deploys him there, the game
-  loading that district first when it is far (§2.9). He keeps his class, with full health, fresh
+  or a control point his side holds on the city's map (D-pad), and X deploys him there (§2.9). He keeps his class, with full health, fresh
   ammo and 2 seconds of invulnerability.
 - **Redeploy:** 30 seconds after his last shot, blow or hit taken, START > Options > Gamemode >
   Battlefront > Redeploy opens the same page without a death (no unit lost). The battle's units keep fighting
@@ -181,10 +192,12 @@ board, Dark Jak and Light Jak are off while a class is played.
 | `goal_src/jak3/engine/level/level.gc` | `load-begin` asks `*bf-alloc-hook*` (`bf-whole-city-chunk`) for a street section's level heap chunks before the stock banks. | A battle over the whole city puts each of six sections in two chunks of its own (§2.9). |
 | `goal_src/jak3/engine/load/load-state.gc` | `add-borrow-levels` lets `*bf-want-hook*` (`bf-whole-city-want`) rewrite the wanted levels first. | During a battle the game's own requests (load boundaries, continue points, ctywide's aliases) would bring back the stock sections, cars and citizens (§2.9). |
 | `goal_src/jak3/levels/city/traffic/traffic-engine-h.gc` | `traffic-engine` gets `level-data-extra`, six more `traffic-level-data` after its fields. | The engine kept the street data of two sections (`level-data-array`); `traffic-level-data-ref` (`traffic-engine.gc`) reads the eight as one list. |
+| `goal_src/jak3/levels/wascity/cty-attack-controller.gc` | Haven City's attack controller holds 128 attackers, not 64. | A battle's 80 units, the player and the city's own: past 64, `allocate-attacker` found none (`Unable to allocate new attacker`), the game fell to 4 frames a second and memory was corrupted. |
+| `goal_src/jak3/engine/collide/collide-touch-h.gc` | The touching-prims pool holds 256 records, not 64. | 80 units crowding at their ships and points ran out of them: thousands of `alloc-node` failures, those touches dropped. |
 | `goal_src/jak3/engine/gfx/background/background-h.gc`, `background.gc` | `background-work` holds 32 trees of each kind, not 11; `init-background` clears all 32, not 8. | Each displayed level adds its trees with no bound: ctywide and six sections drew 17 tie trees, past the 11, and the game crashed natively once the fifth section was displayed (§2.9). |
 | `goal_src/jak3/levels/city/traffic/traffic-manager.gc` | `traffic-manager-method-22` takes each pool size from `bf-want-count`. | It writes every traffic pool's `want-count` from the faction spawn levels every frame: the army caps must be applied there (§2.2). |
 | `game/graphics/opengl_renderer/foreground/Shadow2.cpp`, `Shadow2.h` | A shadow that no longer fits the frame's vertex or index buffers is dropped instead of stopping the game; the buffers are twice as large; the overflow skip loop tests `!=`. | A battle draws dozens of shadow casters: the stock buffers filled and the `alloc_verts` assertion closed the game (seen in the first deployment). Needs `task build-release-game`. |
-| `goal_src/jak3/levels/city/traffic/traffic-engine.gc` | `set-process-to-killed` calls `bf-unit-killed`; `activate-one-vehicle` takes the number of units of a type it may wake from `bf-wake-count` (none of a battle's during a fight: the transports and the edge reinforcements bring them, §2.9); the per-frame check of the awake pedestrians keeps a unit when `bf-keep-unit?` (`battlefront-city.gc`) says so; its loops over the sections' street data go through `traffic-level-data-ref`, eight sections. | The first is reached once per real unit death (recycled units never go there): the loss counter. The second replaces the squad controls' count, which starved the Port. The third keeps the units on the district's lanes awake out of the camera's cells (§2.2). |
+| `goal_src/jak3/levels/city/traffic/traffic-engine.gc` | `set-process-to-killed` calls `bf-unit-killed`; `activate-one-vehicle` takes the number of units of a type it may wake from `bf-wake-count` (none of a battle's during a fight: the transports and the edge reinforcements bring them, §2.9); the per-frame check of the awake pedestrians keeps a unit when `bf-keep-unit?` (`battlefront-city.gc`) says so; its loops over the sections' street data go through `traffic-level-data-ref`, eight sections; the guard pool keeps its sleeping units in 64 slots of its own (`*bf-guard-pool-slots*`) and `add-reserved-process` lists up to 64 of them. | A pool's sleeping units had 20 slots: a guard past them went unlisted, the pool spawned another every frame, and each kept a nav-control on the default nav mesh until it overflowed (`too many users for nav-mesh #f`, 30 guards a second at a deploy with 44 guards; at 22 in round 19 it leaked a few dozen, the 110 measured there). | The first is reached once per real unit death (recycled units never go there): the loss counter. The second replaces the squad controls' count, which starved the Port. The third keeps the units on the district's lanes awake out of the camera's cells (§2.2). |
 | `goal_src/jak3/levels/city/traffic/citizen/guard.gc` | `init-enemy!` takes its skeleton from `bf-guard-skel-name`; `crimson-guard-method-267` registers red guards as roboguards and takes its weapon from `bf-guard-weapon`, and method 270 compares the weapon that would give; `citizen-method-215` registers with `bf-attacker-type`; `citizen-method-194` clears a red guard's dark-guard flag (`bf-guard-flags`) and calls `bf-guard-activated`. | Red guards run the stock guard code (§2.2); no guard of a battle carries the tazer (§2.8). |
 | `goal_src/jak3/levels/city/protect/flying-turret.gc` | `init-enemy!` takes its skeleton from `bf-turret-skel-name` and its scale from `bf-unit-scale`; `citizen-method-215` registers with `bf-attacker-type`; `enemy-common-post` calls `bf-hover-animate`; `flying-turret-method-229` asks `bf-hover-nozzle!` where each thruster flame goes. | Jetpack guards run the stock flying-turret code (§2.2), their flames out of their jetpack's turbines (nodes 15 and 17) instead of the turret's spots under its root. |
 | `goal_src/jak3/dgos/game.gd` | `battlefront-h.o`, `battlefront-player.o`, `battlefront-minimaps.o`, `battlefront.o` at the end. | After the engine code they use (enemy, guard-projectile) and `mods-menu.o`. |
@@ -251,9 +264,9 @@ faction manager requests both CTYPESA and CTYPESC (`borrow-city`); the director 
 above it; for these types the engine does not check `target-count` (`activate-by-type` skips it
 below type 17). `traffic-manager-method-22` writes every `want-count` from the faction spawn levels
 (`*want-count-levels*`) every frame, so its one changed line asks `bf-want-count` instead: during a
-battle guard-a 22, flying-turret 10, roboguard 4, spydroid 4 (stock "war": 13, 6, 6, 9, and 17
-Metal Heads), which with the look shares above (14 blue, 4 red riflemen, 4 red grenadiers, 6 blue
-and 4 red jetpacks) gives 20 units per side at most. Measured in game, units awake on the street:
+battle guard-a 44, flying-turret 20, roboguard 8, spydroid 8 (stock "war": 13, 6, 6, 9, and 17
+Metal Heads), which with the look shares above (28 blue, 8 red riflemen, 8 red grenadiers, 12 blue
+and 8 red jetpacks) gives 40 units per side at most (round 20; 20 before). Measured in game, units awake on the street:
 20 Freedom League and 20 Krimzon Guard in each of the four zones (12 per side before the caps
 were raised; 19 for the Freedom League in two zones of the eleventh round's last runs).
 
@@ -524,6 +537,17 @@ Ending a battle switches the phase off first, then calls `BF_CITY_RESET` (hatred
 removes the director's settings and respawns the player at his spawn with
 `initialize!` `'life`, so every unit comes back with its stock skin. While Jak drives, the end
 waits until he is on foot.
+
+**START: the battle's pause page.** The game opens its START menu with `activate-progress` `'main`
+(`main.gc`, master mode `'progress`). While the mode is on, a wrapper of `activate-progress` hands
+the director a request instead (`BF_REQ_PAUSE`): no menu process, so the game goes back to `'game`,
+and the director opens its own page `BF_PAGE_PAUSE`, paused under it as its other pages are, with
+the city's map in the right frame (`bf-draw-city-map`). An entry closes the page and hands the
+director the request the game's Battlefront page would (`*bf-pause-reqs*`); Game menu sets
+`*bf-stock-start?*` and asks for `'progress`, which the wrapper then lets through once. START or
+Circle closes the page; a new request waits 0.4 s from a close, or the press that closed it
+opened it again through the game's menu. Every other menu (save icons, card errors) is the stock
+one.
 
 **START > Options > Gamemode.** While the mode is on, `bf-update-options-entry` swaps the Options
 page's list (`*options-options-pc*`) for one with a sixth entry, the offsets spread again; off, the
@@ -812,7 +836,10 @@ with the ship's handle: a guard walks out and jumps down (guard-type 11 keeps it
 robotguard falls as a ball, a spider drops, a jetpack flies out. A pool holds both sides' units of
 a kind, so the ship first moves a sleeping unit of its side to the head of the pool
 (`bf-transport-pick`). With the transports there, the traffic wakes none of the battle's types by
-itself (`bf-wake-count`).
+itself (`bf-wake-count`), the deployment included: woken around the player while the zone loaded,
+the Krimzon Guard's units stood at the Freedom League's base when the fight began. As the fight
+starts, any unit of the battle still awake goes back to sleep (`bf-city-sleep-all`): both sides
+start at their bases.
 
 **The whole city loaded.** Star Wars Battlefront (2004) brings each side's units in at every
 command post it holds, all over the map. During a battle Haven City keeps every street section
@@ -863,11 +890,21 @@ reaches its exit point:
 | A guard waits 1.5 s at the hatch | It turns, eased, to the next such twelfth (`bf-transport-turn`). |
 | A unit still in `exit-transport` 8 s after its drop, or the ship going | The unit goes back to sleep through its tracker's `deactivate-object` (`bf-transport-sleep`): no death, the reserves keep it. The event `'traffic-off-force` alone left it asleep but listed awake, and the game crashed in 3 of 6 runs. |
 | Before each drop | The nav mesh under it must have room for the unit (`bf-transport-mesh-room?`). |
-| Each drop on a control point | Every other unit is posted there (`*bf-posts*`, `bf-post-point`): it guards the point while its side holds it. |
+| Its turn | A side's next unit comes down at one of its points drawn at random among those with a ship of its own over them, drawn again after each try of that ship (`bf-transport-my-turn?`, `*bf-drop-turn*`): every ship used to drop whenever its side lacked a unit, and the base's brought most of them. |
+| Each drop on a control point | One unit in four is posted there (`*bf-posts*`, `bf-post-point`): it guards the point while its side holds it. |
 
-**Routes to the points.** Each unit has a point (`bf-city-unit-goal`): the one it is posted on;
-else one in two, odd process id, the nearest control point its side holds in a loaded section;
-else the nearest it does not hold. The city's walking lanes cannot take it there: they are loops
+**Routes to the points.** Each unit has a point (`bf-city-unit-goal`), as Star Wars Battlefront's
+units take the command posts: first a contested point within 250 m, one with units of the other
+side in its capture radius while its own side holds it or has units there too
+(`bf-city-contested-point`), to clear it so the capture can go on; else the one it is posted on;
+else the nearest point its side does not hold, to conquer it; with every control point held, the
+nearest one. Both sides start at their base: the Freedom League takes Freedom HQ and then the Slums,
+the Krimzon Guard the Port and then the Industrial Zone, and the first fight breaks out between the
+Slums and the Industrial Zone. Twice a second every unit also takes again the foe it sees best
+(`bf-city-retarget`, the controller's own choice: the battle's hatred scores a foe by its distance,
+0 beyond 50 m, its current foe counting double), so it attacks what it meets on its way and marches
+on with no foe that near (at 120 m, the Freedom League's 40 guards stayed at their base shooting at
+two Krimzon Guard jetpacks there, none of them marching). The city's walking lanes cannot take it there: they are loops
 within a section. The Freedom League's base, in ctyslumc, has 138 lane nodes and no lane out of the
 section; 173 of ctyslumb's 177 nodes have one lane out or none, and a citizen at a dead end jumps
 to any lane 20 to 120 m behind it (`citizen-method-208`). Routed by the lanes alone, the guards
@@ -876,7 +913,30 @@ its point marches there over the nav meshes, which join the sections:
 
 | Twice a second, `bf-march-plan` (from `bf-city-steer`) | Every frame, `bf-march-apply` |
 |---|---|
-| For each unit walking its lanes (`'active`) away from its point in a loaded section: on the point's mesh (`find-nearest-nav-mesh`), the point; else a search breadth first over the meshes' links (`nav-mesh` `link-array`, 96 meshes at most) for the way through the fewest meshes, and a spot 2 m past the link poly that starts it, toward the next mesh's own link poly (`bf-march-through`). | The unit's controller `dest-point` set to that spot: the citizen's `'active` post gives it to the nav control each frame, which finds the way across the mesh. Standing on the link poly, the unit moves onto the next mesh (`nav-enemy-method-188`); the next plan sends it on. The march runs (`speed-run`) and skips the idle stops (`wait-time`). |
+| For each unit walking its lanes (`'active`) away from its point in a loaded section: on the point's mesh (`find-nearest-nav-mesh`), the point; else the first step of its way there from its own mesh's entry in `*bf-ways*`: a spot 2 m past the link poly that starts it, toward the next mesh's own link poly (`bf-march-through`), or a bridge's end. | The unit's controller `dest-point` set to that spot: the citizen's `'active` post gives it to the nav control each frame, which finds the way across the mesh. Standing on the link poly, the unit moves onto the next mesh (`nav-enemy-method-188`); the next plan sends it on. The march runs (`speed-run`) and skips the idle stops (`wait-time`). |
+
+**The ways.** Every 10 s `bf-ways-build` lists the nav meshes of the active levels (their bsp
+`nav-meshes`) and, for each battle point, searches breadth first from the point's mesh over every
+mesh's links, unbounded: each mesh reached keeps its own link back toward the mesh it was reached
+from. The whole city has nine meshes, one or a few a section, and they did not all join:
+
+| Meshes | Linked to |
+|---|---|
+| ctysluma (the Slums) | ctyindb |
+| ctyindb, ctyinda (the Industrial Zone) | each other; ctyinda to the Port's east mesh |
+| ctyport, three linked meshes and one alone | each other; the west one to an unloaded mesh (the nest's) |
+| ctyslumb (Freedom HQ) | ctyslumc, and an unloaded mesh (the ruins') |
+| ctyslumc (the Freedom League's base) | ctyslumb |
+
+The south (Freedom HQ and the base) joined the rest only through the unloaded ruins: from the
+south no way reached a point of the north, nor from the north one of the south, and a search from
+each unit's mesh (96, then 160 meshes at most) left every Freedom League guard between its base and
+Freedom HQ. `bf-ways-bridges` joins two meshes with no link whose polys come within 6 m of each
+other (the corners of the pair of polys whose centers are nearest): ctyslumb and ctysluma meet
+there, 2.1 m apart, near (747, -70). The search crosses a bridge as a link; a unit within 2.5 m of
+its end moves onto the other mesh (`change-to`) 1.5 m inside it, across the seam
+(`bf-march-apply`). The bridges are made again only when the meshes listed change (the search
+compares every pair of polys).
 
 The lanes set `dest-point` again at a lane's end; the next frame puts it back, and the lane
 callback (`bf-city-choose-branch`) answers a marching unit with the stock random lane, cheap. Near
@@ -889,11 +949,22 @@ their lanes, and piled up there until the game ran out of touching-prims entries
 for 3 s (`target-timed-invulnerable`) and sets `*bf*` flicker-until: the class model blinks
 meanwhile, hidden a tenth of a second in two (`bf-avatar-blink`), then shows steady.
 
-**Live units on the respawn page.** Twice a second `bf-city-steer` writes the units awake, their
-places and sides, into `*bf-unit-dots*` (64 at most); `bf-draw-respawn-pick` draws them as small
-dots of their side's color over the city's map, with the points.
+**Live units on the respawn page.** Every frame `bf-city-dots` writes the units awake, their
+places, headings and sides, into `*bf-unit-dots*` (128 at most); `bf-draw-city-map` draws them over the city's map on the
+respawn page, R3's overlay and the pause page, as the game's minimap marks a guard: a disc of its
+side's color with its view cone, drawn with triangles of its own (`bf-draw-tri`, the GIF packet of
+`draw-sprite2d-xy` with a triangle primitive); each point a black disc, larger, ringed in its
+holder's color. The same frame gives each unit's minimap mark its side's class (25 the guard's blue
+one, 139 the robot's red one: the stock gives the guard's to every crimson-guard and the robot's to
+every flying turret, so the red guards had the blue one and the blue jetpacks the red one), and the
+director puts a black disc on the game's minimap at each point (`bf-point-icons`, a connection at
+the point's place with `*bf-point-minimap-class*`, the "guard" dot scaled 1.8 and black).
 
-**Aim.** Every class that shoots (guards, jetpacks, robotguard) turns its upper body toward the aim
+**Aim.** Every class that shoots faces the aim point while it fires (`bf-avatar-place`), and the
+guards, jetpacks and robotguard turn their upper body toward it, at once for 0.15 s from each
+shot, then eased: the weapon points at the crosshair as it fires. In a run walking sideways with
+the crosshair 70 degrees off the walk, the drawn model stood within 6.6 degrees of the aim's line
+after each shot. Every class that shoots turns its upper body toward the aim
 while it fires (`bf-avatar-aim-torso`, `battlefront-player.gc`; node 4 is the guard's `swivelMe`
 and the jetpack guard's and robotguard's `chest`): the stock guards' own aim (`crimson-guard-method-259` and 260), a
 `polar-look-at` joint-mod on node 4 (`swivelMe`) turned about the model's x and y axes, 80 degrees
@@ -1216,10 +1287,9 @@ code (its name cannot be printed); the object is sound.
   not identified could remain; a crash ends the game with no message (exit code `0xC0000005`). A
   temporary vectored exception handler in the runtime names the faulting GOAL function, or the
   runtime module and offset of a native one (`smoke-tests` skill, game-control).
-- **20 per side is a ceiling, not a constant.** Each zone reached 20 per side, held for 8 to 52 of
-  60 samples of 30 s (§3.1); in the eleventh round's last runs the Freedom League stayed at 19 in
-  the Industrial Zone and the Slums for the 20 s watched. A unit that dies counts until it has
-  left, and its replacement wakes on the next reinforcement, so the count dips below 20 in a heavy
+- **40 per side is a ceiling, not a constant.** A side's ships bring a unit every second or two,
+  so the armies reach 40 about a minute and a half into a battle; a unit that dies counts until it
+  has left, and its replacement comes on the next drop, so the count dips below 40 in a heavy
   fight.
 - **Hit rate of some attacks.** The spider's pounce and the citizen's rifle butt missed a moving
   foe in some runs: they only reach a foe still within range when Jak arrives.

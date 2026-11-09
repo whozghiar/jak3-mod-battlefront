@@ -41,9 +41,12 @@
 (defconstant BF_CTT_JAK 0)
 (define *bf-ctt* (new 'static 'array int32 8 0 3 4 5 9 10 11 12))
 
-(defconstant BF_HATE_REACH (meters 120))   ;; a foe beyond this scores 0: never chosen
+(defconstant BF_HATE_REACH (meters 50))    ;; a foe beyond this scores 0: never chosen (120 m kept 40 guards
+                                           ;; at their base shooting two jetpacks, none marching)
 (defconstant BF_HATE_LOST (meters 150))    ;; a unit whose foe got this far looks again
 (defconstant BF_HATE_PLAYER (meters 50))   ;; the other side turns onto the player this close
+(defconstant BF_GUARD_RUN (* 1.5 (meters 12))) ;; a guard's run during a battle: 1.5 times the stock 12 m/s
+(defconstant BF_CONTEST_REACH (meters 250)) ;; a unit this close to a contested point goes to clear it
 
 (deftype bf-city-saved (structure)
   "Stock hatred indices overwritten during a battle, to write back at its end, and the battle's
@@ -168,11 +171,12 @@
   )
 
 (defun bf-city-retarget ()
-  "Twice a second: a unit of the other side within BF_HATE_PLAYER of the player, its foe farther
-   than him, a unit whose foe got beyond BF_HATE_LOST, and a unit of the player's side that has him
-   as its foe look again for a target now (mission-squad-control-method-13, the controller's own
-   choice): the player's hatred makes the first turn onto him, the second takes the nearest foe
-   again, the third any foe but him. Otherwise a unit keeps its foe until it dies."
+  "Twice a second every unit of the battle looks again for a target (mission-squad-control-method-13,
+   the controller's own choice: the battle's hatred scores a foe by its distance, 0 beyond
+   BF_HATE_REACH, and its current foe twice): the units attack what they see, a foe near enough
+   instead of one far away, and a unit with no foe that near goes on to its point. A unit of the other side within BF_HATE_PLAYER of the player, its foe
+   farther than him, turns onto him (the player's hatred); a unit of the player's side never keeps
+   him as its foe."
   (when (and (bf-city-controller?) *target* (not (focus-test? *target* dead)))
     (let* ((ctrl *cty-attack-controller*)
            (jak (-> ctrl target-attacker self-index))
@@ -198,6 +202,8 @@
                            (< jak-dist BF_HATE_PLAYER)
                            (< jak-dist foe-dist)
                            )
+                      ;; the others too, unless on the player: each takes the foe it sees best now
+                      (!= foe jak)
                       (and (>= foe 0) (< BF_HATE_LOST foe-dist))
                       ;; a unit of his own side on the player: a target taken before the battle's
                       ;; hatreds (the stock ones, while the zone loaded) is kept until it dies (seen in
@@ -438,24 +444,56 @@
     )
   )
 
-(defun bf-city-unit-goal ((proc process) (team int))
-  "The point unit PROC of side TEAM heads for: the control point it guards, while its side holds it
-   (bf-transport.gc `bf-post-point`: every other unit a transport drops there); else one in two
-   (odd process id) defends the nearest control point its side holds in a loaded section
-   (`bf-city-guard-point`); the others, and all of them when it holds none here, march on the
-   nearest it does not hold (`bf-city-goal-point`). -1 for none."
-  (let ((post (bf-post-point proc))
-        (pos (-> (the-as process-drawable proc) root trans))
+(defun bf-city-contested-point ((team int) (from vector))
+  "The contested control point nearest FROM within BF_CONTEST_REACH for side TEAM: units of the other
+   side stand in its capture radius (`*bf*` points near, counted four times a second) while TEAM's
+   units stand there too or TEAM holds it. -1 for none."
+  (let ((best -1)
+        (best-d 0.0)
+        (foe (bf-other-team team))
         )
-    (if (and (>= post 0) (= (-> *bf* points post owner) team))
-        post
-        (let ((keep (if (logtest? (-> proc pid) 1) (bf-city-guard-point team pos) -1)))
-          (if (>= keep 0)
-              keep
-              (bf-city-goal-point team pos)
+    (dotimes (i (-> *bf* point-count))
+      (let ((pt (-> *bf* points i)))
+        (when (and (not (-> pt base?))
+                   (> (-> pt near foe) 0)
+                   (or (> (-> pt near team) 0) (= (-> pt owner) team))
+                   )
+          (let ((d (vector-vector-xz-distance (-> pt pos) from)))
+            (when (and (< d BF_CONTEST_REACH) (or (< best 0) (< d best-d)))
+              (set! best i)
+              (set! best-d d)
+              )
+            )
+          )
+        )
+      )
+    best
+    )
+  )
+
+(defun bf-city-unit-goal ((proc process) (team int))
+  "The point unit PROC of side TEAM heads for, as Star Wars Battlefront's units take the command
+   posts: a contested point near it first (`bf-city-contested-point`), to clear it of the other
+   side's units so the capture can go on; else the control point it guards, while its side holds it
+   (bf-transport.gc `bf-post-point`: one unit in four a transport drops there); else the nearest
+   point its side does not hold (`bf-city-goal-point`), to conquer it; with every control point
+   held, the one nearest it (`bf-city-guard-point`). -1 for none."
+  (let* ((pos (-> (the-as process-drawable proc) root trans))
+         (contest (bf-city-contested-point team pos))
+         (post (bf-post-point proc))
+         )
+    (cond
+      ((>= contest 0) contest)
+      ((and (>= post 0) (= (-> *bf* points post owner) team)) post)
+      (else
+        (let ((goal (bf-city-goal-point team pos)))
+          (if (>= goal 0)
+              goal
+              (bf-city-guard-point team pos)
               )
           )
         )
+      )
     )
   )
 
@@ -535,22 +573,49 @@
 ;; none; a citizen at a lane's dead end jumps to any lane 20 to 120 m behind it (citizen-method-208).
 ;; The lanes alone kept the units 140 to 290 m from a point next door. The meshes join the sections:
 ;; a nav-enemy standing on a mesh's link poly moves onto the next mesh (nav-enemy-method-188).
-(defconstant BF_MARCH_MAX 64)           ;; units marching at once, at most
+(defconstant BF_MARCH_MAX 128)          ;; units marching at once, at most (40 a side)
 (defconstant BF_MARCH_NEAR (meters 12)) ;; a unit this close to its point walks the lanes around it
-(defconstant BF_MARCH_MESHES 96)        ;; meshes a way search looks at, at most
+(defconstant BF_WAY_MESHES 768)         ;; nav meshes of the active levels the ways know, at most
 
 (deftype bf-march (structure)
   "The units marching to their point, each with where it runs now (just past the link poly into its
-   next mesh, or the point) and the mesh it was on then, and a way search's work."
+   next mesh, or the point) and the mesh it was on then."
   ((count  int32)
    (unit   handle   BF_MARCH_MAX)
    (from   nav-mesh BF_MARCH_MAX)
    (to     vector   BF_MARCH_MAX :inline)
-   (mesh   nav-mesh BF_MARCH_MESHES)  ;; the meshes a way search reached
-   (first  int16    BF_MARCH_MESHES)  ;; the start mesh's link each was reached through
+   (hop    int16    BF_MARCH_MAX)     ;; the bridge it crosses at `to` (100 + 2 k + side), -1 none
    (goal   nav-mesh BF_POINT_MAX)     ;; each point's mesh this tick, #f for none loaded
    )
   )
+
+(defconstant BF_BRIDGE_MAX 8)           ;; bridges between meshes the ways know, at most
+(defconstant BF_BRIDGE_GAP (meters 6))  ;; two meshes this close, with no link, get a bridge
+(defconstant BF_BRIDGE_HOP (meters 2.5)) ;; a unit this close to a bridge's end crosses it
+
+(deftype bf-ways (structure)
+  "The way to each battle point from every nav mesh of the active levels (`bf-ways-build`): for
+   point i and mesh k of `mesh`, `next` (at BF_WAY_MESHES i + k) holds the link of mesh k a unit
+   takes toward the point, 100 + 2 b + s to cross bridge b from its side s (0 its mesh-a, 1 its
+   mesh-b), -2 on the point's own mesh, -1 for no way. A bridge joins two meshes that touch with no
+   link between them (`bf-ways-bridges`): a unit at one end (`end-a`, `end-b`, each 1.5 m inside
+   its mesh) moves to the other (`bf-march-apply`)."
+  ((count         int32)
+   (time          time-frame)                     ;; last build
+   (mesh          nav-mesh BF_WAY_MESHES)
+   (next          int16    4608)                  ;; BF_POINT_MAX (6) times BF_WAY_MESHES
+   (queue         int16    BF_WAY_MESHES)
+   (prev          nav-mesh BF_WAY_MESHES)         ;; the meshes listed when the bridges were made
+   (prev-count    int32)
+   (bridge-count  int32)
+   (mesh-a        int16    BF_BRIDGE_MAX)
+   (mesh-b        int16    BF_BRIDGE_MAX)
+   (end-a         vector   BF_BRIDGE_MAX :inline)
+   (end-b         vector   BF_BRIDGE_MAX :inline)
+   )
+  )
+
+(define *bf-ways* (new 'static 'bf-ways))
 
 (define *bf-march* (new 'static 'bf-march))
 
@@ -592,54 +657,252 @@
     )
   )
 
-(defun bf-march-waypoint ((unit nav-enemy) (goal nav-mesh) (pos vector) (out vector))
-  "Where UNIT runs now on its way to POS, on the mesh GOAL: POS itself on that mesh; else just past
-   the link poly of its mesh starting the way through the fewest meshes to GOAL (a search breadth
-   first over the meshes' links, BF_MARCH_MESHES at most, `bf-march-through`). #f when no way."
-  (let ((m (-> unit nav state mesh))
-        (w *bf-march*)
-        (n 1)
-        (head 0)
+(defun bf-ways-index ((m nav-mesh))
+  "Index of nav mesh M in `*bf-ways*` mesh, -1 when it is not listed."
+  (let ((w *bf-ways*))
+    (dotimes (k (-> w count))
+      (if (= (-> w mesh k) m)
+          (return k)
+          )
+      )
+    )
+  -1
+  )
+
+(defun bf-ways-linked? ((a nav-mesh) (b nav-mesh))
+  "#t when one of mesh A's links leads to mesh B."
+  (dotimes (l (-> a link-count))
+    (if (= (-> a link-array l dest-mesh) b)
+        (return #t)
         )
-    (cond
-      ((not m)
-       #f
-       )
-      ((= m goal)
-       (vector-copy! out pos)
-       #t
-       )
-      (else
-        (set! (-> w mesh 0) m)
-        (set! (-> w first 0) -1)
-        (while (< head n)
-          (let ((cur (-> w mesh head)))
-            (dotimes (i (-> cur link-count))
-              (let ((next (-> cur link-array i dest-mesh)))
-                (when (and next (< n BF_MARCH_MESHES))
-                  (let ((seen? #f))
-                    (dotimes (k n)
-                      (if (= (-> w mesh k) next)
-                          (set! seen? #t)
-                          )
+    )
+  #f
+  )
+
+(defun bf-ways-bridges ()
+  "The bridges of `*bf-ways*`: each pair of listed meshes with no link either way whose polys come
+   within BF_BRIDGE_GAP of each other (a corner of one poly from a corner of the other, among the
+   pair of polys whose centers are nearest), its ends 1.5 m inside each poly from those corners.
+   The streets of Freedom HQ (ctyslumb) and the Slums (ctysluma) meet there with no link: the
+   south's two meshes linked to the rest of the city only through the unloaded ruins, and its
+   units could never reach a point of the north, nor the north's units one of the south."
+  (let ((w *bf-ways*)
+        (pa (new 'stack-no-clear 'vector))
+        (pb (new 'stack-no-clear 'vector))
+        (ca (new 'stack-no-clear 'vector))
+        (cb (new 'stack-no-clear 'vector))
+        (va (new 'stack-no-clear 'vector))
+        (vb (new 'stack-no-clear 'vector))
+        )
+    (set! (-> w bridge-count) 0)
+    (dotimes (i (-> w count))
+      (dotimes (j (-> w count))
+        (let ((ma (-> w mesh i))
+              (mb (-> w mesh j))
+              )
+          (when (and (< i j)
+                     (< (-> w bridge-count) BF_BRIDGE_MAX)
+                     (not (bf-ways-linked? ma mb))
+                     (not (bf-ways-linked? mb ma))
+                     ;; their bounding spheres overlap or nearly
+                     (< (vector-vector-distance (the-as vector (-> ma bounds)) (the-as vector (-> mb bounds)))
+                        (+ (-> ma bounds r) (-> mb bounds r) BF_BRIDGE_GAP)
+                        )
+                     )
+            (let ((best -1.0)
+                  (best-a -1)
+                  (best-b -1)
+                  )
+              ;; the polys whose centers are nearest
+              (dotimes (x (-> ma poly-count))
+                (poly-centroid ma (-> ma poly-array x) pa)
+                (dotimes (y (-> mb poly-count))
+                  (poly-centroid mb (-> mb poly-array y) pb)
+                  (let ((d (vector-vector-distance pa pb)))
+                    (when (or (< best 0.0) (< d best))
+                      (set! best d)
+                      (set! best-a x)
+                      (set! best-b y)
                       )
-                    (when (not seen?)
-                      (let ((first (if (zero? head) i (-> w first head))))
-                        (if (= next goal)
-                            (return (bf-march-through m first out))
-                            )
-                        (set! (-> w mesh n) next)
-                        (set! (-> w first n) first)
-                        (+! n 1)
+                    )
+                  )
+                )
+              (when (>= best-a 0)
+                (let ((polya (-> ma poly-array best-a))
+                      (polyb (-> mb poly-array best-b))
+                      (gap -1.0)
+                      )
+                  (poly-centroid ma polya ca)
+                  (poly-centroid mb polyb cb)
+                  ;; their nearest corners
+                  (dotimes (x (the-as int (-> polya vertex-count)))
+                    (dotimes (y (the-as int (-> polyb vertex-count)))
+                      (vector+! pa (-> polya vertex x) (the-as vector (-> ma bounds)))
+                      (vector+! pb (-> polyb vertex y) (the-as vector (-> mb bounds)))
+                      (let ((d (vector-vector-distance pa pb)))
+                        (when (or (< gap 0.0) (< d gap))
+                          (set! gap d)
+                          (vector-copy! va pa)
+                          (vector-copy! vb pb)
+                          )
                         )
                       )
+                    )
+                  (when (and (>= gap 0.0) (< gap BF_BRIDGE_GAP))
+                    (let ((k (-> w bridge-count)))
+                      (set! (-> w mesh-a k) i)
+                      (set! (-> w mesh-b k) j)
+                      ;; 1.5 m inside each poly from its corner, toward its center
+                      (vector+! (-> w end-a k) va (vector-normalize! (vector-! (new 'stack-no-clear 'vector) ca va) (meters 1.5)))
+                      (vector+! (-> w end-b k) vb (vector-normalize! (vector-! (new 'stack-no-clear 'vector) cb vb) (meters 1.5)))
+                      (format 0 "battlefront: bridge ~D between meshes ~D and ~D, corners ~M apart~%" k i j gap)
+                      (+! (-> w bridge-count) 1)
+                      )
+                    )
+                  (if (and (>= gap BF_BRIDGE_GAP) (< best (meters 40)))
+                      (format 0 "battlefront: no bridge between meshes ~D and ~D, corners ~M apart~%" i j gap)
+                      )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-ways-build ()
+  "Every 10 s of a fight: list the nav meshes of the active levels (their bsp nav-meshes), then for
+   each battle point a search breadth first from its own mesh (`*bf-march*` goal) over the meshes'
+   links, unbounded: each mesh reached keeps its own link back toward the mesh it was reached from
+   (the links join two meshes both ways). A unit then finds the first link of its way to any point
+   in its own mesh's entry (`bf-march-waypoint`). A search from each unit's mesh, 96 then 160
+   meshes at most, found no way from the Freedom League's base once the whole city was loaded: its
+   guards stayed between their base and Freedom HQ, no one of them marching."
+  (let ((w *bf-ways*)
+        (march *bf-march*)
+        )
+    (set! (-> w count) 0)
+    (dotimes (li (-> *level* length))
+      (let ((lev (-> *level* level li)))
+        (when (= (-> lev status) 'active)
+          (let ((meshes (-> lev bsp nav-meshes)))
+            (when (nonzero? meshes)
+              (dotimes (i (-> meshes length))
+                (let ((m (-> meshes i nav-mesh)))
+                  (when (and m (< (-> w count) BF_WAY_MESHES))
+                    (set! (-> w mesh (-> w count)) m)
+                    (+! (-> w count) 1)
                     )
                   )
                 )
               )
             )
-          (+! head 1)
           )
+        )
+      )
+    ;; the bridges again when the meshes listed changed (a search over every pair of polys)
+    (let ((same? (= (-> w count) (-> w prev-count))))
+      (dotimes (k (-> w count))
+        (if (!= (-> w mesh k) (-> w prev k))
+            (set! same? #f)
+            )
+        )
+      (when (not same?)
+        (dotimes (k (-> w count))
+          (set! (-> w prev k) (-> w mesh k))
+          )
+        (set! (-> w prev-count) (-> w count))
+        (bf-ways-bridges)
+        )
+      )
+    (dotimes (pt (-> *bf* point-count))
+      (let ((base (* pt BF_WAY_MESHES))
+            (g (bf-ways-index (-> march goal pt)))
+            (head 0)
+            (tail 0)
+            )
+        (dotimes (k (-> w count))
+          (set! (-> w next (+ base k)) -1)
+          )
+        (when (>= g 0)
+          (set! (-> w next (+ base g)) -2)
+          (set! (-> w queue 0) g)
+          (set! tail 1)
+          (while (< head tail)
+            (let ((cur (-> w mesh (-> w queue head))))
+              (dotimes (l (-> cur link-count))
+                (let* ((nb (-> cur link-array l dest-mesh))
+                       (nbi (if nb (bf-ways-index nb) -1))
+                       )
+                  (when (and (>= nbi 0) (= (-> w next (+ base nbi)) -1))
+                    ;; the neighbour's own link back to this mesh
+                    (dotimes (b (-> nb link-count))
+                      (when (= (-> nb link-array b dest-mesh) cur)
+                        (set! (-> w next (+ base nbi)) b)
+                        (set! (-> w queue tail) nbi)
+                        (+! tail 1)
+                        (set! b (the-as int (-> nb link-count)))
+                        )
+                      )
+                    )
+                  )
+                )
+              ;; and over the bridges: the mesh at the other end crosses back to this one
+              (let ((ci (-> w queue head)))
+                (dotimes (k (-> w bridge-count))
+                  (let ((other (cond
+                                 ((= (-> w mesh-a k) ci) (-> w mesh-b k))
+                                 ((= (-> w mesh-b k) ci) (-> w mesh-a k))
+                                 (else -1)
+                                 )
+                               )
+                        )
+                    (when (and (>= other 0) (= (-> w next (+ base other)) -1))
+                      ;; from the other end's side: 0 when it is the bridge's mesh-a
+                      (set! (-> w next (+ base other)) (+ 100 (* 2 k) (if (= (-> w mesh-a k) other) 0 1)))
+                      (set! (-> w queue tail) other)
+                      (+! tail 1)
+                      )
+                    )
+                  )
+                )
+              )
+            (+! head 1)
+            )
+          )
+        )
+      )
+    (set-time! (-> w time))
+    )
+  (none)
+  )
+
+(defun bf-march-waypoint ((unit nav-enemy) (goal int) (pos vector) (out vector))
+  "Where UNIT runs now on its way to point GOAL at POS: POS itself on the point's mesh; else just
+   past the link poly of its own mesh that starts its way there (`*bf-ways*`, `bf-march-through`),
+   or the end of a bridge on its mesh (`bf-ways-bridges`). #f when no way."
+  (let* ((m (-> unit nav state mesh))
+         (k (if m (bf-ways-index m) -1))
+         (nx (if (>= k 0) (-> *bf-ways* next (+ (* goal BF_WAY_MESHES) k)) -1))
+         )
+    (cond
+      ((= nx -2)
+       (vector-copy! out pos)
+       #t
+       )
+      ((>= nx 100)
+       (let ((b (/ (- nx 100) 2)))
+         (vector-copy! out (if (zero? (logand (- nx 100) 1)) (-> *bf-ways* end-a b) (-> *bf-ways* end-b b)))
+         )
+       #t
+       )
+      ((>= nx 0)
+       (bf-march-through m nx out)
+       )
+      (else
         #f
         )
       )
@@ -672,10 +935,16 @@
       (cond
         ((and (>= goal 0) (< (-> w count) BF_MARCH_MAX) (-> w goal goal)
               (< BF_MARCH_NEAR (vector-vector-xz-distance (-> unit root trans) (-> *bf* points goal pos)))
-              (bf-march-waypoint unit (-> w goal goal) (-> *bf* points goal pos) (-> w to (-> w count)))
+              (bf-march-waypoint unit goal (-> *bf* points goal pos) (-> w to (-> w count)))
               )
          (set! (-> w unit (-> w count)) (process->handle unit))
          (set! (-> w from (-> w count)) (-> unit nav state mesh))
+         ;; a bridge to cross at the waypoint: its code from the ways
+         (let* ((k (bf-ways-index (-> unit nav state mesh)))
+                (nx (if (>= k 0) (-> *bf-ways* next (+ (* goal BF_WAY_MESHES) k)) -1))
+                )
+           (set! (-> w hop (-> w count)) (if (>= nx 100) nx -1))
+           )
          (+! (-> w count) 1)
          )
         (else
@@ -701,6 +970,20 @@
           (cond
             ((!= (-> unit nav state mesh) (-> w from i))
              (set! (-> w unit i) (the-as handle #f))
+             )
+            ;; at a bridge's end: onto the other mesh, just across the seam
+            ((and (>= (-> w hop i) 100)
+                  (< (vector-vector-xz-distance (-> unit root trans) (-> w to i)) BF_BRIDGE_HOP)
+                  )
+             (let* ((code (- (-> w hop i) 100))
+                    (b (/ code 2))
+                    (from-a? (zero? (logand code 1)))
+                    (dest (-> *bf-ways* mesh (if from-a? (-> *bf-ways* mesh-b b) (-> *bf-ways* mesh-a b))))
+                    )
+               (change-to dest unit)
+               (move-to-point! (-> unit root) (if from-a? (-> *bf-ways* end-b b) (-> *bf-ways* end-a b)))
+               (set! (-> w unit i) (the-as handle #f))
+               )
              )
             (else
               (vector-copy! (-> unit dest-point) (-> w to i))
@@ -739,33 +1022,44 @@
     )
   )
 
+(defun bf-city-unit-minimap ((proc process))
+  "The game's minimap mark of unit PROC: a crimson-guard's, or a kg-squad-member's (flying turret,
+   roboguard, spider robot). #f for none."
+  (cond
+    ((type? proc crimson-guard) (-> (the-as crimson-guard proc) minimap))
+    ((type? proc kg-squad-member) (-> (the-as kg-squad-member proc) minimap))
+    (else (the-as connection-minimap #f))
+    )
+  )
+
 (defun bf-city-steer ()
-  "Twice a second: the units awake into `*bf-unit-dots*` (the respawn page's map); each unit of the
-   battle away from its point marches there over the nav meshes (`bf-march-plan`), and near it takes
-   its lanes with `bf-city-choose-branch` (its controller's choose-branch-callback, the stock random
-   pick otherwise): one in two defends the nearest control point its side holds here, the others
-   march on the nearest it does not, and each fights what it meets on the way (the attack
-   controller). The unit pools are rebuilt with the stock callback at each end of a battle
-   (`initialize!` 'life)."
+  "Twice a second, each unit of the battle: a guard's run at
+   BF_GUARD_RUN (its run clip plays by the ground it covers, citizen-travel-anim, so its legs keep
+   pace); away from its point it marches there over the nav meshes (`bf-march-plan`), and near it
+   takes its lanes with `bf-city-choose-branch` (its controller's choose-branch-callback, the stock
+   random pick otherwise), and fights what it meets on the way (the attack controller). The unit
+   pools are rebuilt with the stock callbacks and speeds at each end of a battle (`initialize!`
+   'life)."
   (let ((te *traffic-engine*)
-        (dots *bf-unit-dots*)
         (w *bf-march*)
         )
-    (set! (-> dots count) 0)
     (set! (-> w count) 0)
     (dotimes (i (-> *bf* point-count))
       (set! (-> w goal i) (find-nearest-nav-mesh (-> *bf* points i pos) (meters 2)))
       )
+    ;; the ways to the points over every loaded mesh, built again every 10 s
+    (if (or (zero? (-> *bf-ways* count)) (time-elapsed? (-> *bf-ways* time) (seconds 10)))
+        (bf-ways-build)
+        )
     (when (and te (nonzero? te))
       (dotimes (ti 2)
         (let ((tr (-> te tracker-array ti)))
           (dotimes (i (-> tr active-object-count))
             (let ((proc (handle->process (-> tr active-object-list i))))
-              ;; the units awake for the respawn page's map, live (`*bf-unit-dots*`)
-              (when (and proc (>= (bf-unit-team proc) 0) (< (-> dots count) BF_DOT_MAX))
-                (vector-copy! (-> dots pos (-> dots count)) (-> (the-as process-drawable proc) root trans))
-                (set! (-> dots team (-> dots count)) (bf-unit-team proc))
-                (+! (-> dots count) 1)
+              (when (and proc (>= (bf-unit-team proc) 0))
+                (if (type? proc crimson-guard)
+                    (set! (-> (the-as crimson-guard proc) speed-run) BF_GUARD_RUN)
+                    )
                 )
               (when (and proc (type? proc citizen) (>= (bf-unit-team proc) 0))
                 (let ((ctrl (-> (the-as citizen proc) controller)))
@@ -782,6 +1076,194 @@
       )
     )
   (none)
+  )
+
+(defun bf-city-sleep-all ()
+  "As the fight starts: every unit of the battle awake goes back to its pool (`bf-transport-sleep`),
+   so each side's units all come from its own ships, at its base first."
+  (let ((te *traffic-engine*)
+        (n 0)
+        )
+    (when (and te (nonzero? te))
+      (dotimes (ti 2)
+        (let ((tr (-> te tracker-array ti)))
+          ;; from the end: a unit put to sleep leaves the list
+          (countdown (i (-> tr active-object-count))
+            (let ((proc (handle->process (-> tr active-object-list i))))
+              (when (and proc (>= (bf-unit-team proc) 0))
+                (deactivate-object tr (the-as int i) #t)
+                (+! n 1)
+                )
+              )
+            )
+          )
+        )
+      )
+    (format 0 "battlefront: ~D units of the battle put back to sleep as the fight starts~%" n)
+    )
+  (none)
+  )
+
+(defun bf-city-dots ()
+  "Every frame of the fight: the units awake into `*bf-unit-dots*`, their places, headings and sides,
+   for the maps (battlefront.gc `bf-draw-city-map`: the respawn page, R3, the START page), and each
+   one's mark on the game's minimap in its side's color."
+  (let ((te *traffic-engine*)
+        (dots *bf-unit-dots*)
+        )
+    (set! (-> dots count) 0)
+    (when (and te (nonzero? te))
+      (dotimes (ti 2)
+        (let ((tr (-> te tracker-array ti)))
+          (dotimes (i (-> tr active-object-count))
+            (let ((proc (the-as process-drawable (handle->process (-> tr active-object-list i)))))
+              (when (and proc (>= (bf-unit-team proc) 0) (< (-> dots count) BF_DOT_MAX))
+                ;; its minimap mark in its side's color: the stock guard's blue one for the Freedom
+                ;; League (class 25, guard-frustum), the stock robot's red one for the Krimzon Guard
+                ;; (139, robot-frustum), where the stock gives the guard's to every crimson-guard
+                ;; (the red guards too) and the robot's to every flying turret (the blue jetpacks
+                ;; too); every frame, from the first one it is awake
+                (let ((mm (bf-city-unit-minimap proc)))
+                  (if mm
+                      (set! (-> mm class) (-> *minimap-class-list* (if (= (bf-unit-team proc) BF_TEAM_FF) 25 139)))
+                      )
+                  )
+                (let ((k (-> dots count)))
+                  (vector-copy! (-> dots pos k) (-> proc root trans))
+                  (set! (-> dots yaw k) (vector-y-angle (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> proc root quat))))
+                  (set! (-> dots team k) (bf-unit-team proc))
+                  (+! (-> dots count) 1)
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-ways-reach ((pt int))
+  "Nav meshes with a way to point PT (`*bf-ways*`), for the tests; the meshes listed when PT is -1."
+  (let ((w *bf-ways*)
+        (n 0)
+        )
+    (if (< pt 0)
+        (return (the-as int (-> w count)))
+        )
+    (dotimes (k (-> w count))
+      (if (!= (-> w next (+ (* pt BF_WAY_MESHES) k)) -1)
+          (+! n 1)
+          )
+      )
+    n
+    )
+  )
+
+(defun bf-ways-dump ()
+  "Print every nav mesh the ways know: its level, center, radius and links (the index of each
+   link's mesh, -1 for a mesh not loaded), for the tests."
+  (let ((w *bf-ways*))
+    (dotimes (k (-> w count))
+      (let ((m (-> w mesh k))
+            (lev-name #f)
+            )
+        (dotimes (li (-> *level* length))
+          (let ((lev (-> *level* level li)))
+            (when (= (-> lev status) 'active)
+              (let ((meshes (-> lev bsp nav-meshes)))
+                (when (nonzero? meshes)
+                  (dotimes (i (-> meshes length))
+                    (if (= (-> meshes i nav-mesh) m)
+                        (set! lev-name (-> lev name))
+                        )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        (format 0 "SMOKE mesh ~D ~A at ~M ~M r ~M polys ~D links:" k lev-name (-> m bounds x) (-> m bounds z) (-> m bounds r) (-> m poly-count))
+        (dotimes (l (-> m link-count))
+          (let ((d (-> m link-array l dest-mesh)))
+            (format 0 " ~D" (if d (bf-ways-index d) -1))
+            )
+          )
+        (format 0 "~%")
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-ways-gap ((a int) (b int))
+  "Print the two polys of meshes A and B (`*bf-ways*` indices) whose centroids are nearest, and
+   their distance, for the tests."
+  (let ((ma (-> *bf-ways* mesh a))
+        (mb (-> *bf-ways* mesh b))
+        (pa (new 'stack-no-clear 'vector))
+        (pb (new 'stack-no-clear 'vector))
+        (best-a (new 'stack-no-clear 'vector))
+        (best-b (new 'stack-no-clear 'vector))
+        (best -1.0)
+        )
+    (dotimes (i (-> ma poly-count))
+      (poly-centroid ma (-> ma poly-array i) pa)
+      (dotimes (j (-> mb poly-count))
+        (poly-centroid mb (-> mb poly-array j) pb)
+        (let ((d (vector-vector-distance pa pb)))
+          (when (or (< best 0.0) (< d best))
+            (set! best d)
+            (vector-copy! best-a pa)
+            (vector-copy! best-b pb)
+            )
+          )
+        )
+      )
+    (format 0 "SMOKE gap ~D-~D: ~M between ~M ~M ~M" a b best (-> best-a x) (-> best-a y) (-> best-a z))
+    (format 0 " and ~M ~M ~M~%" (-> best-b x) (-> best-b y) (-> best-b z))
+    )
+  (none)
+  )
+
+(defun bf-city-march-count ((team int))
+  "Units of side TEAM marching now (`*bf-march*`), for the tests."
+  (let ((n 0)
+        (w *bf-march*)
+        )
+    (dotimes (i (-> w count))
+      (let ((p (handle->process (-> w unit i))))
+        (if (and p (= (bf-unit-team p) team))
+            (+! n 1)
+            )
+        )
+      )
+    n
+    )
+  )
+
+(defun bf-city-guard-speed ()
+  "The fastest awake guard of the battle now, its nav speed (units a second), for the tests: a run
+   at BF_GUARD_RUN reaches 18 m/s."
+  (let ((te *traffic-engine*)
+        (best 0.0)
+        )
+    (when (and te (nonzero? te))
+      (dotimes (ti 2)
+        (let ((tr (-> te tracker-array ti)))
+          (dotimes (i (-> tr active-object-count))
+            (let ((proc (handle->process (-> tr active-object-list i))))
+              (when (and proc (type? proc crimson-guard) (-> (the-as crimson-guard proc) nav))
+                (set! best (fmax best (-> (the-as crimson-guard proc) nav state speed)))
+                )
+              )
+            )
+          )
+        )
+      )
+    best
+    )
   )
 
 (defun bf-city-free-navs ()
@@ -1046,6 +1528,7 @@
     ((= cmd BF_CITY_PREPARE)
      (bf-city-restore-hatred)
      (bf-city-ships-down)
+     (bf-city-sleep-all)
      )
     ((= cmd BF_CITY_UPDATE)
      (bf-city-apply-hatred)
@@ -1055,6 +1538,7 @@
        (bf-city-steer)
        )
      (bf-march-apply)
+     (bf-city-dots)
      ;; a death reset (ctywide activates again) or a task change restores the stock faction
      ;; state: apply the battle's every 2 seconds
      (when (and *cty-faction-manager*

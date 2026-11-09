@@ -155,7 +155,9 @@
 
 (defun initialize-cty-attack-controller ()
   (set! *cty-attack-controller* (new 'loading-level 'cty-attack-controller))
-  (init! *cty-attack-controller* 64 17 22)
+  ;; MOD battlefront -- 128 attackers, not 64: a battle's 80 units, the player and the city's own
+  ;; (allocate-attacker found none left past 64; the units without one corrupted memory)
+  (init! *cty-attack-controller* 128 17 22)
   (none)
   )
 

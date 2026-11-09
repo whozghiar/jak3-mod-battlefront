@@ -52,6 +52,7 @@
 (defconstant BF_PAGE_TEAM 2)
 (defconstant BF_PAGE_CLASS 3)
 (defconstant BF_PAGE_RESULT 4)
+(defconstant BF_PAGE_PAUSE 5)  ;; START during the mode: the battle's own pause page, the live map
 
 ;; Requests of the START menu's battle page to the director (it runs them in its own process, so
 ;; the settings it creates and removes are its own).
@@ -61,6 +62,8 @@
 (defconstant BF_REQ_END 3)
 (defconstant BF_REQ_RESTART 4)
 (defconstant BF_REQ_REDEPLOY 5)
+(defconstant BF_REQ_PAUSE 6)      ;; START pressed while the mode is on (`activate-progress` below)
+(defconstant BF_REQ_GAME_MENU 7)  ;; the pause page's last entry: the game's own START menu
 (defconstant BF_REDEPLOY_CALM (seconds 30)) ;; out of combat this long, the player may redeploy
 
 (defconstant BF_DEPLOY_TIMEOUT (seconds 120)) ;; give up when the zone is not loaded by then (every street section, round 19)
@@ -84,6 +87,7 @@
    (hud-time      time-frame) ;; last time the health HUD was asked to show
    (field-time    time-frame) ;; last force-field spark
    (field-sound   time-frame) ;; last force-field sound
+   (page-time     time-frame) ;; when the pause page last opened or closed, on the real clock (the game's stops under it)
    )
   (:state-methods
     idle
@@ -91,6 +95,8 @@
   )
 
 (define *bf-request* BF_REQ_NONE)
+;; Set to let the next START through to the game's own menu (the pause page's last entry).
+(define *bf-stock-start?* #f)
 (define *bf-text* (new 'global 'string 256 (the-as string #f)))
 
 ;; Haven City alias levels as a battle needs them: Freedom League guards (ctypesa) and Krimzon
@@ -180,9 +186,41 @@
   (none)
   )
 
+;; The pause page (START while the mode is on): its entries, and the request each hands the director
+;; once the page is closed (BF_REQ_NONE: back to the battle).
+(defconstant BF_PAUSE_COUNT 7)
+(define *bf-pause-reqs*
+  (new 'static 'array int32 7 0 1 2 5 4 3 7)
+  )
+
+(defun bf-pause-label ((i int))
+  "Label of entry I of the pause page."
+  (case i
+    ((0) (bf-tr "Resume" "Reprendre"))
+    ((1) (bf-tr "New battle" "Nouvelle bataille"))
+    ((2) (bf-tr "Change class" "Changer de classe"))
+    ((3) (bf-tr "Redeploy" "Se redéployer"))
+    ((4) (bf-tr "Restart the battle" "Recommencer la bataille"))
+    ((5) (bf-tr "Quit the battle" "Quitter la bataille"))
+    (else (bf-tr "Game menu" "Menu du jeu"))
+    )
+  )
+
+(defun bf-pause-ok? ((i int))
+  "#t when entry I of the pause page can be chosen now (the others are grey)."
+  (case i
+    ((1) (not (bf-active?)))
+    ((2 4) (bf-fighting?))
+    ((3) (-> *bf* redeploy-ok?))
+    ((5) (bf-active?))
+    (else #t)
+    )
+  )
+
 (defun bf-page-count ((page int))
   "Number of choices of PAGE."
   (cond
+    ((= page BF_PAGE_PAUSE) BF_PAUSE_COUNT)
     ;; the war zones, then Spargus, to come (grey, refused)
     ((= page BF_PAGE_ZONE) (+ BF_ZONE_COUNT 1))
     ((= page BF_PAGE_TEAM) BF_TEAM_COUNT)
@@ -199,6 +237,7 @@
     ((= page BF_PAGE_ZONE) (if (< i BF_ZONE_COUNT) (bf-zone-name i) (bf-tr "Spargus (coming soon)" "Spargus (à venir)")))
     ((= page BF_PAGE_TEAM) (bf-team-name i))
     ((= page BF_PAGE_CLASS) (bf-class-name (+ (* team 4) i)))
+    ((= page BF_PAGE_PAUSE) (bf-pause-label i))
     (else "")
     )
   )
@@ -358,6 +397,158 @@
   (none)
   )
 
+(defun bf-draw-tri ((buf dma-buffer) (x0 float) (y0 float) (x1 float) (y1 float) (x2 float) (y2 float) (color rgba))
+  "A filled triangle of COLOR with corners (X0, Y0), (X1, Y1), (X2, Y2) in the screen units of
+   `draw-sprite2d-xy` (display.gc), whose GIF packet this copies with a triangle primitive: its
+   prim, color, three vertices and the color again (six registers: a whole number of quadwords)."
+  (let ((start (-> buf base)))
+    (let ((pkt (the-as dma-packet (-> buf base))))
+      (set! (-> pkt dma) (new 'static 'dma-tag :id (dma-tag-id cnt)))
+      (set! (-> pkt vif0) (new 'static 'vif-tag))
+      (set! (-> pkt vif1) (new 'static 'vif-tag :cmd (vif-cmd direct) :msk #x1))
+      (set! (-> buf base) (&+ (the-as pointer pkt) 16))
+      )
+    (let ((tag (the-as gs-gif-tag (-> buf base))))
+      (set! (-> tag tag) (new 'static 'gif-tag64 :nloop #x1 :eop #x1 :flg (gif-flag reg-list) :nreg #x6))
+      (set! (-> tag regs) (new 'static 'gif-tag-regs
+                            :regs1 (gif-reg-id rgbaq)
+                            :regs2 (gif-reg-id xyzf2)
+                            :regs3 (gif-reg-id xyzf2)
+                            :regs4 (gif-reg-id xyzf2)
+                            :regs5 (gif-reg-id rgbaq)
+                            )
+            )
+      (set! (-> buf base) (&+ (the-as pointer tag) 16))
+      )
+    (let ((d (-> buf base)))
+      (set! (-> (the-as (pointer gs-prim) d) 0) (new 'static 'gs-prim :prim (gs-prim-type tri) :abe #x1))
+      (set! (-> (the-as (pointer gs-rgbaq) d) 1) (the-as gs-rgbaq color))
+      (set! (-> (the-as (pointer gs-xyzf) d) 2)
+            (new 'static 'gs-xyzf :x (the int (* 16.0 (+ 1792.0 x0))) :y (the int (* 16.0 (+ 1840.0 y0))) :z #x3fffff)
+            )
+      (set! (-> (the-as (pointer gs-xyzf) d) 3)
+            (new 'static 'gs-xyzf :x (the int (* 16.0 (+ 1792.0 x1))) :y (the int (* 16.0 (+ 1840.0 y1))) :z #x3fffff)
+            )
+      (set! (-> (the-as (pointer gs-xyzf) d) 4)
+            (new 'static 'gs-xyzf :x (the int (* 16.0 (+ 1792.0 x2))) :y (the int (* 16.0 (+ 1840.0 y2))) :z #x3fffff)
+            )
+      (set! (-> (the-as (pointer gs-rgbaq) d) 5) (the-as gs-rgbaq color))
+      (set! (-> buf base) (&+ d 48))
+      )
+    ;; the DMA tag and the VIF direct count the quadwords after the tag
+    (let ((qwc (/ (the-as int (+ (- -16 (the-as int start)) (the-as int (-> buf base)))) 16)))
+      (logior! (-> (the-as (pointer uint64) start) 0) (shr (shl qwc 48) 48))
+      (logior! (-> (the-as (pointer uint64) start) 1) (shl (shr (shl qwc 48) 48) 32))
+      )
+    )
+  (none)
+  )
+
+(defun bf-draw-disc ((buf dma-buffer) (x float) (y float) (r float) (color rgba))
+  "A filled disc of COLOR, radius R, centered on (X, Y): eight triangles (`bf-draw-tri`). The screen
+   units are 512 wide, so a disc keeps its roundness with the screen's width (relative-x-scale)."
+  (let ((rx (* r (-> *video-params* relative-x-scale))))
+    (dotimes (k 8)
+      (let ((a0 (* 8192.0 (the float k)))
+            (a1 (* 8192.0 (the float (+ k 1))))
+            )
+        (bf-draw-tri buf x y
+                     (+ x (* rx (sin a0))) (+ y (* r (cos a0)))
+                     (+ x (* rx (sin a1))) (+ y (* r (cos a1)))
+                     color
+                     )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-zone-xy ((zone int) (p vector) (out vector))
+  "OUT x and y get world point P on ZONE's map in the right frame (`*bf-zone-view*`); returns #f when
+   it falls outside the frame."
+  (let* ((view *bf-zone-view*)
+         (texel (-> *bf-zone-minimap-corner* (+ (* 3 zone) 2)))
+         (tx (/ (- (-> p x) (-> *bf-zone-minimap-corner* (* 3 zone))) texel))
+         (ty (/ (- (-> p z) (-> *bf-zone-minimap-corner* (+ (* 3 zone) 1))) texel))
+         )
+    (set! (-> out x) (+ (-> view x0) (* (-> view kx) tx)))
+    (set! (-> out y) (+ (-> view y0) (* (-> view ky) ty)))
+    (and (< (-> view x0) (-> out x)) (< (-> out x) (-> view x1)) (< (-> view y0) (-> out y)) (< (-> out y) (-> view y1)))
+    )
+  )
+
+(defun bf-draw-unit-mark ((buf dma-buffer) (zone int) (p vector) (yaw float) (color rgba) (cone rgba) (r float))
+  "A unit on ZONE's map as the game's minimap marks a guard: a disc of COLOR, radius R, with its
+   view, a cone of CONE 4 radii long and 60 degrees wide, toward heading YAW (rotation units, 0 along
+   world +z: down the map, whose y grows with world z)."
+  (let ((at (new 'stack-no-clear 'vector))
+        (sx (-> *video-params* relative-x-scale))
+        )
+    (when (bf-zone-xy zone p at)
+      (let ((len (* 4.0 r))
+            (a0 (- yaw (degrees 30)))
+            (a1 (+ yaw (degrees 30)))
+            )
+        (bf-draw-tri buf (-> at x) (-> at y)
+                     (+ (-> at x) (* len sx (sin a0))) (+ (-> at y) (* len (cos a0)))
+                     (+ (-> at x) (* len sx (sin a1))) (+ (-> at y) (* len (cos a1)))
+                     cone
+                     )
+        )
+      (bf-draw-disc buf (-> at x) (-> at y) r color)
+      )
+    )
+  (none)
+  )
+
+(defun bf-draw-city-map ((buf dma-buffer) (zone int) (pick int))
+  "Over the city's map in the right frame (`bf-draw-zone-minimap`, under it): its frame; each battle
+   point a black disc, larger than a unit's, ringed in its holder's color (white while neutral), the
+   point PICK blinking white (-1 none); each unit awake as the game's minimap marks a guard, a disc
+   with its view cone, blue for the Freedom League, red for the Krimzon Guard (`*bf-unit-dots*`,
+   live); Jak a white one looking where the battle camera looks."
+  (bf-zone-view! zone)
+  (let ((view *bf-zone-view*)
+        (at (new 'stack-no-clear 'vector))
+        )
+    (bf-draw-frame buf
+                   (the int (-> view x0))
+                   (the int (-> view y0))
+                   (the int (- (-> view x1) (-> view x0)))
+                   (the int (- (-> view y1) (-> view y0)))
+                   )
+    (dotimes (i (-> *bf* point-count))
+      (let ((pt (-> *bf* points i)))
+        (when (bf-zone-xy zone (-> pt pos) at)
+          (if (and (= i pick) (< (mod (current-time) (seconds 0.5)) (seconds 0.3)))
+              (bf-draw-disc buf (-> at x) (-> at y) 11.0 (static-rgba 255 255 255 128))
+              )
+          (bf-draw-disc buf (-> at x) (-> at y) 8.0 (case (-> pt owner)
+                                                       ((BF_TEAM_FF) (static-rgba 40 110 255 128))
+                                                       ((BF_TEAM_KG) (static-rgba 255 40 40 128))
+                                                       (else (static-rgba 220 220 220 128))
+                                                       )
+                        )
+          (bf-draw-disc buf (-> at x) (-> at y) 6.5 (static-rgba 0 0 0 128))
+          )
+        )
+      )
+    (dotimes (i (-> *bf-unit-dots* count))
+      (if (= (-> *bf-unit-dots* team i) BF_TEAM_FF)
+          (bf-draw-unit-mark buf zone (-> *bf-unit-dots* pos i) (-> *bf-unit-dots* yaw i)
+                             (static-rgba 70 140 255 128) (static-rgba 70 140 255 48) 2.5)
+          (bf-draw-unit-mark buf zone (-> *bf-unit-dots* pos i) (-> *bf-unit-dots* yaw i)
+                             (static-rgba 255 70 70 128) (static-rgba 255 70 70 48) 2.5)
+          )
+      )
+    (if *target*
+        (bf-draw-unit-mark buf zone (-> *target* control trans) (-> *bf* view-yaw)
+                           (static-rgba 255 255 255 128) (static-rgba 255 255 255 56) 3.5)
+        )
+    )
+  (none)
+  )
+
 (defun bf-draw-zone-marks ((buf dma-buffer) (zone int))
   "Over the zone's map (`bf-draw-zone-minimap`): its frame, the Freedom League's base (blue), the
    Krimzon Guard's (red), the control points (grey, `*bf-point-defs*`) and Jak (white). The whole
@@ -427,6 +618,7 @@
           (bf-draw-text buf (if (= page BF_PAGE_CLASS) (bf-team-name team) "BATTLEFRONT") 54.0 68.0 0.6 (font-color menu-parent) #f)
           (bf-draw-text buf
                     (cond
+                      ((= page BF_PAGE_PAUSE) (bf-tr "Pause" "Pause"))
                       ((= page BF_PAGE_ZONE) (bf-tr "Choose the war zone" "Choisissez la zone de guerre"))
                       ((= page BF_PAGE_TEAM) (bf-tr "Choose your side" "Choisissez votre camp"))
                       (else (bf-tr "Choose your class" "Choisissez votre classe"))
@@ -438,23 +630,32 @@
                       54.0
                       (+ 122.0 (* 22.0 (the float i)))
                       ;; the class names are longer ("Red Krimzon Guard (Jetpack)" ran past the panel)
-                      (if (= page BF_PAGE_CLASS) 0.43 0.5)
+                      (if (or (= page BF_PAGE_CLASS) (= page BF_PAGE_PAUSE)) 0.43 0.5)
                       (cond
                         ((and (= page BF_PAGE_ZONE) (>= i BF_ZONE_COUNT)) (font-color menu-invalid))
+                        ((and (= page BF_PAGE_PAUSE) (not (bf-pause-ok? i))) (font-color menu-invalid))
                         ((= i (-> self cursor)) (font-color cyan))
                         (else (font-color default))
                         )
                       #f)
             )
-          (if (= page BF_PAGE_CLASS)
-              ;; under the class list, which holds two or four names
-              (bf-draw-class-help buf (+ (* team 4) (-> self cursor)) (+ 128.0 (* 22.0 (the float (bf-page-count page)))))
+          (cond
+            ((= page BF_PAGE_CLASS)
+             ;; under the class list, which holds two or four names
+             (bf-draw-class-help buf (+ (* team 4) (-> self cursor)) (+ 128.0 (* 22.0 (the float (bf-page-count page)))))
+             )
+            ((= page BF_PAGE_PAUSE)
+             0
+             )
+            (else
               (bf-draw-text-wrapped buf (bf-page-desc page team (-> self cursor)) 54.0 216.0 0.38 (font-color menu-parent) 27)
               )
+            )
           (bf-draw-text buf
                     (cond
                       ((= page BF_PAGE_ZONE) (bf-tr "<PAD_X> Select  <PAD_CIRCLE> Cancel" "<PAD_X> Choisir  <PAD_CIRCLE> Annuler"))
                       ((= page BF_PAGE_TEAM) (bf-tr "<PAD_X> Select  <PAD_CIRCLE> Back" "<PAD_X> Choisir  <PAD_CIRCLE> Retour"))
+                      ((= page BF_PAGE_PAUSE) (bf-tr "<PAD_X> Select  <PAD_CIRCLE> Resume" "<PAD_X> Choisir  <PAD_CIRCLE> Reprendre"))
                       ;; the deployment still loads the zone under the page (`bf-deploy-update`)
                       ((= (-> *bf* phase) BF_PHASE_DEPLOY) (bf-tr "Loading the war zone..." "Chargement de la zone de guerre..."))
                       (else (bf-tr "<PAD_X> Deploy" "<PAD_X> Déployer"))
@@ -466,6 +667,10 @@
              )
             ((and (= page BF_PAGE_ZONE) (>= (-> self cursor) BF_ZONE_COUNT))
              (bf-draw-text buf (bf-tr "Coming soon" "À venir") 373.0 200.0 0.6 (font-color menu-invalid) #t)
+             )
+            ((= page BF_PAGE_PAUSE)
+             ;; the city's map as it stands, the points and the units (`bf-draw-city-map`)
+             (bf-draw-city-map buf (-> *bf* zone) -1)
              )
             (else
               (bf-draw-zone-marks buf (if (= page BF_PAGE_ZONE) (-> self cursor) (-> self pick-zone)))
@@ -1188,52 +1393,49 @@
     (bf-draw-text buf *bf-text* 149.0 190.0 (if (< pick 2) 0.9 0.6) (bf-team-color (-> *bf* team)) #t)
     (bf-draw-text buf (bf-tr "<PAD_DPAD_ANY> Choose" "<PAD_DPAD_ANY> Choisir") 70.0 250.0 0.45 (font-color default) #f)
     (bf-draw-text buf (bf-tr "<PAD_X> Deploy" "<PAD_X> Déployer") 70.0 276.0 0.45 (font-color default) #f)
-    (bf-draw-zone-marks buf zone)
-    (dotimes (i (-> *bf* point-count))
-      (let* ((pt (-> *bf* points i))
-             (rgba (case (-> pt owner)
-                     ((BF_TEAM_FF) (static-rgba 40 110 255 128))
-                     ((BF_TEAM_KG) (static-rgba 255 40 40 128))
-                     (else (static-rgba 220 220 220 128))
-                     )
-                   )
-             )
-        (if (and (= i pick) (< (mod (current-time) (seconds 0.5)) (seconds 0.3)))
-            (bf-zone-dot buf zone (-> pt pos) 15 (static-rgba 255 255 255 128))
-            )
-        (bf-zone-dot buf zone (-> pt pos) (if (= i pick) 11 7) rgba)
-        )
-      )
-    ;; the units awake, live: small dots of their side's color (`*bf-unit-dots*`)
-    (dotimes (i (-> *bf-unit-dots* count))
-      (bf-zone-dot buf zone (-> *bf-unit-dots* pos i) 3 (if (= (-> *bf-unit-dots* team i) BF_TEAM_FF)
-                                                         (static-rgba 90 160 255 128)
-                                                         (static-rgba 255 90 90 128)
-                                                         )
-                   )
-      )
+    (bf-draw-city-map buf zone pick)
     )
   (none)
   )
 
+(defun bf-draw-overlay ((buf dma-buffer))
+  "R3 in a fight (`*bf*` overlay?): the player's kills and deaths where the game shows its orb and
+   skull gem counters (hud-classes.gc hud-skullgem 150 and hud-skill 270 units down, on the left),
+   and the whole city's map, live, with the points and the units (`bf-draw-city-map`)."
+  (bf-draw-box buf 14 118 104 186)
+  (bf-draw-text buf (bf-tr "Kills" "Éliminations") 66.0 130.0 0.45 (font-color menu-parent) #t)
+  (clear *bf-text*)
+  (format *bf-text* "~D" (-> *bf* kills))
+  (bf-draw-text buf *bf-text* 66.0 152.0 1.0 (font-color green) #t)
+  (bf-draw-text buf (bf-tr "Deaths" "Morts") 66.0 236.0 0.45 (font-color menu-parent) #t)
+  (clear *bf-text*)
+  (format *bf-text* "~D" (-> *bf* deaths))
+  (bf-draw-text buf *bf-text* 66.0 258.0 1.0 (font-color red) #t)
+  (bf-draw-text buf (bf-tr "R3: close" "R3 : fermer") 373.0 360.0 0.4 (font-color default) #t)
+  (bf-draw-city-map buf (-> *bf* zone) -1)
+  (none)
+  )
+
 (defbehavior bf-draw-hud bf-director ()
-  "The reserves (`bf-draw-reserves`), the player's kills on the left, the warnings of the fight, the
-   countdown of a dead player, and the crosshair. The class's gun and ammo are in the stock gun HUD
+  "The reserves (`bf-draw-reserves`), the R3 overlay (`bf-draw-overlay`) or the respawn page, the
+   warnings of the fight, the countdown of a dead player, and the crosshair. The class's gun and ammo are in the stock gun HUD
    (hud-gun `update-values!` and `draw` above)."
   ;; the dead player picking his respawn point: the zone's map under the page (`bf-draw-respawn-pick`)
-  (if (>= (-> *bf* respawn-pick) 0)
+  (if (or (>= (-> *bf* respawn-pick) 0) (-> *bf* overlay?))
       (bf-draw-zone-minimap (-> *bf* zone))
       )
   (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
     (bf-draw-reserves buf)
     (bf-draw-points-hud buf)
-    (if (>= (-> *bf* respawn-pick) 0)
-        (bf-draw-respawn-pick buf)
-        )
-    ;; the player's kills, small, on the left
-    (clear *bf-text*)
-    (format *bf-text* (bf-tr "Kills: ~D" "Éliminations : ~D") (-> *bf* kills))
-    (bf-draw-text buf *bf-text* 14.0 52.0 0.45 (font-color default) #f)
+    (cond
+      ((>= (-> *bf* respawn-pick) 0)
+       (bf-draw-respawn-pick buf)
+       )
+      ;; R3: the kills, the deaths and the whole map (`bf-draw-overlay`)
+      ((-> *bf* overlay?)
+       (bf-draw-overlay buf)
+       )
+      )
     (if (not (time-elapsed? (-> self field-time) (seconds 1)))
         (bf-draw-text buf (bf-tr "CEILING" "PLAFOND") 0.0 150.0 0.6 (font-color red) #t)
         )
@@ -1394,6 +1596,7 @@
         (remove-setting! 'pilot)
         (remove-setting! 'airlock)
         (remove-setting! 'disable-parking-spots?)
+        (remove-setting! 'allow-look-around)
         (set-setting! 'borrow *bf-borrow* 0.0 0)
         (set-setting! 'faction-command *bf-faction-commands* 0.0 0)
         ;; outside the campaign: only the tasks this setting names stay open (task-control.gc
@@ -1407,6 +1610,9 @@
         ;; (ctywide-obs.gc parking-spot)
         (set-setting! 'airlock #f 0.0 0)
         (set-setting! 'disable-parking-spots? #t 0.0 0)
+        ;; R3 shows the battle's overlay (`bf-draw-overlay`), not the stock first-person look
+        ;; around (logic-target.gc)
+        (set-setting! 'allow-look-around #f 0.0 0)
         (apply-settings *setting-control*)
         (bf-avatar-kill)
         (bf-set-phase! BF_PHASE_DEPLOY)
@@ -1444,6 +1650,50 @@
   (none)
   )
 
+;; A battle point on the game's minimap: a black disc, larger than a guard's mark (the "guard" dot
+;; of *minimap-class-list*, class 10, scaled), drawn at the point (`bf-point-icons`).
+(define *bf-point-minimap-class*
+  (new 'static 'minimap-class-node
+    :default-position (new 'static 'vector :w 1.0)
+    :name "bf-point"
+    :icon-xy (new 'static 'vector2ub :data (new 'static 'array uint8 2 #x0 #x1))
+    :scale 1.8
+    :color (new 'static 'rgba :a #x80)
+    )
+  )
+
+(defbehavior bf-point-icons bf-director ()
+  "Each frame of a fight: every battle point without its mark on the game's minimap gets one, a
+   connection of the director at the point's place (minimap.gc add-icon!, class 10, then
+   `*bf-point-minimap-class*`)."
+  (dotimes (i (-> *bf* point-count))
+    (let ((pt (-> *bf* points i)))
+      (when (not (-> pt icon))
+        (let ((c (add-icon! *minimap* self (the-as uint 10) (the-as int #f) (-> pt pos) 0)))
+          (when c
+            (set! (-> c class) *bf-point-minimap-class*)
+            (set! (-> pt icon) c)
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-point-icons-kill ()
+  "Take every battle point's mark off the game's minimap (minimap.gc kill-callback)."
+  (dotimes (i BF_POINT_MAX)
+    (let ((pt (-> *bf* points i)))
+      (when (-> pt icon)
+        (kill-callback (-> *minimap* engine) (-> pt icon))
+        (set! (-> pt icon) #f)
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior bf-end-battle! bf-director ()
   "Undo everything the battle changed and go back to the stock game. While Jak drives, wait: the
    respawn that ends it would take the vehicle from under him."
@@ -1458,6 +1708,12 @@
   (set! (-> self end-pending?) #f)
   (bf-spectate-end!)
   (bf-avatar-kill)
+  ;; Jak drawn again: the director hid him while his class model was away (`bf-director-update`)
+  (if *target*
+      (send-event *target* 'draw #t)
+      )
+  (bf-point-icons-kill)
+  (set! (-> *bf* overlay?) #f)
   (bf-hud-health-update #f)
   (let ((city? (and (bf-active?) (= (level-status? *level* 'ctywide #f) 'active))))
     (when (bf-active?)
@@ -1476,6 +1732,7 @@
     (remove-setting! 'pilot)
     (remove-setting! 'airlock)
     (remove-setting! 'disable-parking-spots?)
+    (remove-setting! 'allow-look-around)
     (apply-settings *setting-control*)
     ;; respawn at the current continue (the side's spawn) the way a death does: every unit of the
     ;; battle is replaced by a stock one
@@ -2002,11 +2259,24 @@
        (set! (-> self refill?) #f)
        (set! (-> self want-avatar?) #t)
        (bf-avatar-kill)
+       ;; the old model's end showed Jak again ('draw #t): hidden until the new one is in
+       (if *target*
+           (logior! (-> *target* draw status) (draw-control-status no-draw))
+           )
        (bf-spawn-shield)
        )
       ((= page BF_PAGE_RESULT)
        (bf-close-page)
        (bf-end-battle!)
+       )
+      ((and (= page BF_PAGE_PAUSE) (not (bf-pause-ok? i)))
+       (sound-play "menu-back")
+       (return #f)
+       )
+      ((= page BF_PAGE_PAUSE)
+       ;; the request runs once the page is closed and the game runs again (`bf-director-update`)
+       (bf-close-page)
+       (set! *bf-request* (-> *bf-pause-reqs* i))
        )
       )
     )
@@ -2024,6 +2294,10 @@
       ((= page BF_PAGE_TEAM)
        (bf-open-page BF_PAGE_ZONE)
        (set! (-> self cursor) (-> self pick-zone))
+       )
+      ((= page BF_PAGE_PAUSE)
+       (bf-close-page)
+       (set! (-> self page-time) (-> *display* real-clock frame-counter))
        )
       )
     )
@@ -2049,12 +2323,25 @@
       ((cpad-pressed? 0 circle triangle)
        (bf-menu-back)
        )
+      ;; START again on the pause page: back to the battle (not the press that opened it). The game
+      ;; may see the same press once the page is closed and ask for the page again: the request
+      ;; waits 0.4 s from here (`bf-director-update`)
+      ((and (= (-> self page) BF_PAGE_PAUSE)
+            (cpad-pressed? 0 start)
+            (< (seconds 0.25) (- (-> *display* real-clock frame-counter) (-> self page-time)))
+            )
+       (bf-close-page)
+       (set! (-> self page-time) (-> *display* real-clock frame-counter))
+       )
       )
     )
   (when (!= (-> self page) BF_PAGE_NONE)
     (bf-preview-update)
     (bf-draw-page)
-    (if (or (and (= (-> self page) BF_PAGE_ZONE) (< (-> self cursor) BF_ZONE_COUNT)) (= (-> self page) BF_PAGE_TEAM))
+    (if (or (and (= (-> self page) BF_PAGE_ZONE) (< (-> self cursor) BF_ZONE_COUNT))
+            (= (-> self page) BF_PAGE_TEAM)
+            (= (-> self page) BF_PAGE_PAUSE)
+            )
         (bf-draw-zone-minimap (if (= (-> self page) BF_PAGE_ZONE) (-> self cursor) (-> self pick-zone)))
         )
     )
@@ -2177,6 +2464,20 @@
            (bf-open-class-page #f #t)
            )
        )
+      ((and (= req BF_REQ_PAUSE) (bf-can-open-menu?))
+       (set! *bf-request* BF_REQ_NONE)
+       ;; not the START press that just closed it (`bf-menu-update`)
+       (when (< (seconds 0.4) (- (-> *display* real-clock frame-counter) (-> self page-time)))
+         (bf-open-page BF_PAGE_PAUSE)
+         (set! (-> self page-time) (-> *display* real-clock frame-counter))
+         )
+       )
+      ((and (= req BF_REQ_GAME_MENU) (bf-can-open-menu?))
+       (set! *bf-request* BF_REQ_NONE)
+       ;; the game's own START menu, once (`activate-progress` below lets it through)
+       (set! *bf-stock-start?* #t)
+       (set-master-mode 'progress)
+       )
       ((and (= req BF_REQ_REDEPLOY) (bf-can-open-menu?))
        (set! *bf-request* BF_REQ_NONE)
        ;; the respawn page without a death (`bf-target-death`'s 'bf-redeploy mode)
@@ -2235,6 +2536,17 @@
            (set! (-> *bf* redraw?) #f)
            (bf-avatar-kill)
            (set! (-> self want-avatar?) #t)
+           )
+         (bf-point-icons)
+         ;; no Jak on the battlefield: hidden while his class model is away (a class change, a
+         ;; respawn, the frames before the model is in), which used to show him for a moment
+         (if (and *target* (!= (-> *bf* class) BF_CLASS_JAK) (not (bf-avatar-alive?)))
+             (logior! (-> *target* draw status) (draw-control-status no-draw))
+             )
+         ;; R3: the kills, the deaths and the whole map, on and off (`bf-draw-overlay`)
+         (when (and (cpad-pressed? 0 r3) (= (-> self page) BF_PAGE_NONE) (< (-> *bf* respawn-pick) 0))
+           (set! (-> *bf* overlay?) (not (-> *bf* overlay?)))
+           (sound-play "menu-pick")
            )
          (when (and *target* (not (focus-test? *target* dead)) (< (-> *game-info* blackout-time) (current-time)))
            (cond
@@ -2801,6 +3113,28 @@
         )
       )
     )
+  )
+
+(define-perm *bf-stock-activate-progress* (function process symbol none) activate-progress)
+
+(defun activate-progress ((arg0 process) (arg1 symbol))
+  "The game opens its START menu here (main.gc, master mode 'progress) with ARG1 'main. While the
+   Battlefront mode is on, START opens the battle's own pause page instead, its entries and the
+   city's live map (`bf-draw-page`, BF_PAGE_PAUSE), handed to the director: no menu process, so the
+   game goes back to 'game, and the director pauses it under its page. The page's Game menu entry
+   lets the next one through (`*bf-stock-start?*`). Every other menu (save icons, card errors) is
+   the stock one."
+  (cond
+    ((and (= arg1 'main) *mod-battlefront-enable* (not *bf-stock-start?*) *target*)
+     (bf-director-ensure!)
+     (set! *bf-request* BF_REQ_PAUSE)
+     )
+    (else
+      (set! *bf-stock-start?* #f)
+      (*bf-stock-activate-progress* arg0 arg1)
+      )
+    )
+  (none)
   )
 
 (defun bf-menu-request ((p progress) (req int))

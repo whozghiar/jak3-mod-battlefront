@@ -90,24 +90,28 @@
 (defconstant BF_DROP_MAX 8)           ;; pickups of dead units waiting for the director
 (defconstant BF_RESPAWN_TIME (seconds 4)) ;; a dead player watches the battle this long, then respawns
 
-;; Army caps: at most 20 units per side on the street at once. Freedom League: 14 blue guards and 6
-;; blue jetpack guards. Krimzon Guard: 4 red riflemen, 4 red grenadiers, 4 red jetpack guards, 4
-;; robotguards and 4 spider robots. The traffic pools are capped to these sums (`bf-want-count`), and
-;; each new guard or jetpack guard takes the look furthest below its share (`*bf-look-share*`). The
-;; stock "war" spawn level fields about 50 units (guard-a 13, roboguards 6, spydroids 9, flying
-;; turrets 6, Metal Heads 17, traffic-manager.gc *want-count-levels*): the battle's 40 and no citizen
-;; stay under it.
-(defconstant BF_CAP_GUARDS 22)
-(defconstant BF_CAP_TURRETS 10)
-(defconstant BF_CAP_ROBOGUARDS 4)
-(defconstant BF_CAP_SPYDROIDS 4)
+;; Army caps: at most 40 units per side on the street at once. Freedom League: 28 blue guards and
+;; 12 blue jetpack guards. Krimzon Guard: 8 red riflemen, 8 red grenadiers, 8 red jetpack guards, 8
+;; robotguards and 8 spider robots. The traffic pools are capped to these sums (`bf-want-count`), and
+;; each new guard or jetpack guard takes the look furthest below its share (`*bf-look-share*`). A
+;; traffic pool keeps its sleeping units in 20 slots (traffic-engine.gc reset-and-init-from-manager):
+;; the guard pool gets `*bf-guard-pool-slots*` instead, the flying turrets fill their 20.
+(defconstant BF_CAP_GUARDS 44)
+(defconstant BF_CAP_TURRETS 20)
+(defconstant BF_CAP_ROBOGUARDS 8)
+(defconstant BF_CAP_SPYDROIDS 8)
+
+;; The guard pool's sleeping units (traffic-engine.gc reset-and-init-from-manager points guard-a's
+;; slots here): BF_CAP_GUARDS and room to spare, where the stock 20 slots would run into the next
+;; types' (guard-b, the Metal Heads).
+(define *bf-guard-pool-slots* (new 'static 'array uint64 64))
 
 ;; The battle's unit kinds (traffic types: guard-a, flying-turret, roboguard, spydroid) and each
 ;; side's share of the caps above, Freedom League then Krimzon Guard, in that order: what its troop
 ;; transports bring it (levels/city/battlefront/bf-transport.gc).
 (defconstant BF_KIND_COUNT 4)
 (define *bf-kinds* (new 'static 'array int32 4 6 16 14 15))
-(define *bf-team-caps* (new 'static 'array int32 8 14 6 0 0 8 4 4 4))
+(define *bf-team-caps* (new 'static 'array int32 8 28 12 0 0 16 8 8 8))
 
 ;; ---------------------------------------------------------------------------------------------
 ;; Types
@@ -159,6 +163,7 @@
    (old-ship   handle)         ;; the one leaving it after a capture: the new holder's waits for it to go
    (fight      float)          ;; seconds of a fight away from the player since its last losses
    (snapped?   symbol)         ;; moved onto the open ground nearest it once its section loaded
+   (icon       connection-minimap) ;; its mark on the game's minimap during a fight, #f for none
    )
   )
 
@@ -235,6 +240,7 @@
    (deaths        int32)          ;; the player's deaths in this battle
    (bag-deaths    int32)          ;; unit deaths left in the pickup bag (`bf-queue-drop`), 0 for a new bag
    (bag-drops     int32)          ;; pickups left in it
+   (overlay?      symbol)         ;; R3 shows the kills, the deaths and the whole city's map (battlefront.gc)
    )
   )
 
@@ -264,20 +270,23 @@
   (none)
   )
 (set! (-> *bf* redeploy-ok?) #f)
+(set! (-> *bf* overlay?) #f)
 ;; the points' ships: no process (a zero handle names process 0)
 (dotimes (i BF_POINT_MAX)
   (set! (-> *bf* points i ship) (the-as handle #f))
   (set! (-> *bf* points i old-ship) (the-as handle #f))
   (set! (-> *bf* points i snapped?) #f)
+  (set! (-> *bf* points i icon) #f)
   )
 
-;; The units awake, for the respawn page's map (battlefront.gc `bf-draw-respawn-pick`): their
-;; places and sides, written twice a second by the Haven City side (battlefront-city.gc `bf-city-steer`).
-(defconstant BF_DOT_MAX 64)
+;; The units awake, for the maps (battlefront.gc `bf-draw-city-map`): their places, headings and
+;; sides, written every frame of a fight by the Haven City side (battlefront-city.gc `bf-city-dots`).
+(defconstant BF_DOT_MAX 128)
 
 (deftype bf-unit-dots (structure)
   ((count  int32)
    (pos    vector BF_DOT_MAX :inline)
+   (yaw    float  BF_DOT_MAX)   ;; heading, rotation units (0 along +z)
    (team   int8   BF_DOT_MAX)
    )
   )
@@ -948,8 +957,8 @@
   (none)
   )
 
-;; Share of each look in its pool (army caps above): 14 + 4 + 4 = BF_CAP_GUARDS, 6 + 4 = BF_CAP_TURRETS.
-(define *bf-look-share* (new 'static 'array int32 5 14 4 4 6 4))
+;; Share of each look in its pool (army caps above): 28 + 8 + 8 = BF_CAP_GUARDS, 12 + 8 = BF_CAP_TURRETS.
+(define *bf-look-share* (new 'static 'array int32 5 28 8 8 12 8))
 
 (defun bf-take-look ((look int))
   "Count one more unit of LOOK (it is being spawned) and return LOOK."
@@ -1044,11 +1053,12 @@
 
 (defun bf-wake-count ((kind int) (stock int))
   "How many units of traffic type KIND the traffic may wake on its own (traffic-engine.gc
-   activate-one-vehicle), STOCK out of a battle. During a fight none of the battle's four kinds: the
-   sides' troop transports bring every unit (levels/city/battlefront/bf-transport.gc), woken with
-   'activate-object, which this count does not hold back. Before the fight, and for the other
-   kinds, the army caps (`bf-want-count`)."
-  (if (and (bf-fighting?)
+   activate-one-vehicle), STOCK out of a battle. During a battle, its deployment too, none of the
+   battle's four kinds: the sides' troop transports bring every unit from their bases
+   (levels/city/battlefront/bf-transport.gc), woken with 'activate-object, which this count does
+   not hold back; woken by the traffic during the deployment, the Krimzon Guard's stood around the
+   Freedom League's base when the fight began. For the other kinds, the army caps (`bf-want-count`)."
+  (if (and (bf-active?)
            (or (= kind (the-as int (traffic-type guard-a)))
                (= kind (the-as int (traffic-type flying-turret)))
                (= kind (the-as int (traffic-type roboguard)))
