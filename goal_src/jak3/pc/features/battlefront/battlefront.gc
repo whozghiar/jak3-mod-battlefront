@@ -902,8 +902,17 @@
       )
     (set! (-> spr tid) (the-as texture-id (get-texture hud-gun-reticle level-default-minimap)))
     (set! (-> spr flags) (hud-sprite-flags hsf3))
-    (set! (-> spr scale-x) 1.0)
-    (set! (-> spr scale-y) 1.0)
+    ;; a guard's crosshair as wide as its rifle's spread (battlefront-player.gc `bf-avatar-spread`):
+    ;; small kneeling, larger on the move
+    (let ((size (if (and av (< 0.0 (-> av spread)))
+                    (+ 0.7 (* 0.8 (/ (-> av spread) (degrees 3.5))))
+                    1.0
+                    )
+                )
+          )
+      (set! (-> spr scale-x) size)
+      (set! (-> spr scale-y) size)
+      )
     (set! (-> spr angle) 0.0)
     (set-vector! (-> spr pos) (the int x) (the int y) #xffffff 0)
     (set-vector! (-> spr color) 128 (if foe? 32 128) (if foe? 32 128) 128)
@@ -1417,7 +1426,8 @@
   )
 
 (defbehavior bf-draw-hud bf-director ()
-  "The reserves (`bf-draw-reserves`), the R3 overlay (`bf-draw-overlay`) or the respawn page, the
+  "The reserves (`bf-draw-reserves`), the R3 overlay (`bf-draw-overlay`, the game's minimap hidden
+   meanwhile) or the respawn page, the
    warnings of the fight, the countdown of a dead player, and the crosshair. The class's gun and ammo are in the stock gun HUD
    (hud-gun `update-values!` and `draw` above)."
   ;; the dead player picking his respawn point: the zone's map under the page (`bf-draw-respawn-pick`)
@@ -1714,6 +1724,7 @@
       )
   (bf-point-icons-kill)
   (set! (-> *bf* overlay?) #f)
+  (remove-setting! 'minimap)
   (bf-hud-health-update #f)
   (let ((city? (and (bf-active?) (= (level-status? *level* 'ctywide #f) 'active))))
     (when (bf-active?)
@@ -2546,6 +2557,11 @@
          ;; R3: the kills, the deaths and the whole map, on and off (`bf-draw-overlay`)
          (when (and (cpad-pressed? 0 r3) (= (-> self page) BF_PAGE_NONE) (< (-> *bf* respawn-pick) 0))
            (set! (-> *bf* overlay?) (not (-> *bf* overlay?)))
+           ;; the game's minimap at the bottom right goes while the whole map is up
+           (if (-> *bf* overlay?)
+               (set-setting! 'minimap 'clear 0.0 (minimap-flag minimap))
+               (remove-setting! 'minimap)
+               )
            (sound-play "menu-pick")
            )
          (when (and *target* (not (focus-test? *target* dead)) (< (-> *game-info* blackout-time) (current-time)))

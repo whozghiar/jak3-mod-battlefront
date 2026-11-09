@@ -391,8 +391,8 @@
   (new 'static 'boxed-array :type string
     "24 HP. Rifle 10/20, 5 grenades"
     "<PAD_R1> Fire    <PAD_SQUARE> Rifle butt"
-    "<PAD_L2> + <PAD_ANALOG_ANY> Roll"
-    "<PAD_R2> + <PAD_ANALOG_ANY> Strafe"
+    "<PAD_L1> Crouch: steadier aim"
+    "<PAD_L2> + <PAD_ANALOG_ANY> Dodge    <PAD_R2> + <PAD_ANALOG_ANY> Roll"
     "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Tazer (every 20 s)"
     "<PAD_DPAD_DOWN> Rifle    <PAD_DPAD_UP> Grenades"
     )
@@ -402,8 +402,8 @@
   (new 'static 'boxed-array :type string
     "24 PV. Fusil 10/20, 5 grenades"
     "<PAD_R1> Tir    <PAD_SQUARE> Crosse"
-    "<PAD_L2> + <PAD_ANALOG_ANY> Roulade"
-    "<PAD_R2> + <PAD_ANALOG_ANY> Pas chassé"
+    "<PAD_L1> S'accroupir : tir plus précis"
+    "<PAD_L2> + <PAD_ANALOG_ANY> Esquive    <PAD_R2> + <PAD_ANALOG_ANY> Roulade"
     "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Tazer (toutes les 20 s)"
     "<PAD_DPAD_DOWN> Fusil    <PAD_DPAD_UP> Grenades"
     )
