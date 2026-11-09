@@ -19,7 +19,7 @@
     Red Guard        bf-red-guard (ctypesa)       D-pad: weapon, L2/R2: dodge    weapon         rifle butt
     Red Jetpack      bf-hover-red (ctypesc)       X: up, Circle: down (fuel)     2-shot salvo   dive kick
     Robotguard       roboguard-city (ctypesc)     slower, R2: rolling ball       2-shot salvo   punch       shield
-    Spider Robot     spydroid (ctypesc)           x1.5, higher jumps, R2: x2                                bite
+    Spider Robot     spydroid (ctypesc)           x2.25, higher jumps, R2: x2                               bite
 
   Neither the Spargus Citizen (class 2) nor Jak himself (class 3) is playable any more.
 
@@ -54,7 +54,7 @@
 (defconstant BF_BOOST_TIME 10.0)            ;; seconds of spider sprint in a full blue eco gauge
 (defconstant BF_BOOST_SPEED 2.0)            ;; spider speed multiplier while it sprints
 (defconstant BF_SPIDER_LEAP_HEIGHT (meters 11)) ;; height of the spider robot's leap (X)
-(defconstant BF_ROLL_SPEED 1.6)             ;; robotguard speed multiplier as a ball
+(defconstant BF_ROLL_SPEED 2.4)             ;; robotguard speed multiplier as a ball (1.6 before round 22: x1.5)
 (defconstant BF_SALVO_GAP (seconds 0.12))   ;; between the two shots of a jetpack or robotguard salvo
 (defconstant BF_SHIELD_TIME (seconds 5))    ;; robotguard: its shield stops every hit this long
 (defconstant BF_SHIELD_RECHARGE (seconds 25)) ;; then it needs this long to come back
@@ -97,9 +97,11 @@
 (defconstant BF_GRENADES 5.0)               ;; grenades carried (Jak's red ammo), no magazine
 (defconstant BF_SPIDER_WALK (meters 4))     ;; ground the spider's walk and run clips cover at rate 1
 (defconstant BF_SPIDER_RUN (meters 8))      ;; (spydroid.gc walk-travel-speed, run-travel-speed)
-;; The guard classes run 1.5 times as fast as they did (their speed 1.425, 0.95 before), their walk
-;; and run clips 1.5 times as fast too, so their legs keep pace (`bf-avatar-loop-rate`)
-(defconstant BF_GUARD_PACE 1.5)
+;; Every class moves 1.5 times as fast as it did (round 22; the guards since round 20: 1.425, 0.95
+;; before; the jetpacks 1.5, the robotguard 1.05, the spider 2.25); the guards' and the robotguard's
+;; walk and run clips play 1.5 times as fast too, so their legs keep pace (`bf-avatar-loop-rate`),
+;; the spider's by the ground it covers, the jetpacks' hover clips at their own pace
+(defconstant BF_CLASS_PACE 1.5)
 
 (deftype bf-class-art (structure)
   "How one class is drawn and fights. Indices are art-group indices of its model."
@@ -133,7 +135,7 @@
     ;; blue jetpack: bf-hover-blue (battlefront-h.gc order); gun tips 9 and 11
     (new 'static 'bf-class-art :skel "skel-bf-hover-blue" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
-         :ammo BF_AMMO_NONE :speed 1.0 :height 4.3 :fire-delay (seconds 0.8))
+         :ammo BF_AMMO_NONE :speed 1.5 :height 4.3 :fire-delay (seconds 0.8))
     ;; Spargus citizen: no longer playable; the entry keeps the indices (wlander-male-ag idle0 4,
     ;; walk0 5, run0 7, shoot0 10, attack-rifle-butt 12; gunblast 21)
     (new 'static 'bf-class-art :skel "skel-wlander-male" :level 'ctypesa
@@ -150,21 +152,24 @@
     ;; red jetpack
     (new 'static 'bf-class-art :skel "skel-bf-hover-red" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
-         :ammo BF_AMMO_NONE :speed 1.0 :height 4.3 :fire-delay (seconds 0.8))
+         :ammo BF_AMMO_NONE :speed 1.5 :height 4.3 :fire-delay (seconds 0.8))
     ;; roboguard: roboguard-city-ag idle0 3, walk 10, run 11, idle-shoot0-loop 5, ball 13,
     ;; punch-close-go 20; fists 11, 15
     (new 'static 'bf-class-art :skel "skel-roboguard-city" :level 'ctypesc
          :idle 3 :walk 10 :run 11 :jump 3 :shoot 5 :special 13 :melee 20 :gun0 11 :gun1 15
-         :ammo BF_AMMO_NONE :speed 0.7 :height 4.8 :fire-delay (seconds 0.9))
+         :ammo BF_AMMO_NONE :speed 1.05 :height 4.8 :fire-delay (seconds 0.9))
     ;; spider: spydroid-ag idle 3, walk 4, run 5, attack-jump 6 (its bite)
     (new 'static 'bf-class-art :skel "skel-spydroid" :level 'ctypesc
          :idle 3 :walk 4 :run 5 :jump 6 :shoot 6 :special 6 :melee 6 :gun0 -1 :gun1 -1
-         :ammo BF_AMMO_NONE :speed 1.5 :height 2.0 :fire-delay (seconds 0.8))
+         :ammo BF_AMMO_NONE :speed 2.25 :height 2.0 :fire-delay (seconds 0.8))
     )
   )
 
 ;; crimson-guard-ag clips of the guard weapons (the red guard models share them)
-(defconstant BF_CLIP_TAZER 22)      ;; stab-attack
+(defconstant BF_CLIP_TAZER 22)      ;; stab-attack: a short loop, the baton's zap held out
+(defconstant BF_CLIP_STAB_IN 21)    ;; stab-idle-to-attack: the thrust (guard-tazer.gc, before the zap)
+(defconstant BF_CLIP_STAB_OUT 23)   ;; stab-attack-to-stab-idle: the arm back
+(defconstant BF_STAB_ZAP (seconds 0.5)) ;; the zap held out between the two, as the stock guard's
 (defconstant BF_CLIP_GRENADE 37)    ;; grenade-attack
 (defconstant BF_CLIP_RELOAD 44)     ;; grenade-reload, the stock rifle guards' reload too
 (defconstant BF_CLIP_COCK 45)       ;; cock-gun, the end of a reload
@@ -209,6 +214,9 @@
    (melee-time  time-frame)     ;; last Square attack
    (melee-until time-frame)     ;; close attack running until then: cleared when its clip ends
    (melee-step  int32)          ;; robotguard: clip of its punch playing (`*bf-punch-clips*`)
+   (stab-until  time-frame)     ;; guard: the tazer's stab playing until then: cleared when its last clip ends
+   (stab-clip   int32)          ;; guard: the stab's clip playing (BF_CLIP_STAB_IN, BF_CLIP_TAZER, BF_CLIP_STAB_OUT)
+   (stab-time   time-frame)     ;; when its zap began
    (top-step    int32)          ;; guard: upper-body clip playing (`bf-avatar-top-update`), 0 none
    (reload?     symbol)         ;; guard: the weapon in hand is empty and reloads when it can
    (dive-until  time-frame)     ;; jetpack dive kick flying until then
@@ -704,12 +712,13 @@
            (set! (-> self tazing?) #t)
            (change-mode bolt (lightning-mode lm1))
            (sound-play "guard-zap")
-           ;; the arm thrusts the tazer out: the stab on the upper body, played to its end and then
-           ;; blended back into the legs' clip, which goes on walking. Holding the stab's pose as the
-           ;; upper body's resting clip, then dropping it as the arc went out, cut it after 0.35 s:
-           ;; no stab was seen (the author's play)
+           ;; the stock guard's stab on the whole body (guard-tazer.gc): the thrust, the zap held
+           ;; out BF_STAB_ZAP, the arm back (`bf-avatar-pick-anim`). Played on the upper body alone
+           ;; over the walking legs, the thrust hid behind the guard's back from the camera, and no
+           ;; stab was seen (the author's play, twice); the zap clip alone is a short loop
            (bf-avatar-top-stop)
-           (bf-avatar-top-play BF_CLIP_TAZER 0.0 -1.0 1.0 #t)
+           (set! (-> self stab-until) (+ (current-time) BF_MELEE_MAX))
+           (set! (-> self stab-clip) BF_CLIP_STAB_IN)
            )
          (set! (-> bolt spec) (-> *lightning-spec-id-table* 20))
          (set! (-> bolt state points-to-draw) 9)
@@ -1507,8 +1516,8 @@
   )
 
 (defbehavior bf-avatar-loop-rate bf-avatar ()
-  "Rate the looping clip plays at: 1; for a guard walking or running, BF_GUARD_PACE, its pace at its
-   speed; for a jetpack, BF_HOVER_RATE, its clips' own pace; for the
+  "Rate the looping clip plays at: 1; for a guard or the robotguard walking or running,
+   BF_CLASS_PACE, its pace at its speed; for a jetpack, BF_HOVER_RATE, its clips' own pace; for the
    spider walking or running, the ground it covers over the ground its clip covers
    (`BF_SPIDER_WALK`, `BF_SPIDER_RUN`), so its legs step at its speed (Jak's speed times 1.5, or 2
    more while it boosts, played at rate 1, its legs slid over the ground), from 0.5 to 4."
@@ -1525,8 +1534,8 @@
                  ((or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
                   BF_HOVER_RATE
                   )
-                 ((and walking? (bf-guard-class? (-> self class)))
-                  BF_GUARD_PACE
+                 ((and walking? (or (bf-guard-class? (-> self class)) (= (-> self class) BF_CLASS_ROBOGUARD)))
+                  BF_CLASS_PACE
                   )
                  (else
                    1.0
@@ -1781,6 +1790,10 @@
        ;; a guard's roll, tucked, or its dodge, its jump to that side (`bf-avatar-dodge`)
        (if (-> self roll?) BF_CLIP_ROLL (-> self dodge-clip))
        )
+      ((< (current-time) (-> self stab-until))
+       ;; a guard's tazer strike: the stock guard's stab, its clip now (`bf-avatar-tazer`)
+       (-> self stab-clip)
+       )
       ((-> self crouch?)
        ;; a guard kneeling (L1): the stock guard's kneeling shot
        BF_CLIP_KNEEL
@@ -2028,6 +2041,32 @@
              )
            )
          )
+        ((and (< (current-time) (-> self stab-until)) (= (-> self anim) (-> self stab-clip)))
+         ;; the tazer's stab: the thrust once, the zap looped BF_STAB_ZAP, the arm back once, which
+         ;; ends it
+         (cond
+           ((= (-> self stab-clip) BF_CLIP_TAZER)
+            (ja :num! (loop!))
+            (when (time-elapsed? (-> self stab-time) BF_STAB_ZAP)
+              (set! (-> self stab-clip) BF_CLIP_STAB_OUT)
+              )
+            )
+           (else
+             (ja :num! (seek!))
+             (when (ja-done? 0)
+               (cond
+                 ((= (-> self stab-clip) BF_CLIP_STAB_IN)
+                  (set! (-> self stab-clip) BF_CLIP_TAZER)
+                  (set-time! (-> self stab-time))
+                  )
+                 (else
+                   (set! (-> self stab-until) 0)
+                   )
+                 )
+               )
+             )
+           )
+         )
         ((and (< (current-time) (-> self dodge-until))
               (or (= (-> self anim) BF_CLIP_ROLL) (= (-> self anim) BF_CLIP_DODGE_RIGHT) (= (-> self anim) BF_CLIP_DODGE_LEFT))
               )
@@ -2071,6 +2110,7 @@
   (set! (-> self salvo-time) 0)
   (set! (-> self melee-time) 0)
   (set! (-> self melee-until) 0)
+  (set! (-> self stab-until) 0)
   (set! (-> self melee-step) 0)
   (set! (-> self top-step) 0)
   (set! (-> self reload?) #f)

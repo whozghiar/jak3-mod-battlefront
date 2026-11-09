@@ -88,6 +88,9 @@
 
 (defconstant BF_CEILING (meters 30))  ;; force-field ceiling of the jetpacks, above the higher spawn
 (defconstant BF_DROP_MAX 8)           ;; pickups of dead units waiting for the director
+(defconstant BF_BAG_DROPS 6)          ;; pickups left by every 10 fallen units (`bf-queue-drop`)
+(defconstant BF_DROP_LIFE (seconds 10)) ;; a pickup left by a fallen unit goes this long after it appears
+(defconstant BF_UNIT_RESPAWN (seconds 5)) ;; a fallen unit's place in its side's army waits this long
 (defconstant BF_RESPAWN_TIME (seconds 4)) ;; a dead player watches the battle this long, then respawns
 
 ;; Army caps: at most 40 units per side on the street at once. Freedom League: 28 blue guards and
@@ -240,7 +243,7 @@
    (deaths        int32)          ;; the player's deaths in this battle
    (bag-deaths    int32)          ;; unit deaths left in the pickup bag (`bf-queue-drop`), 0 for a new bag
    (bag-drops     int32)          ;; pickups left in it
-   (overlay?      symbol)         ;; R3 shows the kills, the deaths and the whole city's map (battlefront.gc)
+   (overlay?      symbol)         ;; L3 shows the kills, the deaths and the whole city's map (battlefront.gc)
    )
   )
 
@@ -1111,16 +1114,16 @@
   )
 
 (defun bf-queue-drop ((proc process))
-  "Maybe leave a pickup where PROC died: 3 of every 10 fallen units leave one, in a random order (a
-   bag of 10 deaths holding 3 pickups: 30 % exactly, where a 30 % chance at each death gave 26 % in
-   two long battles), 12 in 30 yellow ammo (the rifle's reserve), 7 red (grenades), 6 health, 5
-   dark eco (the jetpack's boost); no blue ammo: the tazer needs none. Queued for the director,
-   which spawns it in its own process (`bf-spawn-drops`): this runs on the traffic manager's small
-   stack."
+  "Maybe leave a pickup where PROC died: 6 of every 10 fallen units leave one, in a random order (a
+   bag of 10 deaths holding 6 pickups: 60 % exactly, where a chance at each death gave less in two
+   long battles), 15 in 30 yellow ammo (the rifle's reserve), 8 red (grenades), 4 health, 3 dark eco
+   (the jetpack's boost); no blue ammo: the tazer needs none. Each one goes 10 s after it appears
+   (`bf-spawn-drops`). Queued for the director, which spawns it in its own process: this runs on
+   the traffic manager's small stack."
   (when (and (type? proc process-drawable) (< (-> *bf* drop-count) BF_DROP_MAX))
     (when (<= (-> *bf* bag-deaths) 0)
       (set! (-> *bf* bag-deaths) 10)
-      (set! (-> *bf* bag-drops) 3)
+      (set! (-> *bf* bag-drops) BF_BAG_DROPS)
       )
     (let ((drop? (< (rand-vu-int-count (-> *bf* bag-deaths)) (-> *bf* bag-drops))))
       (+! (-> *bf* bag-deaths) -1)
@@ -1128,9 +1131,9 @@
         (+! (-> *bf* bag-drops) -1)
         (let* ((roll (rand-vu-int-count 30))
                (kind (cond
-                       ((< roll 12) (pickup-type ammo-yellow))
-                       ((< roll 19) (pickup-type ammo-red))
-                       ((< roll 25) (pickup-type health))
+                       ((< roll 15) (pickup-type ammo-yellow))
+                       ((< roll 23) (pickup-type ammo-red))
+                       ((< roll 27) (pickup-type health))
                        (else (pickup-type eco-pill-dark))
                        )
                      )
@@ -1146,12 +1149,67 @@
   (none)
   )
 
+(defconstant BF_FALLEN_MAX 64)
+
+(deftype bf-fallen (structure)
+  "The last units fallen, the newest over the oldest once full: when, and their side and kind
+   (4 team + the kind's index in `*bf-kinds*`), so that a side's ship waits BF_UNIT_RESPAWN before
+   it brings the next unit in a fallen one's place (levels/city/battlefront/bf-transport.gc
+   `bf-transport-next-kind`)."
+  ((time  time-frame BF_FALLEN_MAX)
+   (slot  int32      BF_FALLEN_MAX)
+   (next  int32)
+   )
+  )
+
+(define *bf-fallen* (new 'static 'bf-fallen))
+
+(defun bf-unit-kind ((proc process))
+  "Index in `*bf-kinds*` of unit PROC's kind: 0 guard, 1 jetpack guard, 2 robotguard, 3 spider
+   robot; -1 for any other process."
+  (case (-> proc type symbol)
+    (('crimson-guard) 0)
+    (('flying-turret) 1)
+    (('roboguard-city) 2)
+    (('spydroid) 3)
+    (else -1)
+    )
+  )
+
+(defun bf-fallen-count ((team int) (kind int))
+  "Units of side TEAM and kind KIND (`bf-unit-kind`) fallen less than BF_UNIT_RESPAWN ago."
+  (let ((n 0)
+        (want (+ (* 4 team) kind))
+        )
+    (dotimes (i BF_FALLEN_MAX)
+      (if (and (= (-> *bf-fallen* slot i) want)
+               (nonzero? (-> *bf-fallen* time i))
+               (not (time-elapsed? (-> *bf-fallen* time i) BF_UNIT_RESPAWN))
+               )
+          (+! n 1)
+          )
+      )
+    n
+    )
+  )
+
 (defun bf-unit-killed ((proc process))
   "Called by the traffic engine when one of its units dies (traffic-tracker set-process-to-killed,
    reached once per real death; units recycled out of view do not go there): its side loses one
-   unit, and it may leave a pickup."
+   unit, it may leave a pickup, and its place waits BF_UNIT_RESPAWN for the next one (`*bf-fallen*`)."
   (when (bf-fighting?)
-    (bf-count-loss (bf-unit-team proc))
+    (let ((team (bf-unit-team proc))
+          (kind (bf-unit-kind proc))
+          )
+      (bf-count-loss team)
+      (when (and (>= team 0) (>= kind 0))
+        (let ((k (-> *bf-fallen* next)))
+          (set-time! (-> *bf-fallen* time k))
+          (set! (-> *bf-fallen* slot k) (+ (* 4 team) kind))
+          (set! (-> *bf-fallen* next) (mod (+ k 1) BF_FALLEN_MAX))
+          )
+        )
+      )
     (bf-queue-drop proc)
     )
   (none)

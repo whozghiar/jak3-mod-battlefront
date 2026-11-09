@@ -170,15 +170,16 @@
   )
 
 (defun bf-transport-next-kind ((team int))
-  "Traffic type of the unit side TEAM lacks most now (*bf-team-caps* against `bf-transport-team-count`),
-   among those with a sleeping unit of its side; -1 when it lacks none."
+  "Traffic type of the unit side TEAM lacks most now (*bf-team-caps* against `bf-transport-team-count`
+   and the units of the kind fallen less than BF_UNIT_RESPAWN ago, `bf-fallen-count`: a fallen unit's
+   place waits that long), among those with a sleeping unit of its side; -1 when it lacks none."
   (let ((now (new 'stack-no-clear 'array 'int32 4))
         (best -1)
         (gap 0)
         )
     (bf-transport-team-count team now)
     (dotimes (k BF_KIND_COUNT)
-      (let ((left (- (-> *bf-team-caps* (+ (* 4 team) k)) (-> now k))))
+      (let ((left (- (-> *bf-team-caps* (+ (* 4 team) k)) (-> now k) (bf-fallen-count team k))))
         (when (< gap left)
           (let ((type (-> *bf-kinds* k)))
             (when (bf-transport-pick type team)
@@ -230,46 +231,97 @@
 ;; The point whose ship drops each side's next unit (`bf-transport-my-turn?`), -1 to draw again.
 (define *bf-drop-turn* (new 'static 'array int32 2 -1 -1))
 
+;; Each side's point whose ship last tried and dropped nothing (no unit asleep, no room on its
+;; mesh), -1 for none: the next draw passes over it once, so a full mesh at the front does not
+;; hold back the side's every unit.
+(define *bf-drop-skip* (new 'static 'array int32 2 -1 -1))
+
 ;; Units dropped at each point, side by side (8 points a side: index 8 team + point), for the tests
 ;; (docs/modding/current_mod/battlefront_smoke.gc reads and clears it).
 (define *bf-drops-at* (new 'static 'array int32 16))
 
+(defconstant BF_DEFEND_REACH (meters 60)) ;; foes this close to a held point attack it (battlefront-city.gc BF_ZONE_REACH)
+(defconstant BF_DEFEND_SHARE 0.5)         ;; share of a side's units brought to its points under attack
+
+(defun bf-transport-draw ((team int))
+  "The point where side TEAM's next unit comes down, among its points with a ship of its own over
+   them (`*bf*` points ship), -1 for none. A point under attack (a foe within BF_DEFEND_REACH:
+   a unit, `*bf-unit-dots*`, or the player) gets BF_DEFEND_SHARE of the units, the one with the most
+   foes; the others come down at the point nearest a foe, where the fight is, as Star Wars
+   Battlefront's reinforcements come out of the command post at the front. The point in
+   `*bf-drop-skip*` is passed over while another one is there."
+  (let ((dots *bf-unit-dots*)
+        (foe? (and *target* (!= (-> *bf* team) team) (not (focus-test? *target* dead))))
+        (front -1)
+        (front-d 0.0)
+        (attacked -1)
+        (attackers 0)
+        (skip (-> *bf-drop-skip* team))
+        )
+    (set! (-> *bf-drop-skip* team) -1)
+    (dotimes (pass 2)
+      (when (< front 0)
+        (dotimes (i (-> *bf* point-count))
+          (when (and (= (-> *bf* points i owner) team)
+                     (handle->process (-> *bf* points i ship))
+                     (or (= pass 1) (!= i skip))
+                     )
+            (let ((pos (-> *bf* points i pos))
+                  (near (meters 100000))
+                  (n 0)
+                  )
+              (dotimes (d (-> dots count))
+                (when (!= (-> dots team d) team)
+                  (let ((dist (vector-vector-xz-distance (-> dots pos d) pos)))
+                    (set! near (fmin near dist))
+                    (if (< dist BF_DEFEND_REACH)
+                        (+! n 1)
+                        )
+                    )
+                  )
+                )
+              (when foe?
+                (let ((dist (vector-vector-xz-distance (-> *target* control trans) pos)))
+                  (set! near (fmin near dist))
+                  (if (< dist BF_DEFEND_REACH)
+                      (+! n 1)
+                      )
+                  )
+                )
+              (when (or (< front 0) (< near front-d))
+                (set! front i)
+                (set! front-d near)
+                )
+              (when (< attackers n)
+                (set! attacked i)
+                (set! attackers n)
+                )
+              )
+            )
+          )
+        )
+      )
+    (if (and (>= attacked 0) (< (rand-vu) BF_DEFEND_SHARE))
+        attacked
+        front
+        )
+    )
+  )
+
 (defun bf-transport-my-turn? ((this bf-transport))
-  "#t when ship THIS is over the point where its side's next unit comes down: one drawn at random
-   among the side's points with a ship of its own over them (`*bf*` points ship), again after each
-   try of that ship (`drop-unit`), so a side's units appear at all its points, at random, as Star
-   Wars Battlefront's come out of any command post. Before, every ship dropped whenever its side
-   lacked a unit, and the base's, there first and on screen sooner, brought most of them."
+  "#t when ship THIS is over the point where its side's next unit comes down (`bf-transport-draw`),
+   drawn again after each try of that ship (`drop-unit`) and when that point changed hands or lost
+   its ship."
   (let* ((team (-> this team))
          (turn (-> *bf-drop-turn* team))
          )
-    ;; no point drawn, or it changed hands or lost its ship: draw again
     (when (or (< turn 0)
               (>= turn (-> *bf* point-count))
               (!= (-> *bf* points turn owner) team)
               (not (handle->process (-> *bf* points turn ship)))
               )
-      (let ((n 0))
-        (dotimes (i (-> *bf* point-count))
-          (if (and (= (-> *bf* points i owner) team) (handle->process (-> *bf* points i ship)))
-              (+! n 1)
-              )
-          )
-        (set! turn -1)
-        (when (> n 0)
-          (let ((k (rand-vu-int-count n)))
-            (dotimes (i (-> *bf* point-count))
-              (when (and (= (-> *bf* points i owner) team) (handle->process (-> *bf* points i ship)))
-                (if (zero? k)
-                    (set! turn i)
-                    )
-                (+! k -1)
-                )
-              )
-            )
-          )
-        (set! (-> *bf-drop-turn* team) turn)
-        )
+      (set! turn (bf-transport-draw team))
+      (set! (-> *bf-drop-turn* team) turn)
       )
     (= turn (-> this point))
     )
@@ -350,6 +402,10 @@
          (set! (-> this next-drop-time) (+ (current-time) (if on-screen (seconds 1) (seconds 2))))
          )
         (else
+          ;; a unit wanted but none came down here: the side's next draw passes over this point once
+          (if (>= kind 0)
+              (set! (-> *bf-drop-skip* (-> this team)) (-> this point))
+              )
           (set! (-> this next-drop-time) (+ (current-time) (seconds 0.5)))
           )
         )

@@ -45,7 +45,40 @@
                                            ;; passed each other: 8 losses in 6 minutes)
 (defconstant BF_HATE_LOST (meters 150))    ;; a unit whose foe got this far looks again
 (defconstant BF_HATE_PLAYER (meters 50))   ;; the other side turns onto the player this close
-(defconstant BF_GUARD_RUN (* 1.5 (meters 12))) ;; a guard's run during a battle: 1.5 times the stock 12 m/s
+;; Every unit of a battle walks and runs 1.5 times as fast as the game's (`bf-city-unit-pace`): its
+;; walk and run speeds, and the ground its walk and run clips cover, both times BF_UNIT_PACE, so its
+;; legs keep the stock cadence (citizen-travel-anim plays them at its speed over that ground), the
+;; player's guard's (battlefront-player.gc BF_CLASS_PACE). The guards' run speed alone raised to
+;; 18 m/s played their run clip 1.5 times as fast as the player's; the nav control's speed-scale
+;; instead left the spiders at 8 m/s and the guards at 16 (round 22's runs).
+(defconstant BF_UNIT_PACE 1.5)
+
+;; The stock walk speed, run speed, walk clip ground and run clip ground of each kind (`bf-unit-kind`:
+;; guard.gc, flying-turret.gc, roboguard-city.gc, spydroid.gc init-enemy!), in units.
+(define *bf-unit-stock-pace* (new 'static 'array float 16
+                                  12288.0 49152.0 12288.0 34078.72
+                                  102400.0 102400.0 8192.0 16384.0
+                                  12288.0 49152.0 16384.0 26624.0
+                                  16384.0 32768.0 8192.0 16384.0
+                                  )
+  )
+
+(defun bf-city-unit-pace ((unit citizen))
+  "Unit UNIT of the battle at BF_UNIT_PACE times its kind's stock walk and run speeds and clip
+   grounds (`*bf-unit-stock-pace*`): written each time, so a unit woken again (its init sets the
+   stock values back) is paced within half a second."
+  (let ((k (bf-unit-kind unit)))
+    (when (>= k 0)
+      (let ((base (* 4 k)))
+        (set! (-> unit speed-walk) (* BF_UNIT_PACE (-> *bf-unit-stock-pace* base)))
+        (set! (-> unit speed-run) (* BF_UNIT_PACE (-> *bf-unit-stock-pace* (+ base 1))))
+        (set! (-> unit dist-walk-anim) (* BF_UNIT_PACE (-> *bf-unit-stock-pace* (+ base 2))))
+        (set! (-> unit dist-run-anim) (* BF_UNIT_PACE (-> *bf-unit-stock-pace* (+ base 3))))
+        )
+      )
+    )
+  (none)
+  )
 (defconstant BF_CONTEST_REACH (meters 250)) ;; a unit this close to a contested point goes to clear it
 (defconstant BF_ZONE_REACH (meters 60))     ;; a point's zone: the other side's units this close contest it
 (defconstant BF_ENGAGE_REACH (meters 40))   ;; a unit with a foe this close stops its march to fight
@@ -967,9 +1000,19 @@
   #f
   )
 
+(defun bf-city-walking? ((unit process))
+  "#t when UNIT walks its lanes: the citizens' 'active, or a spider robot's 'hunting, its 'active
+   while the faction manager has it at war (spydroid.gc, its 'active goes there with a nonzero
+   faction-mode): it follows its dest-point the same way. Taking 'active alone, no spider ever
+   marched to its point."
+  (and (-> unit next-state)
+       (or (= (-> unit next-state name) 'active) (= (-> unit next-state name) 'hunting))
+       )
+  )
+
 (defun bf-march-plan ((unit citizen) (team int))
   "In `bf-city-steer`: UNIT of side TEAM, with no foe in sight (`bf-city-engaged?`: it fights that
-   one first), walking its lanes ('active) more than BF_MARCH_NEAR from
+   one first), walking its lanes (`bf-city-walking?`) more than BF_MARCH_NEAR from
    its point (`bf-city-unit-goal`) in a loaded section, marches there: `*bf-march*` gets it with its
    waypoint (`bf-march-waypoint`) and its mesh now. A unit walking its lanes near its point walks
    again (its walking speed: a march runs)."
@@ -977,7 +1020,7 @@
         (goal (bf-city-unit-goal unit team))
         )
     ;; a unit with a foe in sight fights it (the stock guard's own attack), no march
-    (when (and (-> unit nav) (= (-> unit next-state name) 'active) (not (bf-city-engaged? unit)))
+    (when (and (-> unit nav) (bf-city-walking? unit) (not (bf-city-engaged? unit)))
       (cond
         ((and (>= goal 0) (< (-> w count) BF_MARCH_MAX) (-> w goal goal)
               (< BF_MARCH_NEAR (vector-vector-xz-distance (-> unit root trans) (-> *bf* points goal pos)))
@@ -1003,7 +1046,7 @@
   )
 
 (defun bf-march-apply ()
-  "Every frame of the fight: each marching unit (`*bf-march*`), still walking its lanes ('active),
+  "Every frame of the fight: each marching unit (`*bf-march*`), still walking its lanes (`bf-city-walking?`),
    runs to its waypoint: its controller's dest-point, which the citizen's 'active post gives its nav
    control as target each frame (citizen.gc), the nav control finding the way across the mesh. The
    lanes set it again at a lane's end; this puts it back the next frame. No idle stop on the way
@@ -1012,7 +1055,7 @@
   (let ((w *bf-march*))
     (dotimes (i (-> w count))
       (let ((unit (the-as citizen (handle->process (-> w unit i)))))
-        (when (and unit (= (-> unit next-state name) 'active) (-> unit nav))
+        (when (and unit (bf-city-walking? unit) (-> unit nav))
           (cond
             ((!= (-> unit nav state mesh) (-> w from i))
              (set! (-> w unit i) (the-as handle #f))
@@ -1078,10 +1121,53 @@
     )
   )
 
+(defconstant BF_ROBOT_SIGHT (meters 50)) ;; a robotguard takes a foe this close at most (`bf-city-robot-sight`)
+
+(defun bf-city-robot-sight ((robot process) (foe city-attacker-info))
+  "The battle's robotguards' attacker callback (mission-squad-control-method-13 asks it of each foe
+   it scores): a foe within BF_ROBOT_SIGHT, so a robotguard with none that near drops its foe
+   (enemy -1) and marches on (`bf-city-steer`). With the battle's 100 m sight they stood in
+   'hostile-stand for minutes, 400 to 700 m from their point, on a foe they never reached."
+  (let ((p (handle->process (-> foe proc))))
+    (the-as int (and p
+                     (type? p process-drawable)
+                     (< (vector-vector-xz-distance (-> (the-as process-drawable p) root trans)
+                                                   (-> (the-as process-drawable robot) root trans)
+                                                   )
+                        BF_ROBOT_SIGHT
+                        )
+                     )
+            )
+    )
+  )
+
+(defun bf-city-robot-free ((unit citizen))
+  "In `bf-city-steer`: robotguard UNIT of the battle sees foes within BF_ROBOT_SIGHT only
+   (`bf-city-robot-sight`), and, standing in its hostile states with no foe left
+   ('hostile, 'hostile-stand, 'reposition), walks its lanes again ('active, `go-process`): its
+   focus kept it there, on a foe it no longer had."
+  (let ((info (-> unit attacker-info)))
+    (when (and info (nonzero? info))
+      (if (!= (-> info callback) bf-city-robot-sight)
+          (set! (-> info callback) bf-city-robot-sight)
+          )
+      (when (and (not (handle->process (-> info enemy)))
+                 (-> unit next-state)
+                 (let ((st (-> unit next-state name)))
+                   (or (= st 'hostile) (= st 'hostile-stand) (= st 'reposition))
+                   )
+                 )
+        (set! (-> unit focus handle) (the-as handle #f))
+        (go-process unit (method-of-object unit active))
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-city-steer ()
-  "Twice a second, each unit of the battle: a guard's run at
-   BF_GUARD_RUN (its run clip plays by the ground it covers, citizen-travel-anim, so its legs keep
-   pace); away from its point it marches there over the nav meshes (`bf-march-plan`), and near it
+  "Twice a second, each unit of the battle: BF_UNIT_PACE times the stock speed
+   (`bf-city-unit-pace`); away from its point it marches there over the nav meshes (`bf-march-plan`), and near it
    takes its lanes with `bf-city-choose-branch` (its controller's choose-branch-callback, the stock
    random pick otherwise), and fights what it meets on the way (the attack controller). The unit
    pools are rebuilt with the stock callbacks and speeds at each end of a battle (`initialize!`
@@ -1114,8 +1200,12 @@
           (dotimes (i (-> tr active-object-count))
             (let ((proc (handle->process (-> tr active-object-list i))))
               (when (and proc (>= (bf-unit-team proc) 0))
-                (if (type? proc crimson-guard)
-                    (set! (-> (the-as crimson-guard proc) speed-run) BF_GUARD_RUN)
+                (if (type? proc citizen)
+                    (bf-city-unit-pace (the-as citizen proc))
+                    )
+                ;; roboguard-city is CTYPESC's type, unknown here: told by its name
+                (if (= (-> proc type symbol) 'roboguard-city)
+                    (bf-city-robot-free (the-as citizen proc))
                     )
                 )
               (when (and proc (type? proc citizen) (>= (bf-unit-team proc) 0))
@@ -1332,7 +1422,7 @@
 
 (defun bf-city-guard-speed ()
   "The fastest awake guard of the battle now, its nav speed (units a second), for the tests: a run
-   at BF_GUARD_RUN reaches 18 m/s."
+   at BF_UNIT_PACE times the stock 12 m/s reaches 18 m/s."
   (let ((te *traffic-engine*)
         (best 0.0)
         )

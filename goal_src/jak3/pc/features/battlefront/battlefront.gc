@@ -1407,8 +1407,36 @@
   (none)
   )
 
+;; L3 held now, and SELECT pressed with it (`bf-l3-tapped?`)
+(define *bf-l3-held?* #f)
+(define *bf-l3-select?* #f)
+
+(defun bf-l3-tapped? ()
+  "Every frame of the director: #t the frame L3 lets go after a press with no SELECT (L3 + SELECT
+   opens the Mods menu, mods-menu.gc), else #f."
+  (let ((held? (cpad-hold? 0 l3))
+        (tap? #f)
+        )
+    (cond
+      (held?
+       (if (not *bf-l3-held?*)
+           (set! *bf-l3-select?* #f)
+           )
+       (if (cpad-hold? 0 select)
+           (set! *bf-l3-select?* #t)
+           )
+       )
+      (*bf-l3-held?*
+       (set! tap? (not *bf-l3-select?*))
+       )
+      )
+    (set! *bf-l3-held?* held?)
+    tap?
+    )
+  )
+
 (defun bf-draw-overlay ((buf dma-buffer))
-  "R3 in a fight (`*bf*` overlay?): the player's kills and deaths where the game shows its orb and
+  "L3 in a fight (`*bf*` overlay?): the player's kills and deaths where the game shows its orb and
    skull gem counters (hud-classes.gc hud-skullgem 150 and hud-skill 270 units down, on the left),
    and the whole city's map, live, with the points and the units (`bf-draw-city-map`)."
   (bf-draw-box buf 14 118 104 186)
@@ -1420,13 +1448,13 @@
   (clear *bf-text*)
   (format *bf-text* "~D" (-> *bf* deaths))
   (bf-draw-text buf *bf-text* 66.0 258.0 1.0 (font-color red) #t)
-  (bf-draw-text buf (bf-tr "R3: close" "R3 : fermer") 373.0 360.0 0.4 (font-color default) #t)
+  (bf-draw-text buf (bf-tr "L3: close" "L3 : fermer") 373.0 360.0 0.4 (font-color default) #t)
   (bf-draw-city-map buf (-> *bf* zone) -1)
   (none)
   )
 
 (defbehavior bf-draw-hud bf-director ()
-  "The reserves (`bf-draw-reserves`), the R3 overlay (`bf-draw-overlay`, the game's minimap hidden
+  "The reserves (`bf-draw-reserves`), the L3 overlay (`bf-draw-overlay`, the game's minimap hidden
    meanwhile) or the respawn page, the
    warnings of the fight, the countdown of a dead player, and the crosshair. The class's gun and ammo are in the stock gun HUD
    (hud-gun `update-values!` and `draw` above)."
@@ -1441,7 +1469,7 @@
       ((>= (-> *bf* respawn-pick) 0)
        (bf-draw-respawn-pick buf)
        )
-      ;; R3: the kills, the deaths and the whole map (`bf-draw-overlay`)
+      ;; L3: the kills, the deaths and the whole map (`bf-draw-overlay`)
       ((-> *bf* overlay?)
        (bf-draw-overlay buf)
        )
@@ -1620,8 +1648,8 @@
         ;; (ctywide-obs.gc parking-spot)
         (set-setting! 'airlock #f 0.0 0)
         (set-setting! 'disable-parking-spots? #t 0.0 0)
-        ;; R3 shows the battle's overlay (`bf-draw-overlay`), not the stock first-person look
-        ;; around (logic-target.gc)
+        ;; no stock first-person look around on R3 (logic-target.gc): the camera is the class's
+        ;; over the shoulder; L3 shows the battle's overlay (`bf-draw-overlay`)
         (set-setting! 'allow-look-around #f 0.0 0)
         (apply-settings *setting-control*)
         (bf-avatar-kill)
@@ -2079,15 +2107,32 @@
   (none)
   )
 
+;; The fact the dead units' pickups are born with: gone BF_DROP_LIFE after they appear, wherever
+;; Jak is (collectables.gc initialize-options: without no-distance-check-fadeout a pickup only
+;; fades with Jak over 50 m away). Its process stays 0: birth-pickup-at-point reads the entity of a
+;; nonzero one.
+(define *bf-drop-fact* (new 'static 'fact-info
+                            :options (actor-option fade-out no-distance-check-fadeout)
+                            :fade-time BF_DROP_LIFE
+                            )
+  )
+
 (defbehavior bf-spawn-drops bf-director ()
   "Spawn the pickups the dead units left (battlefront-h.gc `bf-queue-drop`): the stock ammo, health
-   and dark eco pickups, which give Jak ammo and health the stock way. Dark eco comes as 3 pills (6
-   units), a full jetpack's worth (battlefront-player.gc BF_DARK_FUEL)."
+   and dark eco pickups, which give Jak ammo and health the stock way, each gone BF_DROP_LIFE after
+   it appears (`*bf-drop-fact*`). Dark eco comes as 3 pills (6 units), a full jetpack's worth
+   (battlefront-player.gc BF_DARK_FUEL)."
   (dotimes (i (-> *bf* drop-count))
     (let ((pos (vector-copy! (new 'stack-no-clear 'vector) (-> *bf* drop-pos i))))
       (+! (-> pos y) (meters 1))
       (let ((kind (the-as pickup-type (-> *bf* drop-kind i))))
-        (birth-pickup-at-point pos kind (if (= kind (pickup-type eco-pill-dark)) 6.0 1.0) #t *entity-pool* (the-as fact-info #f))
+        (let ((pp (birth-pickup-at-point pos kind (if (= kind (pickup-type eco-pill-dark)) 6.0 1.0) #t *entity-pool* *bf-drop-fact*)))
+          ;; an ammo pickup takes no fade time from its fact (collectables.gc initialize-ammo-by-other:
+          ;; 15 s): set on the one born
+          (if (and pp (nonzero? pp) (-> pp 0) (type? (-> pp 0) collectable))
+              (set! (-> (the-as collectable (-> pp 0)) fadeout-timeout) BF_DROP_LIFE)
+              )
+          )
         )
       )
     )
@@ -2554,8 +2599,9 @@
          (if (and *target* (!= (-> *bf* class) BF_CLASS_JAK) (not (bf-avatar-alive?)))
              (logior! (-> *target* draw status) (draw-control-status no-draw))
              )
-         ;; R3: the kills, the deaths and the whole map, on and off (`bf-draw-overlay`)
-         (when (and (cpad-pressed? 0 r3) (= (-> self page) BF_PAGE_NONE) (< (-> *bf* respawn-pick) 0))
+         ;; L3: the kills, the deaths and the whole map, on and off (`bf-draw-overlay`), as L3
+         ;; lets go, unless SELECT came with it (L3 + SELECT opens the Mods menu)
+         (when (and (bf-l3-tapped?) (= (-> self page) BF_PAGE_NONE) (< (-> *bf* respawn-pick) 0))
            (set! (-> *bf* overlay?) (not (-> *bf* overlay?)))
            ;; the game's minimap at the bottom right goes while the whole map is up
            (if (-> *bf* overlay?)
