@@ -1173,8 +1173,9 @@
 (defun bf-drop-roll ()
   "A pickup's kind, its index in `*bf-drop-types*`: dark eco 30 %, ammo 40 % (yellow 60, red 30,
    blue 10 % of it), health 30 % (the author's shares), exact over each bag of 10 (`bf-bag-draw`).
-   A draw at each pickup gave health 50 times in 108 over three battles, from either of the game's
-   generators, though the same draws gave the right shares away from the game."
+   A draw at each pickup gave health 50 times in 108 over three battles, with rand-vu and then
+   rand-uint31-gen, whose code gives 30 % in 200000 draws simulated away from the game: the cause
+   was not found, the bags make the shares exact whatever it is."
   (case (bf-bag-draw (-> *bf-drop-bags* kind) *bf-drop-kind-full* 3)
     ((0) 0)
     ((1) (+ 1 (bf-bag-draw (-> *bf-drop-bags* ammo) *bf-drop-ammo-full* 3)))
