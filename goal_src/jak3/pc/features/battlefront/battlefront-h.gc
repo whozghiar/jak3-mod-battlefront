@@ -397,7 +397,7 @@
 ;; lit (~3L) for the tazer, the down part alone for the rifle.
 (define *bf-guard-help*
   (new 'static 'boxed-array :type string
-    "24 HP. Rifle 10/20, 5 grenades"
+    "24 HP. Rifle 20/100, 5 grenades"
     "<PAD_R1> Fire    <PAD_SQUARE> Rifle butt"
     "<PAD_L1> Crouch: steadier aim"
     "<PAD_L2> + <PAD_ANALOG_ANY> Dodge    <PAD_R2> + <PAD_ANALOG_ANY> Roll"
@@ -409,7 +409,7 @@
 
 (define *bf-guard-help-fr*
   (new 'static 'boxed-array :type string
-    "24 PV. Fusil 10/20, 5 grenades"
+    "24 PV. Fusil 20/100, 5 grenades"
     "<PAD_R1> Tir    <PAD_SQUARE> Crosse"
     "<PAD_L1> S'accroupir : tir plus précis"
     "<PAD_L2> + <PAD_ANALOG_ANY> Esquive    <PAD_R2> + <PAD_ANALOG_ANY> Roulade"
@@ -423,7 +423,7 @@
   (new 'static 'boxed-array :type string
     "18 HP. Flies without limit."
     "<PAD_X> Up    <PAD_CIRCLE> Down"
-    "<PAD_R2> + <PAD_ANALOG_ANY> Boost"
+    "<PAD_R2> + <PAD_ANALOG_ANY> Boost, 10 s gauge"
     "Dark eco refills the boost."
     "<PAD_R1> 2 shots    <PAD_SQUARE> Dive kick"
     )
@@ -433,7 +433,7 @@
   (new 'static 'boxed-array :type string
     "18 PV. Vol sans limite."
     "<PAD_X> Monter    <PAD_CIRCLE> Descendre"
-    "<PAD_R2> + <PAD_ANALOG_ANY> Accélérer"
+    "<PAD_R2> + <PAD_ANALOG_ANY> Accélérer, jauge de 10 s"
     "L'éco noire recharge la jauge."
     "<PAD_R1> Deux tirs    <PAD_SQUARE> Piqué"
     )
@@ -1122,13 +1122,73 @@
   (none)
   )
 
+;; The pickups left by the fallen units since the battle began, by kind, for the tests
+;; (docs/modding/current_mod/battlefront_smoke.gc): dark eco, yellow ammo, red ammo, blue ammo, health.
+(define *bf-drop-kinds* (new 'static 'array int32 5))
+
+(define *bf-drop-types* (new 'static 'array uint32 5
+                           (pickup-type eco-pill-dark) (pickup-type ammo-yellow) (pickup-type ammo-red)
+                           (pickup-type ammo-blue) (pickup-type health)
+                           )
+        )
+
+(deftype bf-drop-bags (structure)
+  "What is left in the pickups' two bags (`bf-drop-roll`): KIND, of 10 pickups (dark eco, ammo,
+   health), and AMMO, of 10 ammo pickups (yellow, red, blue)."
+  ((kind  int32 3)
+   (ammo  int32 3)
+   )
+  )
+
+(define *bf-drop-bags* (new 'static 'bf-drop-bags))
+(define *bf-drop-kind-full* (new 'static 'array int32 3 3 4 3)) ;; dark eco, ammo, health in 10
+(define *bf-drop-ammo-full* (new 'static 'array int32 3 6 3 1)) ;; yellow, red, blue in 10 ammo
+
+(defun bf-bag-draw ((bag (pointer int32)) (full (pointer int32)) (n int))
+  "One of the N kinds of BAG (what is left of each), weighted by what is left, taken out; the bag
+   refilled from FULL when empty. Returns the kind's index."
+  (let ((left 0))
+    (dotimes (i n)
+      (+! left (-> bag i))
+      )
+    (when (<= left 0)
+      (dotimes (i n)
+        (set! (-> bag i) (-> full i))
+        (+! left (-> full i))
+        )
+      )
+    (let ((r (the int (mod (rand-uint31-gen *random-generator*) (the uint left))))
+          (k 0)
+          )
+      (while (>= r (-> bag k))
+        (set! r (- r (-> bag k)))
+        (+! k 1)
+        )
+      (+! (-> bag k) -1)
+      k
+      )
+    )
+  )
+
+(defun bf-drop-roll ()
+  "A pickup's kind, its index in `*bf-drop-types*`: dark eco 30 %, ammo 40 % (yellow 60, red 30,
+   blue 10 % of it), health 30 % (the author's shares), exact over each bag of 10 (`bf-bag-draw`).
+   A draw at each pickup gave health 50 times in 108 over three battles, from either of the game's
+   generators, though the same draws gave the right shares away from the game."
+  (case (bf-bag-draw (-> *bf-drop-bags* kind) *bf-drop-kind-full* 3)
+    ((0) 0)
+    ((1) (+ 1 (bf-bag-draw (-> *bf-drop-bags* ammo) *bf-drop-ammo-full* 3)))
+    (else 4)
+    )
+  )
+
 (defun bf-queue-drop ((proc process))
   "Maybe leave a pickup where PROC died: 6 of every 10 fallen units leave one, in a random order (a
-   bag of 10 deaths holding 6 pickups: 60 % exactly, where a chance at each death gave less in two
-   long battles), 15 in 30 yellow ammo (the rifle's reserve), 8 red (grenades), 4 health, 3 dark eco
-   (the jetpack's boost); no blue ammo: the tazer needs none. Each one goes 10 s after it appears
-   (`bf-spawn-drops`). Queued for the director, which spawns it in its own process: this runs on
-   the traffic manager's small stack."
+   bag of 10 deaths holding 6, where a chance at each death gave less in two long battles): dark eco
+   (the jetpack's boost) 30 %, ammo 40 % (of it yellow, the rifle's reserve, 60 %, red, grenades,
+   30 %, blue, which recharges the tazer at once, 10 %), health 30 % (the author's shares). Each one
+   goes 10 s after it appears (`bf-spawn-drops`). Queued for the director, which spawns it in its
+   own process: this runs on the traffic manager's small stack."
   (when (and (type? proc process-drawable) (< (-> *bf* drop-count) BF_DROP_MAX))
     (when (<= (-> *bf* bag-deaths) 0)
       (set! (-> *bf* bag-deaths) 10)
@@ -1138,17 +1198,11 @@
       (+! (-> *bf* bag-deaths) -1)
       (when drop?
         (+! (-> *bf* bag-drops) -1)
-        (let* ((roll (rand-vu-int-count 30))
-               (kind (cond
-                       ((< roll 15) (pickup-type ammo-yellow))
-                       ((< roll 23) (pickup-type ammo-red))
-                       ((< roll 27) (pickup-type health))
-                       (else (pickup-type eco-pill-dark))
-                       )
-                     )
-               (i (-> *bf* drop-count))
-               )
-          (set! (-> *bf* drop-kind i) (the-as int kind))
+        (let ((k (bf-drop-roll))
+              (i (-> *bf* drop-count))
+              )
+          (set! (-> *bf* drop-kind i) (the-as int (-> *bf-drop-types* k)))
+          (+! (-> *bf-drop-kinds* k) 1)
           (vector-copy! (-> *bf* drop-pos i) (-> (the-as process-drawable proc) root trans))
           (+! (-> *bf* drop-count) 1)
           )

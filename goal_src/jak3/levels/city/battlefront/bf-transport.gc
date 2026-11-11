@@ -24,8 +24,8 @@
   the head of the pool, the one the traffic wakes next (`bf-transport-pick`).
 
   Invulnerable, as Jak 2's: penetrated-by none, no 'attack. The engine sounds are Jak 2's, silent in
-  Jak 3. Only the ships over the sides' bases are seen: over a control point the ship is a ghost
-  (`ghost?`: not drawn, no collision, no engine sound), and its units come out of the air.
+  Jak 3. Only the sides' bases have a ship: at a control point a side holds, its units appear on
+  the nav meshes around it (battlefront-city.gc `bf-city-spawn-near`).
 |#
 
 ;; DECOMP BEGINS
@@ -70,7 +70,6 @@
    (drop-at             time-frame 8)   ;; when each was dropped
    (turn-time           time-frame)     ;; its last turn for a guard waiting at the hatch
    (want-quat           quaternion :inline) ;; the way it turns to
-   (ghost?              symbol)         ;; over a control point: not drawn, no collision, silent
    )
   (:state-methods
     come-down
@@ -245,74 +244,69 @@
 
 (defconstant BF_DEFEND_REACH (meters 60))  ;; foes this close to a held point attack it (battlefront-city.gc BF_ZONE_REACH)
 (defconstant BF_DEFEND_SHARE 0.5)          ;; share of a side's units brought to its points under attack
-(defconstant BF_CROWD_REACH (meters 120))  ;; units this close to a point count for its crowd
-(defconstant BF_CROWD_SHARE 0.75)          ;; share of the rest brought to the point with the largest crowd
+
+(defun bf-transport-point-ok? ((team int) (i int))
+  "#t when side TEAM's units can come down at point I: its base with its ship over it, or a control
+   point it holds in a loaded section (battlefront.gc `bf-point-live?`), where they appear on the
+   nav meshes around it (battlefront-city.gc `bf-city-spawn-near`)."
+  (let ((pt (-> *bf* points i)))
+    (and (= (-> pt owner) team)
+         (if (-> pt base?)
+             (handle->process (-> pt ship))
+             (bf-point-live? pt)
+             )
+         )
+    )
+  )
 
 (defun bf-transport-draw ((team int))
-  "The point where side TEAM's next units come down, among its points with a ship of its own over
-   them (`*bf*` points ship), -1 for none. A point under attack (a foe within BF_DEFEND_REACH: a
-   unit, `*bf-unit-dots*`, or the player) gets BF_DEFEND_SHARE of the units, the one with the most
-   foes; of the rest, BF_CROWD_SHARE come down at the point with the most units of both sides
-   within BF_CROWD_REACH (the nearest a foe when none has any: the front), where the fight is, the
-   others at one of its points drawn at random. The point in `*bf-drop-skip*` is passed over while
-   another one is there."
+  "The point where side TEAM's next units come down (`bf-transport-point-ok?`), -1 for none. A point
+   under attack (a foe within BF_DEFEND_REACH: a unit, `*bf-unit-dots*`, or the player) gets
+   BF_DEFEND_SHARE of the units, the one with the most foes; the rest come down at its most advanced
+   control point, the nearest the other side's base, its base while it holds none. The point in
+   `*bf-drop-skip*` is passed over while another one is there."
   (let ((dots *bf-unit-dots*)
         (foe? (and *target* (!= (-> *bf* team) team) (not (focus-test? *target* dead))))
-        (crowd -1)
-        (crowd-n 0)
-        (front -1)
-        (front-d 0.0)
+        (their-base (-> *bf* points (bf-other-team team) pos))
+        (ahead -1)
+        (ahead-d 0.0)
+        (base -1)
         (attacked -1)
         (attackers 0)
-        (count 0)
         (skip (-> *bf-drop-skip* team))
         )
     (set! (-> *bf-drop-skip* team) -1)
     (dotimes (pass 2)
-      (when (< front 0)
+      (when (and (< ahead 0) (< base 0))
         (dotimes (i (-> *bf* point-count))
-          (when (and (= (-> *bf* points i owner) team)
-                     (handle->process (-> *bf* points i ship))
-                     (or (= pass 1) (!= i skip))
-                     )
+          (when (and (bf-transport-point-ok? team i) (or (= pass 1) (!= i skip)))
             (let ((pos (-> *bf* points i pos))
-                  (near (meters 100000))
                   (n 0)
-                  (crowded 0)
                   )
-              (+! count 1)
               (dotimes (d (-> dots count))
-                (let ((dist (vector-vector-xz-distance (-> dots pos d) pos)))
-                  (if (< dist BF_CROWD_REACH)
-                      (+! crowded 1)
-                      )
-                  (when (!= (-> dots team d) team)
-                    (set! near (fmin near dist))
-                    (if (< dist BF_DEFEND_REACH)
-                        (+! n 1)
-                        )
+                (if (and (!= (-> dots team d) team) (< (vector-vector-xz-distance (-> dots pos d) pos) BF_DEFEND_REACH))
+                    (+! n 1)
                     )
+                )
+              (if (and foe? (< (vector-vector-xz-distance (-> *target* control trans) pos) BF_DEFEND_REACH))
+                  (+! n 1)
                   )
-                )
-              (when foe?
-                (let ((dist (vector-vector-xz-distance (-> *target* control trans) pos)))
-                  (set! near (fmin near dist))
-                  (if (< dist BF_DEFEND_REACH)
-                      (+! n 1)
-                      )
-                  )
-                )
-              (when (or (< front 0) (< near front-d))
-                (set! front i)
-                (set! front-d near)
-                )
-              (when (< crowd-n crowded)
-                (set! crowd i)
-                (set! crowd-n crowded)
-                )
               (when (< attackers n)
                 (set! attacked i)
                 (set! attackers n)
+                )
+              (cond
+                ((-> *bf* points i base?)
+                 (set! base i)
+                 )
+                (else
+                  (let ((d (vector-vector-xz-distance pos their-base)))
+                    (when (or (< ahead 0) (< d ahead-d))
+                      (set! ahead i)
+                      (set! ahead-d d)
+                      )
+                    )
+                  )
                 )
               )
             )
@@ -323,46 +317,32 @@
       ((and (>= attacked 0) (< (rand-vu) BF_DEFEND_SHARE))
        attacked
        )
-      ((< (rand-vu) BF_CROWD_SHARE)
-       (if (>= crowd 0) crowd front)
+      ((>= ahead 0)
+       ahead
        )
       (else
-        ;; one of its points at random
-        (let ((k (rand-vu-int-count (max 1 count)))
-              (pick front)
-              )
-          (dotimes (i (-> *bf* point-count))
-            (when (and (= (-> *bf* points i owner) team) (handle->process (-> *bf* points i ship)))
-              (if (zero? k)
-                  (set! pick i)
-                  )
-              (+! k -1)
-              )
-            )
-          pick
-          )
+        base
         )
       )
     )
   )
 
-(defun bf-transport-my-turn? ((this bf-transport))
-  "#t when ship THIS is over the point where its side's next unit comes down (`bf-transport-draw`),
-   drawn again after each try of that ship (`drop-unit`) and when that point changed hands or lost
-   its ship."
-  (let* ((team (-> this team))
-         (turn (-> *bf-drop-turn* team))
-         )
-    (when (or (< turn 0)
-              (>= turn (-> *bf* point-count))
-              (!= (-> *bf* points turn owner) team)
-              (not (handle->process (-> *bf* points turn ship)))
-              )
+(defun bf-transport-drop-point ((team int))
+  "The point side TEAM's next units come down at (`*bf-drop-turn*`), drawn again (`bf-transport-draw`)
+   when there is none or it no longer serves (`bf-transport-point-ok?`). -1 for none."
+  (let ((turn (-> *bf-drop-turn* team)))
+    (when (or (< turn 0) (>= turn (-> *bf* point-count)) (not (bf-transport-point-ok? team turn)))
       (set! turn (bf-transport-draw team))
       (set! (-> *bf-drop-turn* team) turn)
       )
-    (= turn (-> this point))
+    turn
     )
+  )
+
+(defun bf-transport-my-turn? ((this bf-transport))
+  "#t when ship THIS (over its side's base) is where its side's next units come down
+   (`bf-transport-drop-point`)."
+  (= (bf-transport-drop-point (-> this team)) (-> this point))
   )
 
 ;; The kind the last `bf-transport-wake` wanted, -1 for none.
@@ -683,10 +663,7 @@
         )
     (set! (-> spec volume) (the int (* 1024.0 height-k)))
     (set! (-> spec pitch-mod) (the int (* 1524.0 speed-k)))
-    ;; a ghost ship is silent
-    (if (not (-> this ghost?))
-        (sound-play-by-spec spec (-> this ambient-sound-id) (-> this root trans))
-        )
+    (sound-play-by-spec spec (-> this ambient-sound-id) (-> this root trans))
     )
   (none)
   )
@@ -920,16 +897,6 @@
   (set-time! (-> self turn-time))
   (set! (-> self level) lev)
   (initialize-skeleton self (if (= team BF_TEAM_FF) *bf-transport-blue-sg* *bf-transport-red-sg*) (the-as pair 0))
-  ;; a ship over a control point is a ghost: its units come out of the air (the author's wish: a
-  ;; transport over each side's starting base only)
-  (set! (-> self ghost?) (not (-> *bf* points point base?)))
-  (when (-> self ghost?)
-    (logior! (-> self draw status) (draw-control-status no-draw))
-    (let ((rp (-> self root root-prim)))
-      (set! (-> rp prim-core collide-as) (collide-spec))
-      (set! (-> rp prim-core collide-with) (collide-spec))
-      )
-    )
   (set! (-> self y-ground) (-> self root trans y))
   (set! (-> self y-dest)
         (fmax (+ (-> self y-ground) BF_TRANSPORT_HOVER_MIN)

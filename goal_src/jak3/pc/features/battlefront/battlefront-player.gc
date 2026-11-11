@@ -48,7 +48,7 @@
 (defconstant BF_JET_LIFT (meters 7))        ;; upward speed while the jetpack climbs (X)
 (defconstant BF_JET_DROP (meters 6))        ;; downward speed while it comes down (Circle)
 (defconstant BF_JET_FLOAT (meters 0.8))     ;; the jetpack model floats this high above Jak
-(defconstant BF_JET_BOOST_TIME 3.0)         ;; seconds of jetpack boost (R2) in a full gauge
+(defconstant BF_JET_BOOST_TIME 10.0)        ;; seconds of jetpack boost (R2) in a full gauge (3 before round 24)
 (defconstant BF_JET_BOOST_SPEED (meters 24)) ;; its speed, toward the left stick or ahead
 (defconstant BF_GAUGE_REFILL 10.0)          ;; seconds an empty blue eco gauge takes to refill
 (defconstant BF_BOOST_TIME 10.0)            ;; seconds of spider sprint in a full blue eco gauge
@@ -96,8 +96,8 @@
 (defconstant BF_SPREAD_MOVE (degrees 3.5))
 (defconstant BF_ROLL_SPIN (seconds 0.45))   ;; a roll turns the model head over heels once in this time
 (defconstant BF_DARK_FUEL 6.0)              ;; dark eco for a full jetpack boost (one drop: 3 pills of 2)
-(defconstant BF_MAG_RIFLE 10)               ;; rifle magazine
-(defconstant BF_RESERVE_RIFLE 20.0)         ;; rifle rounds carried besides the magazine (Jak's yellow ammo)
+(defconstant BF_MAG_RIFLE 20)               ;; rifle magazine (10 before round 24)
+(defconstant BF_RESERVE_RIFLE 100.0)        ;; rifle rounds carried besides the magazine, 5 magazines (Jak's yellow ammo; 20 before)
 (defconstant BF_GRENADES 5.0)               ;; grenades carried (Jak's red ammo), no magazine
 (defconstant BF_SPIDER_WALK (meters 4))     ;; ground the spider's walk and run clips cover at rate 1
 (defconstant BF_SPIDER_RUN (meters 8))      ;; (spydroid.gc walk-travel-speed, run-travel-speed)
@@ -1512,6 +1512,12 @@
             (set! (-> self fuel) (fmin 1.0 (+ (-> self fuel) (/ dark BF_DARK_FUEL))))
             )
         )
+      )
+    ;; blue ammo (a dead unit's pickup, battlefront-h.gc `bf-queue-drop`) recharges the tazer at
+    ;; once; the battle sets Jak's own aside at its start
+    (when (< 0.0 (-> *game-info* gun-ammo BF_AMMO_BLUE))
+      (set! (-> *game-info* gun-ammo BF_AMMO_BLUE) 0.0)
+      (set! (-> *bf* tazer-time) 0)
       )
     ;; the class's health cap: a health pickup adds to Jak's own, whose maximum is a full 24 points
     ;; (`bf-class-health`)

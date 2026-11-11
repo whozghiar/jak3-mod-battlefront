@@ -236,11 +236,112 @@
   (none)
   )
 
+;; A foe a wall hides from a unit is passed over this long (`bf-city-sees?`, `bf-city-foe-ok?`).
+(defconstant BF_SIGHT_HOLD (seconds 3))
+(defconstant BF_SIGHT_TRIES 3) ;; hidden foes a unit passes over in one look before it takes none
+(defconstant BF_ROBOT_SIGHT (meters 50)) ;; a robotguard takes a foe this close at most
+
+(deftype bf-sight (structure)
+  "The foes walls hid from each attacker of Haven City's attack controller (4 slots for its
+   attacker index), and when (`bf-city-hide!`); BLIND set when its last look found only hidden
+   foes: it takes none until its next look (`bf-city-retarget`)."
+  ((foe   handle     512)
+   (time  time-frame 512)
+   (next  int8       128)
+   (blind int8       128)
+   )
+  )
+
+(define *bf-sight* (new 'static 'bf-sight))
+
+;; Foes a wall hid since the battle began, for the tests (docs/modding/current_mod/battlefront_smoke.gc).
+(define *bf-sight-count* (new 'static 'array int32 1 0))
+
+(defun bf-city-sees? ((me process-drawable) (foe process-drawable))
+  "#t when no scenery stands between ME's eyes (1.6 m up) and FOE's middle (1.2 m up): a thin probe
+   of the background along the line. Units took foes through the thick walls between the
+   Industrial Zone and the Slums, and fired into them (the author's play)."
+  (let ((cq (new 'stack-no-clear 'collide-query)))
+    (vector-copy! (-> cq start-pos) (-> me root trans))
+    (+! (-> cq start-pos y) (meters 1.6))
+    (vector-! (-> cq move-dist) (-> foe root trans) (-> me root trans))
+    (+! (-> cq move-dist y) (meters -0.4))
+    (set! (-> cq radius) (meters 0.2))
+    (set! (-> cq collide-with) (collide-spec backgnd))
+    (set! (-> cq ignore-process0) #f)
+    (set! (-> cq ignore-process1) #f)
+    (set! (-> cq ignore-pat) (new 'static 'pat-surface :noentity #x1 :nojak #x1 :probe #x1 :noendlessfall #x1 :board #x1))
+    (set! (-> cq action-mask) (collide-action solid))
+    (< (fill-and-probe-using-line-sphere *collide-cache* cq) 0.0)
+    )
+  )
+
+(defun bf-city-hide! ((k int) (foe handle))
+  "Attacker K (its index in the controller) cannot see FOE: passed over for BF_SIGHT_HOLD."
+  (when (and (>= k 0) (< k 128))
+    (let ((slot (+ (* 4 k) (-> *bf-sight* next k))))
+      (set! (-> *bf-sight* foe slot) foe)
+      (set-time! (-> *bf-sight* time slot))
+      (set! (-> *bf-sight* next k) (logand (+ (-> *bf-sight* next k) 1) 3))
+      )
+    )
+  (none)
+  )
+
+(defun bf-city-foe-ok? ((me process) (foe city-attacker-info))
+  "The battle's units' attacker callback (mission-squad-control-method-13 asks it of each foe it
+   scores): none while it is blind (its last look found only foes behind walls), no foe a wall hid
+   from it in the last BF_SIGHT_HOLD (`bf-city-hide!`), and for a
+   robotguard none beyond BF_ROBOT_SIGHT (with the battle's 100 m sight the robotguards stood in
+   'hostile-stand for minutes, 400 to 700 m from their point, on a foe they never reached). #f
+   drops the foe, anything else keeps it."
+  (let ((p (handle->process (-> foe proc)))
+        (info (if (and me (type? me citizen))
+                  (-> (the-as citizen me) attacker-info)
+                  )
+              )
+        (ok? (and me #t))
+        )
+    (when (and info (nonzero? info))
+      (let ((k (-> info self-index)))
+        (when (and (>= k 0) (< k 128))
+          (if (nonzero? (-> *bf-sight* blind k))
+              (set! ok? #f)
+              )
+          (dotimes (j 4)
+            (if (and (= (-> *bf-sight* foe (+ (* 4 k) j)) (-> foe proc))
+                     (not (time-elapsed? (-> *bf-sight* time (+ (* 4 k) j)) BF_SIGHT_HOLD))
+                     )
+                (set! ok? #f)
+                )
+            )
+          )
+        )
+      )
+    (the-as int (and ok?
+                     p
+                     (type? p process-drawable)
+                     (or (!= (-> me type symbol) 'roboguard-city)
+                         (< (vector-vector-xz-distance (-> (the-as process-drawable p) root trans)
+                                                       (-> (the-as process-drawable me) root trans)
+                                                       )
+                            BF_ROBOT_SIGHT
+                            )
+                         )
+                     )
+            )
+    )
+  )
+
 (defun bf-city-retarget ()
   "Twice a second every unit of the battle looks again for a target (mission-squad-control-method-13,
    the controller's own choice: the battle's hatred scores a foe by its distance, 0 beyond
    BF_HATE_REACH, and its current foe twice): the units attack what they see, a foe near enough
-   instead of one far away, and a unit with no foe that near goes on to its point. A unit of the other side within BF_HATE_PLAYER of the player, its foe
+   instead of one far away, and a unit with no foe that near goes on to its point. A foe a wall
+   hides from the unit (`bf-city-sees?`) is passed over (`bf-city-hide!`), another one picked; after
+   BF_SIGHT_TRIES hidden ones the unit takes none until its next look and goes on to its point (in
+   the author's play, units in the Industrial Zone fired into a thick wall at foes in the Slums
+   behind it, a second foe as hidden as the first). A unit of the other side within BF_HATE_PLAYER of the player, its foe
    farther than him, turns onto him (the player's hatred); a unit of the player's side never keeps
    him as its foe."
   (set! (-> *bf-engaged* count) 0)
@@ -255,6 +356,10 @@
                      (!= i jak)
                      (>= (bf-ctt-team (-> info self-type)) 0)
                      )
+            ;; a new look: the unit sees again (`bf-city-foe-ok?`)
+            (if (< i 128)
+                (set! (-> *bf-sight* blind i) 0)
+                )
             (let* ((pos (-> ctrl attacker-cache data i pos))
                    (foe (-> info enemy-index))
                    (foe-dist (if (>= foe 0)
@@ -279,6 +384,37 @@
                       )
                   (mission-squad-control-method-13 ctrl info)
                   )
+              ;; a foe behind a wall: passed over, another one picked (`bf-city-foe-ok?`), up to
+              ;; BF_SIGHT_TRIES; then none until the next look
+              (let ((tries 0))
+                (while (and (< tries BF_SIGHT_TRIES) (>= (-> info enemy-index) 0))
+                  (let ((me (handle->process (-> info proc)))
+                        (them (handle->process (-> ctrl attackers data (-> info enemy-index) proc)))
+                        )
+                    (cond
+                      ((and me them (type? me process-drawable) (type? them process-drawable)
+                            (not (bf-city-sees? (the-as process-drawable me) (the-as process-drawable them)))
+                            )
+                       (bf-city-hide! i (-> ctrl attackers data (-> info enemy-index) proc))
+                       (+! (-> *bf-sight-count* 0) 1)
+                       (+! tries 1)
+                       ;; none left in sight: blind until the next look, unless it is in the middle
+                       ;; of an attack (the stock's lock-focus); its foe gone then, the game crashed
+                       ;; twice in three runs
+                       (if (and (= tries BF_SIGHT_TRIES) (< i 128) (type? me enemy)
+                                (not (logtest? (-> (the-as enemy me) enemy-flags) (enemy-flag lock-focus)))
+                                )
+                           (set! (-> *bf-sight* blind i) 1)
+                           )
+                       (mission-squad-control-method-13 ctrl info)
+                       )
+                      (else
+                        (set! tries BF_SIGHT_TRIES)
+                        )
+                      )
+                    )
+                  )
+                )
               ;; a foe in sight now: the unit fights it, no march (`bf-march-plan`)
               (let ((nf (-> info enemy-index)))
                 (when (and (>= nf 0)
@@ -411,8 +547,9 @@
    - not moved yet: onto the open ground nearest it (bf-transport.gc `bf-transport-spot`: ground,
      a nav mesh, nothing above up to 60 m), so the point stands in the open and its ship hovers
      right over it, through no roof or bridge;
-   - held: a troop transport of its holder stationed over it, its side's place to bring units
-     (bf-transport.gc: it drops them while the side lacks some, and stays);
+   - a base: its side's troop transport stationed over it, its side's place to bring units
+     (bf-transport.gc: it drops them while the side lacks some, and stays); a control point gets no
+     ship: its holder's units appear on the nav meshes around it (`bf-city-spawn-near`);
    - taken by the other side: its ship leaves (`'leave`), and the new holder's comes once it has
      gone (`old-ship`).
    A point's ship leaves too when its section unloads. The ships are the director's children."
@@ -437,7 +574,7 @@
              (set! (-> pt ship) (the-as handle #f))
              (format 0 "battlefront: the ship over point ~D leaves~%" i)
              )
-            ((and (not ship) live? (>= (-> pt owner) 0) (not (handle->process (-> pt old-ship))))
+            ((and (not ship) live? (-> pt base?) (>= (-> pt owner) 0) (not (handle->process (-> pt old-ship))))
              (when (bf-transport-spot (-> pt pos) *bf-city-spot*)
                (let* ((hatch (bf-city-hatch-dir *bf-city-spot*))
                       (new-ship (bf-transport-spawn parent *bf-city-spot* (-> pt owner) i hatch))
@@ -1204,36 +1341,13 @@
     )
   )
 
-(defconstant BF_ROBOT_SIGHT (meters 50)) ;; a robotguard takes a foe this close at most (`bf-city-robot-sight`)
-
-(defun bf-city-robot-sight ((robot process) (foe city-attacker-info))
-  "The battle's robotguards' attacker callback (mission-squad-control-method-13 asks it of each foe
-   it scores): a foe within BF_ROBOT_SIGHT, so a robotguard with none that near drops its foe
-   (enemy -1) and marches on (`bf-city-steer`). With the battle's 100 m sight they stood in
-   'hostile-stand for minutes, 400 to 700 m from their point, on a foe they never reached."
-  (let ((p (handle->process (-> foe proc))))
-    (the-as int (and p
-                     (type? p process-drawable)
-                     (< (vector-vector-xz-distance (-> (the-as process-drawable p) root trans)
-                                                   (-> (the-as process-drawable robot) root trans)
-                                                   )
-                        BF_ROBOT_SIGHT
-                        )
-                     )
-            )
-    )
-  )
-
 (defun bf-city-robot-free ((unit citizen))
-  "In `bf-city-steer`: robotguard UNIT of the battle sees foes within BF_ROBOT_SIGHT only
-   (`bf-city-robot-sight`), and, standing in its hostile states with no foe left
-   ('hostile, 'hostile-stand, 'reposition), walks its lanes again ('active, `go-process`): its
-   focus kept it there, on a foe it no longer had."
+  "In `bf-city-steer`: robotguard UNIT of the battle, which sees foes within BF_ROBOT_SIGHT only
+   (`bf-city-foe-ok?`), standing in its hostile states with no foe left ('hostile, 'hostile-stand,
+   'reposition), walks its lanes again ('active, `go-process`): its focus kept it there, on a foe
+   it no longer had."
   (let ((info (-> unit attacker-info)))
     (when (and info (nonzero? info))
-      (if (!= (-> info callback) bf-city-robot-sight)
-          (set! (-> info callback) bf-city-robot-sight)
-          )
       (when (and (not (handle->process (-> info enemy)))
                  (-> unit next-state)
                  (let ((st (-> unit next-state name)))
@@ -1298,9 +1412,15 @@
           (dotimes (i (-> tr active-object-count))
             (let ((proc (handle->process (-> tr active-object-list i))))
               (when (and proc (>= (bf-unit-team proc) 0))
-                (if (type? proc citizen)
-                    (bf-city-unit-pace proc)
+                (when (type? proc citizen)
+                  (bf-city-unit-pace proc)
+                  ;; its foes: in sight, a robotguard's near (`bf-city-foe-ok?`)
+                  (let ((info (-> (the-as citizen proc) attacker-info)))
+                    (if (and info (nonzero? info) (!= (-> info callback) bf-city-foe-ok?))
+                        (set! (-> info callback) bf-city-foe-ok?)
+                        )
                     )
+                  )
                 ;; roboguard-city is CTYPESC's type, unknown here: told by its name
                 (if (= (-> proc type symbol) 'roboguard-city)
                     (bf-city-robot-free (the-as citizen proc))
@@ -1515,6 +1635,40 @@
         )
       )
     n
+    )
+  )
+
+(defun bf-city-hidden-foes ()
+  "For the tests: the battle's units with a foe now (the attack controller's), and how many of them
+   have it behind a wall (`bf-city-sees?`): hidden times 1000 plus the units with a foe."
+  (let ((all 0)
+        (hidden 0)
+        )
+    (when (bf-city-controller?)
+      (let ((ctrl *cty-attack-controller*))
+        (dotimes (i (-> ctrl attackers length))
+          (let* ((info (-> ctrl attackers data i))
+                 (nf (-> info enemy-index))
+                 )
+            (when (and (logtest? (-> info flags) (city-attacker-info-flag cai0)) (>= nf 0)
+                       (>= (bf-ctt-team (-> info self-type)) 0)
+                       )
+              (let ((me (handle->process (-> info proc)))
+                    (them (handle->process (-> ctrl attackers data nf proc)))
+                    )
+                (when (and me them (type? me process-drawable) (type? them process-drawable))
+                  (+! all 1)
+                  (if (not (bf-city-sees? (the-as process-drawable me) (the-as process-drawable them)))
+                      (+! hidden 1)
+                      )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    (+ (* hidden 1000) all)
     )
   )
 
@@ -1794,6 +1948,133 @@
   (none)
   )
 
+(defconstant BF_SPAWN_REACH (meters 45)) ;; units appear on the nav meshes this close to their control point
+
+;; When each side may bring units in at a control point again (`bf-city-spawn-tick`).
+(define *bf-spawn-time* (new 'static 'array time-frame 2))
+
+(defun bf-city-spawn-spot ((pt vector) (out vector))
+  "OUT: the middle of a nav poly drawn at random among those of the loaded meshes (`*bf-ways*`)
+   within BF_SPAWN_REACH of PT across and 20 m up or down, the link polys aside: a street, a
+   platform. Returns its mesh, #f for none."
+  (let ((w *bf-ways*)
+        (n 0)
+        (found (the-as nav-mesh #f))
+        (c (new 'stack-no-clear 'vector))
+        )
+    (dotimes (k (-> w count))
+      (let ((m (-> w mesh k)))
+        (when (and m (< (vector-vector-xz-distance (the-as vector (-> m bounds)) pt) (+ (-> m bounds r) BF_SPAWN_REACH)))
+          (dotimes (i (-> m poly-count))
+            (let ((poly (-> m poly-array i)))
+              (when (not (logtest? (-> poly pat) 4))
+                (poly-centroid m poly c)
+                (when (and (< (vector-vector-xz-distance c pt) BF_SPAWN_REACH) (< (fabs (- (-> c y) (-> pt y))) (meters 20)))
+                  (+! n 1)
+                  (when (zero? (rand-vu-int-count n))
+                    (vector-copy! out c)
+                    (set! found m)
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    found
+    )
+  )
+
+(defun bf-city-spawn-near ((team int) (point int))
+  "Up to BF_TRANSPORT_BURST units of side TEAM, each of the kind it lacks most
+   (`bf-transport-next-kind`), woken by the traffic's 'activate-object walking ('active, behavior
+   2) on a nav poly drawn at random around control point POINT (`bf-city-spawn-spot`): the author
+   wanted no ship there, the units anywhere on the meshes near the point, platforms too. One in four
+   is posted on the point. Returns how many came."
+  (let ((done 0))
+    (dotimes (k BF_TRANSPORT_BURST)
+      (when (= k done)
+        (let* ((kind (bf-transport-next-kind team))
+               (at (new 'stack-no-clear 'vector))
+               (mesh (if (>= kind 0) (bf-city-spawn-spot (-> *bf* points point pos) at)))
+               )
+          (set! *bf-wake-kind* kind)
+          (when (and mesh *traffic-manager* (bf-transport-mesh-room? mesh kind))
+            (let ((params (new 'stack 'traffic-object-spawn-params)))
+              (set! (-> params proc) #f)
+              (set! (-> params object-type) (the-as traffic-type kind))
+              (set! (-> params behavior) (the-as uint 2))
+              (set! (-> params id) (the-as uint 0))
+              (set! (-> params nav-mesh) mesh)
+              (set! (-> params nav-branch) #f)
+              (set! (-> params handle) (the-as handle #f))
+              (set! (-> params handle-parent) (the-as handle #f))
+              (set! (-> params user-data) (the-as uint 0))
+              (set! (-> params flags) (traffic-spawn-flags))
+              (set! (-> params guard-type) (the-as uint 11))
+              (set! (-> params entity) #f)
+              (vector-reset! (-> params velocity))
+              (vector-copy! (-> params position) at)
+              (quaternion-axis-angle! (-> params rotation) 0.0 1.0 0.0 (* 65536.0 (rand-vu)))
+              (send-event *traffic-manager* 'activate-object params)
+              (let ((proc (-> params proc)))
+                (when proc
+                  ;; its lanes' goal on itself until its march sends it on (`bf-march-apply`)
+                  (if (type? proc citizen)
+                      (vector-copy! (-> (the-as citizen proc) dest-point) at)
+                      )
+                  (when (zero? (rand-vu-int-count 4))
+                    (let ((n (-> *bf-posts* next)))
+                      (set! (-> *bf-posts* unit n) (process->handle proc))
+                      (set! (-> *bf-posts* point n) point)
+                      (set! (-> *bf-posts* next) (mod (+ n 1) BF_POST_MAX))
+                      )
+                    )
+                  (+! (-> *bf-drops-at* (+ (* 8 team) point)) 1)
+                  (+! done 1)
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    (if (> done (-> *bf-burst-max* 0))
+        (set! (-> *bf-burst-max* 0) done)
+        )
+    done
+    )
+  )
+
+(defun bf-city-spawn-tick ()
+  "Twice a second in a fight, for each side whose next units come down at a control point
+   (bf-transport.gc `bf-transport-drop-point`; at its base its ship brings them): `bf-city-spawn-near`,
+   then the next units a second later, half a second after none (the point passed over once, as a
+   ship's)."
+  (dotimes (team 2)
+    (when (>= (current-time) (-> *bf-spawn-time* team))
+      (let ((turn (bf-transport-drop-point team)))
+        (when (and (>= turn 0) (not (-> *bf* points turn base?)))
+          (set! (-> *bf-drop-turn* team) -1)
+          (cond
+            ((> (bf-city-spawn-near team turn) 0)
+             (set! (-> *bf-spawn-time* team) (+ (current-time) (seconds 1)))
+             )
+            (else
+              (if (>= *bf-wake-kind* 0)
+                  (set! (-> *bf-drop-skip* team) turn)
+                  )
+              (set! (-> *bf-spawn-time* team) (+ (current-time) (seconds 0.5)))
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-city-command ((cmd int))
   "`*bf-city-hook*`. CMD: BF_CITY_PREPARE once the zone is loaded, BF_CITY_UPDATE every frame of
    the fight, BF_CITY_RESET when the battle ends. The unit pools are not rebuilt here: the director
@@ -1834,6 +2115,7 @@
      (when (time-elapsed? (-> *bf-city-saved* reinforce-time) (seconds 0.5))
        (set-time! (-> *bf-city-saved* reinforce-time))
        (bf-city-transports)
+       (bf-city-spawn-tick)
        (bf-city-edge-spawn)
        (bf-city-fields-up)
        )
