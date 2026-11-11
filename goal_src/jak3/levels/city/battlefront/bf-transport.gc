@@ -24,12 +24,14 @@
   the head of the pool, the one the traffic wakes next (`bf-transport-pick`).
 
   Invulnerable, as Jak 2's: penetrated-by none, no 'attack. The engine sounds are Jak 2's, silent in
-  Jak 3.
+  Jak 3. Only the ships over the sides' bases are seen: over a control point the ship is a ghost
+  (`ghost?`: not drawn, no collision, no engine sound), and its units come out of the air.
 |#
 
 ;; DECOMP BEGINS
 
-(defconstant BF_TRANSPORT_MAX_UNITS 8)          ;; units one ship drops at most
+(defconstant BF_TRANSPORT_MAX_UNITS 8)          ;; units one ship keeps track of at the hatch
+(defconstant BF_TRANSPORT_BURST 3)              ;; units one try drops at once, at most
 (defconstant BF_TRANSPORT_HOVER_MIN (meters 4)) ;; how high over the ground it hovers: the hover
 (defconstant BF_TRANSPORT_HOVER_MAX (meters 14)) ;; vehicles' flight level there, kept between these
 
@@ -68,6 +70,7 @@
    (drop-at             time-frame 8)   ;; when each was dropped
    (turn-time           time-frame)     ;; its last turn for a guard waiting at the hatch
    (want-quat           quaternion :inline) ;; the way it turns to
+   (ghost?              symbol)         ;; over a control point: not drawn, no collision, silent
    )
   (:state-methods
     come-down
@@ -240,22 +243,28 @@
 ;; (docs/modding/current_mod/battlefront_smoke.gc reads and clears it).
 (define *bf-drops-at* (new 'static 'array int32 16))
 
-(defconstant BF_DEFEND_REACH (meters 60)) ;; foes this close to a held point attack it (battlefront-city.gc BF_ZONE_REACH)
-(defconstant BF_DEFEND_SHARE 0.5)         ;; share of a side's units brought to its points under attack
+(defconstant BF_DEFEND_REACH (meters 60))  ;; foes this close to a held point attack it (battlefront-city.gc BF_ZONE_REACH)
+(defconstant BF_DEFEND_SHARE 0.5)          ;; share of a side's units brought to its points under attack
+(defconstant BF_CROWD_REACH (meters 120))  ;; units this close to a point count for its crowd
+(defconstant BF_CROWD_SHARE 0.75)          ;; share of the rest brought to the point with the largest crowd
 
 (defun bf-transport-draw ((team int))
-  "The point where side TEAM's next unit comes down, among its points with a ship of its own over
-   them (`*bf*` points ship), -1 for none. A point under attack (a foe within BF_DEFEND_REACH:
-   a unit, `*bf-unit-dots*`, or the player) gets BF_DEFEND_SHARE of the units, the one with the most
-   foes; the others come down at the point nearest a foe, where the fight is, as Star Wars
-   Battlefront's reinforcements come out of the command post at the front. The point in
-   `*bf-drop-skip*` is passed over while another one is there."
+  "The point where side TEAM's next units come down, among its points with a ship of its own over
+   them (`*bf*` points ship), -1 for none. A point under attack (a foe within BF_DEFEND_REACH: a
+   unit, `*bf-unit-dots*`, or the player) gets BF_DEFEND_SHARE of the units, the one with the most
+   foes; of the rest, BF_CROWD_SHARE come down at the point with the most units of both sides
+   within BF_CROWD_REACH (the nearest a foe when none has any: the front), where the fight is, the
+   others at one of its points drawn at random. The point in `*bf-drop-skip*` is passed over while
+   another one is there."
   (let ((dots *bf-unit-dots*)
         (foe? (and *target* (!= (-> *bf* team) team) (not (focus-test? *target* dead))))
+        (crowd -1)
+        (crowd-n 0)
         (front -1)
         (front-d 0.0)
         (attacked -1)
         (attackers 0)
+        (count 0)
         (skip (-> *bf-drop-skip* team))
         )
     (set! (-> *bf-drop-skip* team) -1)
@@ -269,10 +278,15 @@
             (let ((pos (-> *bf* points i pos))
                   (near (meters 100000))
                   (n 0)
+                  (crowded 0)
                   )
+              (+! count 1)
               (dotimes (d (-> dots count))
-                (when (!= (-> dots team d) team)
-                  (let ((dist (vector-vector-xz-distance (-> dots pos d) pos)))
+                (let ((dist (vector-vector-xz-distance (-> dots pos d) pos)))
+                  (if (< dist BF_CROWD_REACH)
+                      (+! crowded 1)
+                      )
+                  (when (!= (-> dots team d) team)
                     (set! near (fmin near dist))
                     (if (< dist BF_DEFEND_REACH)
                         (+! n 1)
@@ -292,6 +306,10 @@
                 (set! front i)
                 (set! front-d near)
                 )
+              (when (< crowd-n crowded)
+                (set! crowd i)
+                (set! crowd-n crowded)
+                )
               (when (< attackers n)
                 (set! attacked i)
                 (set! attackers n)
@@ -301,10 +319,30 @@
           )
         )
       )
-    (if (and (>= attacked 0) (< (rand-vu) BF_DEFEND_SHARE))
-        attacked
-        front
+    (cond
+      ((and (>= attacked 0) (< (rand-vu) BF_DEFEND_SHARE))
+       attacked
+       )
+      ((< (rand-vu) BF_CROWD_SHARE)
+       (if (>= crowd 0) crowd front)
+       )
+      (else
+        ;; one of its points at random
+        (let ((k (rand-vu-int-count (max 1 count)))
+              (pick front)
+              )
+          (dotimes (i (-> *bf* point-count))
+            (when (and (= (-> *bf* points i owner) team) (handle->process (-> *bf* points i ship)))
+              (if (zero? k)
+                  (set! pick i)
+                  )
+              (+! k -1)
+              )
+            )
+          pick
+          )
         )
+      )
     )
   )
 
@@ -327,83 +365,112 @@
     )
   )
 
-(defmethod drop-unit ((this bf-transport))
-  "Jak 2's transport-method-33, once the delay is over and its point's turn has come (`bf-transport-my-turn?`): wake a unit of the ship's side, of the kind it
-   lacks most (`bf-transport-next-kind`), with the traffic's 'activate-object: behavior 6 (each kind's
-   exit-transport), on the nav mesh of the ground under the ship. A guard comes in at the hatch (2 m
-   above the ship's origin; its method 265 puts it inside, on spawn-side, and walks it out); the
-   other kinds at the hatch's end, 12 m behind the ship and 3 m up, facing out, and fall or fly from
-   there, when that mesh has room for it (`bf-transport-mesh-room?`). Guard type 11 keeps the
-   weapon the squad gave. Next try 1 s later after a unit (2 s off
-   screen), 0.5 s after none. Side effects: a unit on the street, kept in drops; the pool's order,
-   spawn-side, count-units, next-drop-time, last-drop-time."
-  (when (and (>= (current-time) (-> this next-drop-time)) (bf-transport-my-turn? this))
-    ;; the next unit of its side comes down at a point drawn again, whatever this try gives
-    (set! (-> *bf-drop-turn* (-> this team)) -1)
-    (let ((params (new 'stack 'traffic-object-spawn-params))
-          (on-screen (logtest? (-> this draw status) (draw-control-status on-screen)))
-          (kind (bf-transport-next-kind (-> this team)))
-          )
-      (set! (-> params proc) #f)
-      (let ((nav (find-nearest-nav-mesh (bf-transport-ground-point this (new 'stack-no-clear 'vector)) 8192.0)))
-        (when (and nav *traffic-manager* (>= kind 0) (bf-transport-mesh-room? nav kind))
-          (set! (-> params object-type) (the-as traffic-type kind))
-          (set! (-> params behavior) (the-as uint 6))
-          (set! (-> params id) (the-as uint 0))
-          (set! (-> params nav-mesh) nav)
-          (set! (-> params nav-branch) #f)
-          (set! (-> params handle) (process->handle this))
-          (set! (-> params handle-parent) (the-as handle #f))
-          (set! (-> params user-data) (-> this spawn-side))
-          (set! (-> params flags) (traffic-spawn-flags))
-          (set! (-> params guard-type) (the-as uint 11))
-          (set! (-> params entity) #f)
-          (vector-reset! (-> params velocity))
-          (quaternion-rotate-local-y! (-> params rotation) (-> this root quat) 32768.0)
-          (cond
-            ((= kind (the-as int (traffic-type guard-a)))
-             (vector-copy! (-> params position) (-> this root trans))
-             (+! (-> params position y) 8192.0)
-             )
-            (else
-              ;; the hatch's end, in the ship's frame
-              (let ((out (vector-orient-by-quat! (new 'stack-no-clear 'vector)
-                                                 (new 'static 'vector :y 12288.0 :z -49152.0 :w 1.0)
-                                                 (-> this root quat)
-                                                 )
-                         )
-                    )
-                (vector+! (-> params position) (-> this root trans) out)
-                )
+;; The kind the last `bf-transport-wake` wanted, -1 for none.
+(define *bf-wake-kind* -1)
+
+;; The most units one try dropped at once, for the tests (docs/modding/current_mod/battlefront_smoke.gc).
+(define *bf-burst-max* (new 'static 'array int32 1 0))
+
+(defun bf-transport-wake ((this bf-transport))
+  "One unit of ship THIS's side, of the kind it lacks most (`bf-transport-next-kind`), woken with
+   the traffic's 'activate-object: behavior 6 (each kind's exit-transport), on the nav mesh of the
+   ground under the ship. A guard comes in at the hatch (2 m above the ship's origin; its method 265
+   puts it inside, on spawn-side, and walks it out); the other kinds at the hatch's end, 12 m behind
+   the ship and 3 m up, facing out, and fall or fly from there, when that mesh has room for it
+   (`bf-transport-mesh-room?`). Guard type 11 keeps the weapon the squad gave. Returns the unit, or
+   #f with the kind wanted in `*bf-wake-kind*` (-1: the side lacks none)."
+  (let ((params (new 'stack 'traffic-object-spawn-params))
+        (kind (bf-transport-next-kind (-> this team)))
+        )
+    (set! *bf-wake-kind* kind)
+    (set! (-> params proc) #f)
+    (let ((nav (find-nearest-nav-mesh (bf-transport-ground-point this (new 'stack-no-clear 'vector)) 8192.0)))
+      (when (and nav *traffic-manager* (>= kind 0) (bf-transport-mesh-room? nav kind))
+        (set! (-> params object-type) (the-as traffic-type kind))
+        (set! (-> params behavior) (the-as uint 6))
+        (set! (-> params id) (the-as uint 0))
+        (set! (-> params nav-mesh) nav)
+        (set! (-> params nav-branch) #f)
+        (set! (-> params handle) (process->handle this))
+        (set! (-> params handle-parent) (the-as handle #f))
+        (set! (-> params user-data) (-> this spawn-side))
+        (set! (-> params flags) (traffic-spawn-flags))
+        (set! (-> params guard-type) (the-as uint 11))
+        (set! (-> params entity) #f)
+        (vector-reset! (-> params velocity))
+        (quaternion-rotate-local-y! (-> params rotation) (-> this root quat) 32768.0)
+        (cond
+          ((= kind (the-as int (traffic-type guard-a)))
+           (vector-copy! (-> params position) (-> this root trans))
+           (+! (-> params position y) 8192.0)
+           )
+          (else
+            ;; the hatch's end, in the ship's frame
+            (let ((out (vector-orient-by-quat! (new 'stack-no-clear 'vector)
+                                               (new 'static 'vector :y 12288.0 :z -49152.0 :w 1.0)
+                                               (-> this root quat)
+                                               )
+                       )
+                  )
+              (vector+! (-> params position) (-> this root trans) out)
               )
             )
-          (send-event *traffic-manager* 'activate-object params)
+          )
+        (send-event *traffic-manager* 'activate-object params)
+        )
+      )
+    (-> params proc)
+    )
+  )
+
+(defmethod drop-unit ((this bf-transport))
+  "Jak 2's transport-method-33, once the delay is over and its point's turn has come
+   (`bf-transport-my-turn?`): up to BF_TRANSPORT_BURST units of the ship's side at once
+   (`bf-transport-wake`), each from the hatch's other side in turn. One in four dropped on a control
+   point is posted there. Next try 1 s later after units (2 s off screen), 0.5 s after none; a point
+   that dropped none while its side wanted some is passed over at the next draw. Side effects: units
+   on the street, kept in drops; the pool's order, spawn-side, count-units, next-drop-time,
+   last-drop-time."
+  (when (and (>= (current-time) (-> this next-drop-time)) (bf-transport-my-turn? this))
+    ;; the next units of its side come down at a point drawn again, whatever this try gives
+    (set! (-> *bf-drop-turn* (-> this team)) -1)
+    (let ((on-screen (logtest? (-> this draw status) (draw-control-status on-screen)))
+          (dropped 0)
+          )
+      (dotimes (k BF_TRANSPORT_BURST)
+        (let ((proc (if (= k dropped) (bf-transport-wake this))))
+          (when proc
+            ;; one unit in four dropped on a control point guards it
+            (when (and (not (-> *bf* points (-> this point) base?)) (zero? (logand (-> this count-units) 3)))
+              (let ((n (-> *bf-posts* next)))
+                (set! (-> *bf-posts* unit n) (process->handle proc))
+                (set! (-> *bf-posts* point n) (-> this point))
+                (set! (-> *bf-posts* next) (mod (+ n 1) BF_POST_MAX))
+                )
+              (format 0 "battlefront: side ~D unit dropped to guard control point ~D~%" (-> this team) (-> this point))
+              )
+            (+! (-> *bf-drops-at* (+ (* 8 (-> this team)) (-> this point))) 1)
+            (let ((slot (mod (the-as int (-> this count-units)) BF_TRANSPORT_MAX_UNITS)))
+              (set! (-> this drops slot) (process->handle proc))
+              (set-time! (-> this drop-at slot))
+              )
+            (set! (-> this spawn-side) (- 1 (the-as int (-> this spawn-side))))
+            (+! (-> this count-units) 1)
+            (+! dropped 1)
+            )
           )
         )
+      (if (> dropped (-> *bf-burst-max* 0))
+          (set! (-> *bf-burst-max* 0) dropped)
+          )
       (cond
-        ((-> params proc)
-         ;; one unit in four dropped on a control point guards it
-         (when (and (not (-> *bf* points (-> this point) base?)) (zero? (logand (-> this count-units) 3)))
-           (let ((k (-> *bf-posts* next)))
-             (set! (-> *bf-posts* unit k) (process->handle (-> params proc)))
-             (set! (-> *bf-posts* point k) (-> this point))
-             (set! (-> *bf-posts* next) (mod (+ k 1) BF_POST_MAX))
-             )
-           (format 0 "battlefront: side ~D unit dropped to guard control point ~D~%" (-> this team) (-> this point))
-           )
-         (+! (-> *bf-drops-at* (+ (* 8 (-> this team)) (-> this point))) 1)
-         (let ((slot (mod (the-as int (-> this count-units)) BF_TRANSPORT_MAX_UNITS)))
-           (set! (-> this drops slot) (process->handle (-> params proc)))
-           (set-time! (-> this drop-at slot))
-           )
-         (set! (-> this spawn-side) (- 1 (the-as int (-> this spawn-side))))
-         (+! (-> this count-units) 1)
+        ((> dropped 0)
          (set-time! (-> this last-drop-time))
          (set! (-> this next-drop-time) (+ (current-time) (if on-screen (seconds 1) (seconds 2))))
          )
         (else
           ;; a unit wanted but none came down here: the side's next draw passes over this point once
-          (if (>= kind 0)
+          (if (>= *bf-wake-kind* 0)
               (set! (-> *bf-drop-skip* (-> this team)) (-> this point))
               )
           (set! (-> this next-drop-time) (+ (current-time) (seconds 0.5)))
@@ -616,7 +683,10 @@
         )
     (set! (-> spec volume) (the int (* 1024.0 height-k)))
     (set! (-> spec pitch-mod) (the int (* 1524.0 speed-k)))
-    (sound-play-by-spec spec (-> this ambient-sound-id) (-> this root trans))
+    ;; a ghost ship is silent
+    (if (not (-> this ghost?))
+        (sound-play-by-spec spec (-> this ambient-sound-id) (-> this root trans))
+        )
     )
   (none)
   )
@@ -850,6 +920,16 @@
   (set-time! (-> self turn-time))
   (set! (-> self level) lev)
   (initialize-skeleton self (if (= team BF_TEAM_FF) *bf-transport-blue-sg* *bf-transport-red-sg*) (the-as pair 0))
+  ;; a ship over a control point is a ghost: its units come out of the air (the author's wish: a
+  ;; transport over each side's starting base only)
+  (set! (-> self ghost?) (not (-> *bf* points point base?)))
+  (when (-> self ghost?)
+    (logior! (-> self draw status) (draw-control-status no-draw))
+    (let ((rp (-> self root root-prim)))
+      (set! (-> rp prim-core collide-as) (collide-spec))
+      (set! (-> rp prim-core collide-with) (collide-spec))
+      )
+    )
   (set! (-> self y-ground) (-> self root trans y))
   (set! (-> self y-dest)
         (fmax (+ (-> self y-ground) BF_TRANSPORT_HOVER_MIN)

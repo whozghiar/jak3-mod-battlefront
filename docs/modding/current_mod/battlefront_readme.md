@@ -2,7 +2,7 @@
 
 - **Game:** Jak 3
 - **Repository:** `whozghiar/jak3-mod-battlefront` (prepared locally as `mods/jak3-mod-battlefront`, not published yet)
-- **Status:** In development, no release. Round 22 (2026-11-09: L3 shows the kills, the deaths and the whole map; the tazer's whole stab; units come down at the front and defend an attacked point; a fallen unit's place waits 5 s; every unit 1.5 times as fast, its legs at the stock pace; the robotguards and spider robots march to their points; 6 pickups in 10 deaths, each gone after 10 s) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T31). Round 21 (2026-11-09: R3 hides the game's minimap behind the whole map; the guard kneels on L1 and aims steadier, dodges on L2 and rolls on R2 toward the stick; the rifle's spread shown by the crosshair's size) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T30). Round 20 (2026-11-09: START opens the battle's own pause page over the city's live map; R3 shows the kills, the deaths and the whole map; 40 units a side, each brought by a ship over one of its side's points picked at random; guards 1.5 times as fast; units take the nearest point their side does not hold, a contested one near them first, and turn onto the foe they see best; the minimap's marks in each side's color and the points as black discs; maps with units as discs and view cones; no frame of Jak at the deploy; the class model facing the crosshair as it fires) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T25, T26). Round 19's whole city (2026-11-09: every street section of Haven City loaded during a battle, so both armies fight at every point at once) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T24). Round 19 (2026-11-08: a side with no point near the player brings its units in from the edge of the loaded area, as Star Wars Battlefront's armies come from every command post; force fields at the ruins of the old town and at the Metal Head nest; every door shut) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T23). Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
+- **Status:** In development, no release. Round 23 (2026-11-11: a ship over each base only, the units out of the air elsewhere, three at a time, where the crowd is; goals spread; the Port's base and point swapped; units sent on at once at a section's edge, by the several links a way can take; the robotguard fires behind its shield, stands still, its gauge refills; the spider's headbutt on Square shocks as the tazer, its sprint without the leap clip; the tazer's whole stab and shock; each class's own death and cry; an empty health ring kills; the class page's previews and help) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T32). Round 22 (2026-11-09: L3 shows the kills, the deaths and the whole map; the tazer's whole stab; units come down at the front and defend an attacked point; a fallen unit's place waits 5 s; every unit 1.5 times as fast, its legs at the stock pace; the robotguards and spider robots march to their points; 6 pickups in 10 deaths, each gone after 10 s) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T31). Round 21 (2026-11-09: R3 hides the game's minimap behind the whole map; the guard kneels on L1 and aims steadier, dodges on L2 and rolls on R2 toward the stick; the rifle's spread shown by the crosshair's size) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T30). Round 20 (2026-11-09: START opens the battle's own pause page over the city's live map; R3 shows the kills, the deaths and the whole map; 40 units a side, each brought by a ship over one of its side's points picked at random; guards 1.5 times as fast; units take the nearest point their side does not hold, a contested one near them first, and turn onto the foe they see best; the minimap's marks in each side's color and the points as black discs; maps with units as discs and view cones; no frame of Jak at the deploy; the class model facing the crosshair as it fires) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T25, T26). Round 19's whole city (2026-11-09: every street section of Haven City loaded during a battle, so both armies fight at every point at once) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T24). Round 19 (2026-11-08: a side with no point near the player brings its units in from the edge of the loaded area, as Star Wars Battlefront's armies come from every command post; force fields at the ruins of the old town and at the Metal Head nest; every door shut) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T23). Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
 
 This is the developer and agent documentation of the mod: what it changes, how it works, how to
 test it, its limits, and its change log. Players read the root [`README.md`](../../../README.md).
@@ -74,8 +74,8 @@ greyed ("coming soon"), which X refuses.
 | Point | Continue point (its levels for a respawn) | Place |
 |---|---|---|
 | Freedom League base | `ctyslumc-freehq-exit` | the entrance of the headquarters |
-| Krimzon Guard base | `ctyport-bombbot` | the Port's east docks, by the KG war zone |
-| A: Port | `ctyport-bbush-6` | (225, 10, 1368) m, a lane of the Port |
+| Krimzon Guard base | `ctyport-bbush-8` | the middle of the Port, 89 m from where the Port's point stood until round 23 (the continue point nearest it) |
+| A: Port | `ctyport-bombbot` | (620, 8, 1477) m, the east docks, where the base stood until round 23 (the author swapped them) |
 | B: Industrial Zone | `ctyinda-bbush-5` | (929, 10, 855) m |
 | C: Slums | `ctysluma-alley` | (1001, 10, 266) m |
 | D: Freedom HQ | `ctyslumb-bbush-4` | (522, 3, -340) m |
@@ -119,7 +119,8 @@ doors to the interiors stay shut and no car is parked.
   the ring.
 - **Health and damage:** one 24 point scale for every class and unit (§2.8): guards and
   robotguards 24, jetpack guards 18, spider robots 12; a rifle shot takes 8, a grenade's blast 20,
-  the tazer 24, a close attack 10 (rifle butt, punch, dive kick), a spider's bite 12, a jetpack's
+  the tazer 24, a close attack 10 (rifle butt, punch, dive kick), a spider robot's bite 12 (the
+  player's spider: a headbutt, the tazer's 24 and shock), a jetpack's
   shot 6, a robotguard's shot 4. A side's own fire takes nothing from its units or from the player;
   Jak running or jumping into a unit takes nothing from it. Every close attack plays Jak's punch
   sound ("punch-hit").
@@ -139,8 +140,16 @@ doors to the interiors stay shut and no car is parked.
   keeps a fixed 15 s whatever its fact says, so `bf-spawn-drops` sets the born one's `fadeout-timeout`). Dark eco is the jetpack's boost: one drop fills its gauge. Jak's light and dark eco are set aside for the battle and given back at its end, and the
   "endless dark eco" and "endless light eco" secrets are off during a battle (they would keep every
   jetpack full and the light eco gauge lit).
-- **Death:** the player's side loses a unit; for 4 seconds the camera follows a living unit of his
-  side ("YOU WERE KILLED", "Back in 4 ... 1"). Then, at every death, a page lets him pick his base
+- **Death:** a hit that leaves less than one segment of the health ring kills (the ring lights
+  `(the int health)` segments, and an empty one took one more hit). The player's side loses a
+  unit; his class model dies its own way while the camera stays on it (`bf-avatar-dying`): a guard
+  plays the stock guard's death clip with its death cry, then fades in the purple sparks of the
+  game's death-default effect; the robotguard explodes (`group-kg-explosion`, robo-explode); a
+  jetpack guard fades, then explodes (`group-kg-small-explosion`, fly-turret-die); the spider
+  explodes with its death cry. Until 4 seconds have passed the camera then follows a living unit
+  of his side ("YOU WERE KILLED", "Back in 4 ... 1"). A hit he takes cries his class's cry, not
+  Jak's (`sound-play-by-name` wrapper: oof and hit-up replaced by guard-hit or spydroid-hit, none
+  for the robotguard). Then, at every death, a page lets him pick his base
   or a control point his side holds on the city's map (D-pad), and X deploys him there (§2.9). He keeps his class, with full health, fresh
   ammo and 2 seconds of invulnerability.
 - **Redeploy:** 30 seconds after his last shot, blow or hit taken, START > Options > Gamemode >
@@ -157,8 +166,8 @@ hides him, draws its own model in his place with its own clips, and changes some
 |---|---|---|---|---|
 | Blue Guard / Red Krimzon Guard | 24 points; run speed x1.425; L1 held on the ground: crouch, the kneeling clip (28), x0.01 (0.06 m moved with the stick pushed), the rifle's spread 0.3 degrees (1.5 standing, 3.5 on the move or in a dodge); L2 + left stick: a dodge toward the stick, a jump 0.8 m high at 11 m/s, the model still facing the crosshair, playing its jump to that side (`jump-right` 40, `jump-left` 41; `jump-high` ahead or back); R2 (+ left stick): a roll toward the stick (ahead when it rests), the same jump, the model facing the roll's way and turned head over heels once in 0.45 s around its middle, in the tucked `jump-high` pose (the guards have no roll clip); no attack during either, 0.4 s before the next one | the weapon in hand, its clip on the upper body while the legs walk or run: rifle shot (8) at the crosshair, one every 0.5 s, 10 to a magazine reloaded from 20 carried (Jak's yellow ammo); tazer strike (24), 12 m, locked by itself on the nearest foe ahead, the stab clip on the upper body to its end while the legs walk on, then 20 s before the next, no ammo and no reload clip (the weapon joint drawn at 0.55: a short baton); grenade (20), lands on the crosshair's point, 35 m away at most, one a second, from the 5 carried (Jak's red ammo). An empty magazine reloads (the stock guards' reload, about 2 s) | rifle butt (10, 4 m), 1.5 s between two | D-pad: left tazer, down rifle, up grenade launcher |
 | Blue / Red Jetpack | 18 points; X held climbs (6 m/s measured), slowing into a hover under the ceiling; Circle held comes down (7 m/s); neither holds the height reached, still, for as long as the player likes; R2 held: a boost at 24 m/s toward the left stick (ahead when it rests) while the gauge lasts, 3 s in a full one (18 m in 1 s measured); only dark eco refills it, 6 units for a full gauge; the model floats 0.8 m above the ground | a salvo of two quick shots (6 each) at the crosshair, 0.8 s between salvos; built-in guns, no ammo | dive kick at the foe ahead (22 m/s, 10 on contact within 1 s), 0.6 s between two | |
-| Robotguard | 24 points; run speed x1.05; R2: rolls as a ball at x2.4 until R2 again (x1.6 before round 22: 45 m in 3 s measured), no attack meanwhile | a salvo of two shots (4 each), 0.9 s between salvos; built-in guns, no ammo | punch: wind-up, punch, back (0.9 s), 10 within 6.5 m, 1.5 s between two | Circle: the Dark Makers' shield sphere around it, glowing red, for 5 s, then 25 s before the next one; Jak's shield level stops every attack meanwhile, and the robot walks and jumps behind it (9.5 m in 1.5 s measured), without attacking |
-| Spider Robot | 12 points; run speed x2.25; X: a leap 11 m high (11.03 m measured); R2 held: blue eco sprint at x2 while the gauge lasts (10 s), refilled in 10 s | nothing | nothing | Circle: bite, a leap at the nearest foe ahead, 12 within 7 m, 1 s between two |
+| Robotguard | 24 points; run speed x1.05; R2: rolls as a ball at x2.4 until R2 again (x1.6 before round 22: 45 m in 3 s measured), no attack meanwhile | a salvo of two shots (4 each), 0.9 s between salvos; built-in guns, no ammo | punch: wind-up, punch, back (0.9 s), 10 within 6.5 m, 1.5 s between two | Circle: the Dark Makers' shield sphere around it, glowing red, for 5 s, then 25 s before the next one; Jak's shield level stops every attack meanwhile, and the robot walks, jumps and fires behind it (9.5 m in 1.5 s measured; its shots 100 m out, the sphere having no collision) |
+| Spider Robot | 12 points; run speed x2.25; X: a leap 11 m high (11.03 m measured); R2 held: blue eco sprint at x2 while the gauge lasts (10 s), refilled in 10 s | nothing | nothing | Square: a headbutt, a leap at the nearest foe ahead, within 7 m the tazer's shock (`bf-avatar-zap`: 24, the electrocuted knock, arcs), 1 s between two; airborne, its leap clip only after 0.3 s off the ground (a sprint's bumps played it) |
 
 Aiming is free for every class: the right stick turns the third-person camera (§2.4) and the
 camera aims. The shots and grenades go where the crosshair's line of sight (the middle of the
@@ -504,9 +513,11 @@ few foes from a 4.8 m tall robot.
 
 **Robotguard shield.** Circle held spawns `bf-shield`, a subtype of the Dark Makers' shield sphere
 (`shield-sphere`, `engine/common-obs/shield-sphere.gc`, GAME code; its art is in CTYPESA): 3 m
-around Jak, 2.2 m up, strength 3. It takes the mech shield's collision (an obstacle the shots hit,
-which neither pushes nor hurts Jak), and its post adds a constant red emissive to the stock heat
-glow. Shots heat it; past 1.0 it breaks into its stock shards, and the avatar, which polls it with
+around Jak, 2.2 m up, strength 3. Its collision is off (its root prim and the backup its states
+restore it from): with the mech shield's, the robot's own shots stopped on it 5.9 m out; Jak's
+shield level stops the attacks instead (below). Its post adds a constant red emissive to the stock
+heat glow. The gauge reads its times on the avatar's clock: read on the HUD's, it came back full at
+once while the shield still recharged. Shots heat it; past 1.0 it breaks into its stock shards, and the avatar, which polls it with
 `'active`, waits 5 s before the next one. Its init binds it to CTYPESA first: `initialize-skeleton`
 looks the art up in the process's level, and without it the shield went straight to
 `process-drawable-art-error`. While it is up, and while the robotguard rolls, the wrapper of
@@ -613,7 +624,10 @@ them, live in CTYPESA and CTYPESC, which only the battle's alias levels load.
 preview (a child of the director, 230 screen units tall, turning 90 degrees per second) and the
 class icon in Jak's health HUD (a child of the HUD process `hud-health`, 34 units tall, which shows
 and hides it with its 'draw events). It runs on the real clock with the menu and pause masks
-cleared, so it moves while the class page pauses the game.
+cleared, so it moves while the class page pauses the game. It plays the clips the battle plays:
+the red guard the blue guard's (`bf-guard-clips`: its own ran four times as fast), at the class's
+idle pace (`bf-idle-rate`: the jetpacks' clips at 0.25, the robotguard held still, its idle0 a
+slow shift of weight the game plays at a tenth of its pace).
 
 It is drawn with the world, not through the HUD's model path. Jak 3's HUD icons
 (`hud-create-icon`) draw with `foreground-draw-hud`, which feeds the PS2 generic renderer
@@ -768,9 +782,16 @@ sprite 14 and string position).
 
 **The tazer.** One strike on the foe the free aim locked within 12 m (`bf-avatar-tazer`), then
 `*bf*` tazer-time holds the next for 20 s, across a class change or a respawn. The strike plays
-the stock guard's `stab-attack` on the whole body, once to its end (`stab-until`,
-`bf-avatar-pick-anim`). On the upper body alone, over the walking legs, the thrust hid behind the
-guard's back from the camera, and the author saw no stab twice. Its look: a
+the stock guard's stab on the whole body, as `guard-tazer.gc` does: `stab-idle-to-attack` (21, the
+thrust) once, `stab-attack` (22, the zap, a 2-frame loop) for 0.5 s, `stab-attack-to-stab-idle`
+(23) once (`stab-clip`, `bf-avatar-pick-anim`). On the upper body alone, over the walking legs,
+the thrust hid behind the guard's back from the camera, and the author saw no stab twice; clip 22
+alone was over in 7 frames. The strike shocks the foe (`bf-avatar-zap`, the spider's headbutt
+too): 24 points as the blue gun's shot hits (`penetrate jak-blue-shot`), so the unit plays its
+electrocuted knock (enemy.gc knocked-type blue-shot, a guard's `blue-hit` clips), with an arc
+drawn across it, its ends drawn again each frame, for 0.6 s (`arc`, `bf-avatar-zap-update`). The
+game keeps a unit the blue gun would kill at 1 point for a second (`apply-incoming-hitpoint-mods`):
+a second strike 1.1 s later kills it. Its look: a
 `joint-mod` in `joint-set*` mode on node 13, the guard skeleton's `gun` joint
 (`joint-nodes.gc`), scaled to 0.55 while the tazer is in hand (`bf-avatar-gun-look`). The avatar
 comes from a dead-pool heap: its `relocate` moves the `gun-jm` field with the process, or the
@@ -902,7 +923,9 @@ reaches its exit point:
 | A guard waits 1.5 s at the hatch | It turns, eased, to the next such twelfth (`bf-transport-turn`). |
 | A unit still in `exit-transport` 8 s after its drop, or the ship going | The unit goes back to sleep through its tracker's `deactivate-object` (`bf-transport-sleep`): no death, the reserves keep it. The event `'traffic-off-force` alone left it asleep but listed awake, and the game crashed in 3 of 6 runs. |
 | Before each drop | The nav mesh under it must have room for the unit (`bf-transport-mesh-room?`). |
-| Its turn | A side's next unit comes down at one of its points with a ship of its own over it, drawn again after each try of that ship (`bf-transport-draw`, `*bf-drop-turn*`): half the time at its point with the most foes within 60 m when one is under attack, else at its point nearest a foe (a unit or the player), the front. A point where a wanted unit could not come down (a full mesh) is passed over at the next draw (`*bf-drop-skip*`). Before round 22 the point was drawn at random. |
+| Its turn | A side's next units come down at one of its points with a ship of its own over it, drawn again after each try of that ship (`bf-transport-draw`, `*bf-drop-turn*`): half the time at its point with the most foes within 60 m when one is under attack; of the rest, 3 in 4 at its point with the most units of both sides within 120 m (the crowd; the point nearest a foe when none has any), the others at one of its points at random. A point where a wanted unit could not come down (a full mesh) is passed over at the next draw (`*bf-drop-skip*`). Round 22 took the point nearest a foe; before, the point was drawn at random. |
+| A try | Up to 3 units at once (`bf-transport-wake`), each from the hatch's other side in turn. |
+| Over a control point | The ship is a ghost (`ghost?`): not drawn, no collision, no engine sound; its units come out of the air. Only the ships over the bases are seen. |
 | Its kind | The kind the side lacks most against its caps, a fallen unit counting for 5 s (`bf-fallen-count`, `*bf-fallen*`, filled by `bf-unit-killed`): a fallen unit's place waits that long. |
 | Each drop on a control point | One unit in four is posted there (`*bf-posts*`, `bf-post-point`): it guards the point while its side holds it. |
 
@@ -912,8 +935,9 @@ side in its zone, 60 m around it (`*bf-zone-near*`, counted twice a second), whi
 holds it or has units there too (`bf-city-contested-point`), to clear it so the capture can go on
 (with the 15 m capture radius alone, no point was fought over in 10 minutes: the attackers took
 them empty); else the one it is posted on;
-else the nearest point its side does not hold, to conquer it; with every control point held, the
-nearest one. Both sides start at their base: the Freedom League takes Freedom HQ and then the Slums,
+else the nearest point its side does not hold, to conquer it, or for 3 units in 10 (by their
+process id) the second nearest (`bf-city-goal-point`), so not all go for the same one; with every
+control point held, the nearest one. Both sides start at their base: the Freedom League takes Freedom HQ and then the Slums,
 the Krimzon Guard the Port and then the Industrial Zone, and the first fight breaks out between the
 Slums and the Industrial Zone. Twice a second every unit also takes again the foe it sees best
 (`bf-city-retarget`, the controller's own choice: the battle's hatred scores a foe by its distance,
@@ -933,7 +957,7 @@ its point marches there over the nav meshes, which join the sections:
 
 | Twice a second, `bf-march-plan` (from `bf-city-steer`) | Every frame, `bf-march-apply` |
 |---|---|
-| For each unit walking its lanes (`bf-city-walking?`: `'active`, or a spider robot's `'hunting`, its `'active` while the faction manager has it at war) away from its point in a loaded section: on the point's mesh (`find-nearest-nav-mesh`), the point; else the first step of its way there from its own mesh's entry in `*bf-ways*`: a spot 2 m past the link poly that starts it, toward the next mesh's own link poly (`bf-march-through`), or a bridge's end. | The unit's controller `dest-point` set to that spot: the citizen's `'active` post gives it to the nav control each frame, which finds the way across the mesh. Standing on the link poly, the unit moves onto the next mesh (`nav-enemy-method-188`); the next plan sends it on. The march runs (`speed-run`) and skips the idle stops (`wait-time`). |
+| For each unit walking its lanes (`bf-city-walking?`: `'active`, or a spider robot's `'hunting`, its `'active` while the faction manager has it at war) away from its point in a loaded section: on the point's mesh (`find-nearest-nav-mesh`), the point; else the first step of its way there from its own mesh's entry in `*bf-ways*`: a spot 2 m past the link poly that starts it, toward the next mesh's own link poly (`bf-march-through`), or a bridge's end. | The unit's controller `dest-point` set to that spot: the citizen's `'active` post gives it to the nav control each frame, which finds the way across the mesh. Standing on the link poly, the unit moves onto the next mesh (`nav-enemy-method-188`) and is sent on at once to its next waypoint there (left to its lanes until the next plan, a unit at a section's edge turned back and circled). Of its mesh's links that lead a mesh nearer the point (`*bf-ways*` depth), a unit takes the same one each time, by its process id (`bf-march-link`): the units spread over the several streets and meshes a way can go by. The march runs (`speed-run`) and skips the idle stops (`wait-time`). |
 
 **The ways.** Every 10 s `bf-ways-build` lists the nav meshes of the active levels (their bsp
 `nav-meshes`) and, for each battle point, searches breadth first from the point's mesh over every
@@ -1299,6 +1323,11 @@ code (its name cannot be printed); the object is sound.
 
 ## 4. Status and known limits
 
+- **A guard drawn with its legs only.** Seen by the author (round 23), mostly on the Freedom
+  League's side. Its mesh masks are not the cause: a set `seg-mask` bit hides a segment, and no
+  awake guard had both armor segments hidden (bits 1 and 2) in 40 scans of 44 guards, 5 s apart,
+  on the Freedom League's side (smoke scenario 33). The model past 20 m (`lod2`) or a guard sunk
+  into the scenery are left to check; the cause is not found.
 - **Little hand play.** The author played the second round once; everything since was checked by
   automated runs (§3.1). The feel of each class (camera, free aim, balance) needs a player, and
   battles longer than ten minutes were not run.

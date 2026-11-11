@@ -61,6 +61,10 @@
 (defconstant BF_SHIELD_SIZE 3.0)            ;; its radius in meters, centered 2.2 m above Jak's feet
 (defconstant BF_SHIELD_STRENGTH 1000)       ;; damage it takes before it breaks: never, it lasts its time
 (defconstant BF_LUNGE_RANGE (meters 7))     ;; spider lunge reach
+(defconstant BF_SPIDER_AIR (seconds 0.3))   ;; the spider airborne this long before its jump clip (a sprint's bumps leave the ground)
+(defconstant BF_ZAP_TIME (seconds 0.6))     ;; arcs around a shocked foe (`bf-avatar-zap-update`)
+(defconstant BF_ZAP_FINISH (seconds 1.1))   ;; a foe the shock left at 1 point is struck again then
+(defconstant BF_CLIP_DIE 17)                ;; crimson-guard-ag die: a guard class's death (`bf-avatar-dying`)
 (defconstant BF_MELEE_RANGE (meters 4))     ;; reach of the rifle butt
 (defconstant BF_PUNCH_RANGE (meters 6.5))   ;; reach of the robotguard's punch (it stands 4.8 m tall)
 (defconstant BF_MELEE_MAX (seconds 3))      ;; a close attack's clip is held this long at most
@@ -233,6 +237,15 @@
    (hover-y     float)          ;; jetpack: the height it holds in the air
    (locked?     symbol)         ;; the tazer locked a foe this frame (its automatic aim)
    (bolt        lightning-control) ;; guard: the tazer arc, #f for the other classes
+   (arc         lightning-control) ;; guard and spider: the arcs around a shocked foe, #f for the other classes
+   (zap-foe     handle)         ;; the foe the last tazer strike or headbutt shocked, #f for none
+   (zap-time    time-frame)     ;; when, 0 once its shock is over
+   (zap-on?     symbol)         ;; its arcs are drawn
+   (zap-done?   symbol)         ;; its finishing strike went (`bf-avatar-zap-update`)
+   (ground-time time-frame)     ;; the last frame Jak stood on the ground
+   (dying?      symbol)         ;; the class model's death is playing (`bf-avatar-dying`)
+   (die-time    time-frame)     ;; when its stage began, on the avatar's clock
+   (die-step    int32)          ;; its stage
    (gun-jm      joint-mod)      ;; guard: scales its weapon joint (the tazer's look), #f for the other classes
    (aim-jm      joint-mod)      ;; turns the upper body toward the aim while it fires (guards, jetpacks, robotguard), #f for the spider
    (blink?      symbol)         ;; hidden by the spawn shield's blinking now (`bf-avatar-blink`)
@@ -440,11 +453,12 @@
     )
   )
 
-(defun bf-send-attack ((foe process) (damage float))
-  "Hit FOE with a generic attack of DAMAGE points on the battle's 24 point scale, sent from Jak (the
-   foe reacts to Jak). `*bf*` own-attack carries the points while the foe takes the event (the
-   damage step, battlefront-h.gc `bf-attack-damage`, reads them: any other blow of Jak's body deals
-   none). A blow is combat: `*bf*` combat-time."
+(defun bf-send-attack-pen ((foe process) (damage float) (pen penetrate))
+  "Hit FOE with an attack of DAMAGE points on the battle's 24 point scale, penetrating as PEN (how the
+   foe reacts: enemy.gc penetrate->knocked-type), sent from Jak (the foe reacts to Jak). `*bf*`
+   own-attack carries the points while the foe takes the event (the damage step, battlefront-h.gc
+   `bf-attack-damage`, reads them: any other blow of Jak's body deals none). A blow is combat:
+   `*bf*` combat-time."
   (set! (-> *bf* own-attack) damage)
   (bf-combat!)
   (let ((id (+ (-> *game-info* attack-id) 1))
@@ -461,7 +475,7 @@
                                                                            (vehicle-damage-factor 1.0)
                                                                            (vehicle-impulse-factor 1.0)
                                                                            (mode 'generic)
-                                                                           (penetrate-using (penetrate generic-attack lunge))
+                                                                           (penetrate-using pen)
                                                                            )
                                   )
                    )
@@ -472,12 +486,79 @@
   (none)
   )
 
+(defun bf-send-attack ((foe process) (damage float))
+  "Hit FOE with a generic attack of DAMAGE points on the battle's 24 point scale (`bf-send-attack-pen`)."
+  (bf-send-attack-pen foe damage (penetrate generic-attack lunge))
+  (none)
+  )
+
 (defun bf-melee-hit ((foe process) (damage float))
   "A close attack lands on FOE: `bf-send-attack` with DAMAGE, and the sound and pad buzz of Jak's
    own punch landing (target-handler.gc)."
   (bf-send-attack foe damage)
   (sound-play "punch-hit")
   (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 178 (seconds 0.1))
+  (none)
+  )
+
+(defbehavior bf-avatar-zap bf-avatar ((foe process))
+  "Shock FOE (a tazer strike, the spider's headbutt): BF_DMG_TAZER as the blue gun's shot hits
+   (penetrate jak-blue-shot), so the unit plays its electrocuted knock (enemy.gc knocked-type
+   blue-shot: a guard's blue-hit clips), with arcs around it for BF_ZAP_TIME (`bf-avatar-zap-update`).
+   The game keeps a unit the blue gun would kill at 1 point for a second (enemy.gc
+   apply-incoming-hitpoint-mods): it is struck again at BF_ZAP_FINISH."
+  (bf-send-attack-pen foe BF_DMG_TAZER (penetrate generic-attack lunge jak-blue-shot))
+  (set! (-> self zap-foe) (process->handle foe))
+  (set-time! (-> self zap-time))
+  (set! (-> self zap-done?) #f)
+  (sound-play "guard-zap")
+  (when (-> self arc)
+    (change-mode (-> self arc) (lightning-mode lm1))
+    (set! (-> self zap-on?) #t)
+    )
+  (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 178 (seconds 0.1))
+  (none)
+  )
+
+(defbehavior bf-avatar-zap-update bf-avatar ()
+  "Every frame of a shock (`bf-avatar-zap`): for BF_ZAP_TIME an arc across the foe, between two
+   points drawn again each frame around its body; at BF_ZAP_FINISH the finishing strike, when the
+   foe still stands."
+  (when (nonzero? (-> self zap-time))
+    (let ((foe (the-as process-drawable (handle->process (-> self zap-foe))))
+          (arc (-> self arc))
+          )
+      (cond
+        ((and foe arc (not (time-elapsed? (-> self zap-time) BF_ZAP_TIME)))
+         (let ((a (vector-copy! (new 'stack-no-clear 'vector) (-> foe root trans)))
+               (b (vector-copy! (new 'stack-no-clear 'vector) (-> foe root trans)))
+               )
+           (+! (-> a x) (rand-vu-float-range (meters -1) (meters 1)))
+           (+! (-> a y) (rand-vu-float-range (meters 0.3) (meters 2.2)))
+           (+! (-> a z) (rand-vu-float-range (meters -1) (meters 1)))
+           (+! (-> b x) (rand-vu-float-range (meters -1) (meters 1)))
+           (+! (-> b y) (rand-vu-float-range (meters 0.3) (meters 2.2)))
+           (+! (-> b z) (rand-vu-float-range (meters -1) (meters 1)))
+           (set! (-> arc spec) (-> *lightning-spec-id-table* 20))
+           (set! (-> arc state points-to-draw) 9)
+           (set-first-meet-point arc a)
+           (set-last-meet-point arc b)
+           )
+         )
+        ((and arc (-> self zap-on?))
+         (change-mode arc (lightning-mode lm3))
+         (set! (-> self zap-on?) #f)
+         )
+        )
+      (when (and (not (-> self zap-done?)) (time-elapsed? (-> self zap-time) BF_ZAP_FINISH))
+        (set! (-> self zap-done?) #t)
+        (set! (-> self zap-time) 0)
+        (if (and foe (type? foe process-focusable) (not (focus-test? (the-as process-focusable foe) dead inactive)))
+            (bf-send-attack-pen foe BF_DMG_TAZER (penetrate generic-attack lunge jak-blue-shot))
+            )
+        )
+      )
+    )
   (none)
   )
 
@@ -696,7 +777,7 @@
       (set-time! (-> self fire-time))
       (let ((foe (handle->process (-> self aim-foe))))
         (if (and foe (-> self locked?) (< (vector-vector-distance (-> self aim) from) BF_TAZER_RANGE))
-            (bf-send-attack foe BF_DMG_TAZER)
+            (bf-avatar-zap foe)
             )
         )
       )
@@ -835,8 +916,8 @@
   )
 
 (defbehavior bf-avatar-bite bf-avatar ()
-  "Spider, Circle: jump at the nearest foe ahead and bite what is in reach (BF_LUNGE_RANGE),
-   BF_DMG_BITE."
+  "Spider, Square: jump at the nearest foe ahead and headbutt what is in reach (BF_LUNGE_RANGE): the
+   tazer's shock (`bf-avatar-zap`), its points, its electrocuted knock and arcs."
   (let* ((aim (new 'stack-no-clear 'vector))
          (foe (bf-avatar-aim (-> *target* root trans) (-> *bf* team) BF_FIRE_RANGE aim))
          (dir (vector-! (new 'stack-no-clear 'vector) aim (-> *target* root trans)))
@@ -847,7 +928,7 @@
     (set! (-> *target* control transv z) (-> dir z))
     (set! (-> *target* control transv y) (meters 6))
     (if (and foe (< (vector-vector-distance (-> foe root trans) (-> *target* root trans)) BF_LUNGE_RANGE))
-        (bf-melee-hit foe BF_DMG_BITE)
+        (bf-avatar-zap foe)
         )
     )
   (set-time! (-> self melee-time))
@@ -1034,8 +1115,8 @@
   "Robotguard. WANT (Circle pressed) with the shield recharged: its red shield sphere around Jak for
    BF_SHIELD_TIME, which stops every shot, blast and blow meanwhile (the `target-attacked` wrapper of
    battlefront.gc; the sphere never breaks: BF_SHIELD_STRENGTH), then BF_SHIELD_RECHARGE before the
-   next one (`shield-time`: when it went up, then when it went down). The robot moves and jumps as
-   usual behind it, and does not attack."
+   next one (`shield-time`: when it went up, then when it went down). The robot moves, jumps and
+   fires as usual behind it: the sphere has no collision."
   (let ((shield (handle->process (-> self shield))))
     (cond
       ((and (-> self shield?) (or (not shield) (time-elapsed? (-> self shield-time) BF_SHIELD_TIME)))
@@ -1059,6 +1140,15 @@
          (set! (-> params shield-type) (shield-type shield-type-0))
          (let ((proc (process-spawn bf-shield :init bf-shield-init-by-other params :name "bf-shield" :to *target*)))
            (when proc
+             ;; no collision: the robotguard's own shots went no further than the sphere (5.9 m,
+             ;; seen in game), and Jak's shield level stops every attack meanwhile (battlefront.gc
+             ;; target-attacked). Its states take the collision back from the backup (toggle-shield)
+             (let ((root (-> (the-as shield-sphere (ppointer->process proc)) root)))
+               (set! (-> root backup-collide-as) (collide-spec))
+               (set! (-> root backup-collide-with) (collide-spec))
+               (set! (-> root root-prim prim-core collide-as) (collide-spec))
+               (set! (-> root root-prim prim-core collide-with) (collide-spec))
+               )
              (set! (-> self shield) (ppointer->handle proc))
              (set! (-> self shield?) #t)
              (set! (-> *bf* shield?) #t)
@@ -1444,10 +1534,13 @@
     ;; speed of the class (Jak's surfaces read it every frame)
     (set! (-> *setting-control* user-default speed-mult) speed)
     (set! (-> self was-ground?) ground?)
+    (if ground?
+        (set-time! (-> self ground-time))
+        )
     (bf-avatar-update-aim)
     (cond
-      ((or (-> self shield?) (-> self rolling?) (< (current-time) (-> self dodge-until)))
-       ;; no attack behind the shield, as a ball or in a roll
+      ((or (-> self rolling?) (< (current-time) (-> self dodge-until)))
+       ;; no attack as a ball or in a roll; the robotguard fires behind its shield
        0
        )
       ((and (bf-guard-class? (-> self class)) (= (-> *bf* weapon) BF_WEAPON_TAZER))
@@ -1464,8 +1557,8 @@
          )
        )
       ((= (-> self class) BF_CLASS_SPYDROID)
-       ;; no R1 weapon: it bites with Circle
-       (if (and (cpad-pressed? 0 circle)
+       ;; no R1 weapon: it headbutts with Square
+       (if (and (cpad-pressed? 0 square)
                 (>= (current-time) (-> self melee-until))
                 (time-elapsed? (-> self melee-time) (bf-melee-delay (-> self class)))
                 )
@@ -1515,6 +1608,154 @@
       )
   )
 
+;; ---------------------------------------------------------------------------------------------
+;; The idle pace, the shock, the death
+;; ---------------------------------------------------------------------------------------------
+
+(defun bf-idle-rate ((class int))
+  "Rate the idle clip of CLASS plays at, in the battle and in the class page's preview: the
+   jetpacks' clips at BF_HOVER_RATE (build-actor stores their 15 frames a second as 60), the
+   robotguard's held still (its idle0 is a slow shift of weight the game plays at a tenth of its
+   pace: played on, it read as a stray loop), the others at 1."
+  (case class
+    ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK) BF_HOVER_RATE)
+    ((BF_CLASS_ROBOGUARD) 0.0)
+    (else 1.0)
+    )
+  )
+
+(defun bf-avatar-die ()
+  "The player died (battlefront.gc `bf-target-death`): his class model plays its own death
+   (`bf-avatar-dying`) and then goes. No model: nothing."
+  (let ((av (the-as bf-avatar (handle->process (-> *bf* avatar)))))
+    (when (and av (not (-> av dying?)))
+      (if (-> av shield?)
+          (bf-shield-close av)
+          )
+      (set! (-> av dying?) #t)
+      (set! (-> av die-step) 0)
+      (set! (-> av die-time) (-> av clock frame-counter))
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-sparks bf-avatar ()
+  "The purple sparks of the game's death-default effect (merc-death.gc part 53, which the merc
+   dissolve launches from each vertex) from three of the model's joints: the mod's build-actor
+   models cannot take the merc dissolve itself (battlefront-h.gc `do-effect`)."
+  (let ((n (-> self node-list length)))
+    (when (< 2 n)
+      (dotimes (k 3)
+        (let ((pos (bf-joint-pos self (+ 1 (rand-vu-int-count (+ n -1))) (new 'stack-no-clear 'vector))))
+          (launch-particles (-> *part-id-table* 53) pos)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-boom bf-avatar ((big? symbol))
+  "The game's Krimzon Guard explosion at the model's chest (node 4, or its root): the robotguard's
+   (group-kg-explosion, roboguard-city.gc explode) when BIG?, else the jetpack's
+   (group-kg-small-explosion, flying-turret.gc knocked); the model hidden."
+  (vector-copy! (-> *launch-matrix* trans) (bf-joint-pos self (if (< 4 (-> self node-list length)) 4 0) (new 'stack-no-clear 'vector)))
+  (if big?
+      (part-tracker-spawn part-tracker :to self :group group-kg-explosion)
+      (part-tracker-spawn part-tracker :to self :group group-kg-small-explosion)
+      )
+  (logior! (-> self draw status) (draw-control-status no-draw))
+  (none)
+  )
+
+(defbehavior bf-avatar-dying bf-avatar ()
+  "The player's class model dies (`bf-avatar-die`), a frame: a guard plays its death clip
+   (BF_CLIP_DIE, with the guards' death cry), then dissolves in purple sparks (`bf-avatar-sparks`,
+   the game's enemy-fizz); the robotguard explodes at once; a jetpack guard dissolves, then
+   explodes; the spider explodes with its death cry. Then the model goes (deactivate)."
+  (let ((t (- (-> self clock frame-counter) (-> self die-time)))
+        (class (-> self class))
+        )
+    (cond
+      ((bf-guard-class? class)
+       (case (-> self die-step)
+         ((0)
+          (bf-avatar-top-stop)
+          (sound-play "guard-die")
+          (ja-channel-push! 1 (seconds 0.1))
+          (ja :group! (-> self draw art-group data BF_CLIP_DIE) :num! min)
+          (set! (-> self die-step) 1)
+          )
+         ((1)
+          (ja :num! (seek!))
+          (when (or (ja-done? 0) (< (seconds 2) t))
+            (sound-play "enemy-fizz")
+            (set! (-> self die-step) 2)
+            (set! (-> self die-time) (-> self clock frame-counter))
+            )
+          )
+         (else
+           (bf-avatar-sparks)
+           (if (< (seconds 0.6) t)
+               (logior! (-> self draw status) (draw-control-status no-draw))
+               )
+           (if (< (seconds 1.2) t)
+               (deactivate self)
+               )
+           )
+         )
+       )
+      ((or (= class BF_CLASS_BLUE_JETPACK) (= class BF_CLASS_RED_JETPACK))
+       (case (-> self die-step)
+         ((0)
+          (sound-play "guard-die")
+          (sound-play "enemy-fizz")
+          (set! (-> self die-step) 1)
+          )
+         ((1)
+          (bf-avatar-sparks)
+          (when (< (seconds 0.8) t)
+            (sound-play "fly-turret-die")
+            (bf-avatar-boom #f)
+            (set! (-> self die-step) 2)
+            )
+          )
+         (else
+           (if (< (seconds 2) t)
+               (deactivate self)
+               )
+           )
+         )
+       )
+      (else
+        ;; the robotguard, the spider
+        (case (-> self die-step)
+          ((0)
+           (cond
+             ((= class BF_CLASS_ROBOGUARD)
+              (sound-play "robo-explode")
+              (bf-avatar-boom #t)
+              )
+             (else
+               (sound-play "spydroid-die")
+               (bf-avatar-boom #f)
+               )
+             )
+           (set! (-> self die-step) 1)
+           )
+          (else
+            (if (< (seconds 1.2) t)
+                (deactivate self)
+                )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior bf-avatar-loop-rate bf-avatar ()
   "Rate the looping clip plays at: 1; for a guard or the robotguard walking or running,
    BF_CLASS_PACE, its pace at its speed; for a jetpack, BF_HOVER_RATE, its clips' own pace; for the
@@ -1536,6 +1777,9 @@
                   )
                  ((and walking? (or (bf-guard-class? (-> self class)) (= (-> self class) BF_CLASS_ROBOGUARD)))
                   BF_CLASS_PACE
+                  )
+                 ((= (-> self anim) (-> art idle))
+                  (bf-idle-rate (-> self class))
                   )
                  (else
                    1.0
@@ -1829,7 +2073,11 @@
       ((and (< (current-time) (-> self shoot-until)) (not (bf-guard-class? (-> self class))))
        (bf-avatar-shoot-clip)
        )
-      ((bf-target-airborne?)
+      ;; airborne: the jump clip; the spider's is its attack leap, which a sprint's bumps played
+      ;; (they leave the ground for a few frames): only once it has been off the ground BF_SPIDER_AIR
+      ((and (bf-target-airborne?)
+            (or (!= (-> self class) BF_CLASS_SPYDROID) (time-elapsed? (-> self ground-time) BF_SPIDER_AIR))
+            )
        (-> art jump)
        )
       ;; idle, walk and run: each one plays a quarter of a second at least, and run and walk switch
@@ -1960,6 +2208,9 @@
   (if (-> this bolt)
       (&+! (-> this bolt) offset)
       )
+  (if (-> this arc)
+      (&+! (-> this arc) offset)
+      )
   (if (-> this gun-jm)
       (&+! (-> this gun-jm) offset)
       )
@@ -1985,12 +2236,18 @@
   :virtual #t
   :trans (behavior ()
     (bf-avatar-follow)
-    (if (and *target* (not (focus-test? *target* dead)))
+    (if (and *target* (not (focus-test? *target* dead)) (not (-> self dying?)))
         (bf-avatar-moves)
         )
+    (bf-avatar-zap-update)
     )
   :code (behavior ()
     (until #f
+      ;; the player died: the class model's own death, then it goes (`bf-avatar-dying`)
+      (while (-> self dying?)
+        (bf-avatar-dying)
+        (suspend)
+        )
       (bf-avatar-motion)
       (let ((want (bf-avatar-pick-anim)))
         ;; every new clip blends in (0.1 s). With two blends still running it waits for one to end
@@ -2128,6 +2385,14 @@
   (set! (-> self shield) (the-as handle #f))
   (set! (-> self shield-time) 0)
   (set! (-> self tazing?) #f)
+  (set! (-> self zap-foe) (the-as handle #f))
+  (set! (-> self zap-time) 0)
+  (set! (-> self zap-on?) #f)
+  (set! (-> self zap-done?) #t)
+  (set! (-> self ground-time) 0)
+  (set! (-> self dying?) #f)
+  (set! (-> self die-time) 0)
+  (set! (-> self die-step) 0)
   (set! (-> self hover-y) (-> self root trans y))
   (set! (-> self dodge-until) 0)
   (set! (-> self dodge-time) 0)
@@ -2139,6 +2404,7 @@
   (vector-copy! (-> self aim) (-> self root trans))
   ;; the guards' tazer arc (guard.gc init: spec 19, nothing drawn until it fires)
   (set! (-> self bolt) (the-as lightning-control #f))
+  (set! (-> self arc) (the-as lightning-control #f))
   (set! (-> self gun-jm) (the-as joint-mod #f))
   (set! (-> self aim-jm) (the-as joint-mod #f))
   (set! (-> self blink?) #f)
@@ -2147,6 +2413,11 @@
   (if (and (!= class BF_CLASS_SPYDROID) (< 4 (-> self node-list length)))
       (set! (-> self aim-jm) (new 'process 'joint-mod (joint-mod-mode polar-look-at) self 4))
       )
+  ;; the arcs around a foe the tazer or the spider's headbutt shocks (`bf-avatar-zap`)
+  (when (or (bf-guard-class? class) (= class BF_CLASS_SPYDROID))
+    (set! (-> self arc) (new 'process 'lightning-control (-> *lightning-spec-id-table* 19) self 0.0))
+    (set! (-> self arc state points-to-draw) 0)
+    )
   (when (bf-guard-class? class)
     (set! (-> self bolt) (new 'process 'lightning-control (-> *lightning-spec-id-table* 19) self 0.0))
     (set! (-> self bolt state points-to-draw) 0)
@@ -2247,7 +2518,9 @@
       (if (< 360.0 (-> self angle))
           (+! (-> self angle) -360.0)
           )
-      (ja :num! (loop!))
+      ;; its idle clip at the class's pace in the battle (`bf-idle-rate`): the jetpacks' clips ran four
+      ;; times too fast, and the robotguard's idle, played on, read as a stray loop
+      (ja :num! (loop! (bf-idle-rate (-> self class))))
       (ja-post)
       (suspend)
       )
@@ -2354,6 +2627,8 @@
       )
     )
   (initialize-skeleton self skel (the-as pair 0))
+  ;; the red guard plays the blue guard's clips, as in the battle (its own ran four times as fast)
+  (bf-guard-clips self)
   (bf-class-masks (-> self draw) class (-> *bf* weapon))
   (logclear! (-> self mask) (process-mask menu progress pause actor-pause))
   (+! (-> self clock ref-count) -1)

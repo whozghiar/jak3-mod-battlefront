@@ -270,13 +270,21 @@
   "The class page's description of CLASS into BUF: its help lines (battlefront-h.gc `*bf-classes*`,
    French when the game runs in French), one under the other from Y, each drawn as it is: its
    button tags become the font's button icons (`bf-draw-text`, pc-encode-utf8-string), the first
-   line, the class's features, in the page's title color."
+   line, the class's features, in the page's title color. A line under a D-pad icon (the guards'
+   weapons, one a line) gets more room: the icon stands taller than a line, and three of them 17
+   apart ran into one another."
   (let ((lines (if (bf-fr?) (-> *bf-classes* class desc-fr) (-> *bf-classes* class desc))))
     (dotimes (i (-> lines length))
-      (bf-draw-text buf (-> lines i) 52.0 (+ y (* 17.0 (the float i))) 0.36
-                    (if (zero? i) (font-color menu-parent) (font-color default))
-                    #f
-                    )
+      (let ((line (-> lines i)))
+        (if (or (string-prefix= "~Y" line) (string-prefix= "<PAD_DPAD" line))
+            (+! y 6.0)
+            )
+        (bf-draw-text buf line 52.0 y 0.36
+                      (if (zero? i) (font-color menu-parent) (font-color default))
+                      #f
+                      )
+        (+! y 16.0)
+        )
       )
     )
   (none)
@@ -628,7 +636,8 @@
             (bf-draw-text buf
                       (bf-page-label page team i)
                       54.0
-                      (+ 122.0 (* 22.0 (the float i)))
+                      ;; the class page's names closer, for its help lines (`bf-draw-class-help`)
+                      (+ 122.0 (* (if (= page BF_PAGE_CLASS) 20.0 22.0) (the float i)))
                       ;; the class names are longer ("Red Krimzon Guard (Jetpack)" ran past the panel)
                       (if (or (= page BF_PAGE_CLASS) (= page BF_PAGE_PAUSE)) 0.43 0.5)
                       (cond
@@ -642,7 +651,7 @@
           (cond
             ((= page BF_PAGE_CLASS)
              ;; under the class list, which holds two or four names
-             (bf-draw-class-help buf (+ (* team 4) (-> self cursor)) (+ 128.0 (* 22.0 (the float (bf-page-count page)))))
+             (bf-draw-class-help buf (+ (* team 4) (-> self cursor)) (+ 128.0 (* 20.0 (the float (bf-page-count page)))))
              )
             ((= page BF_PAGE_PAUSE)
              0
@@ -660,7 +669,8 @@
                       ((= (-> *bf* phase) BF_PHASE_DEPLOY) (bf-tr "Loading the war zone..." "Chargement de la zone de guerre..."))
                       (else (bf-tr "<PAD_X> Deploy" "<PAD_X> Déployer"))
                       )
-                    54.0 330.0 0.4 (font-color default) #f)
+                    ;; on the class page, under the guards' seven help lines
+                    54.0 (if (= page BF_PAGE_CLASS) 340.0 330.0) 0.4 (font-color default) #f)
           (cond
             ((= page BF_PAGE_CLASS)
              0
@@ -854,7 +864,8 @@
 (defun bf-class-gauge ()
   "Level (0 to 1) of the class's gauge: the jetpack's boost, the spider's blue eco, or the
    robotguard's shield (draining while it is up, then refilling until it can go up again); -1.0
-   for none."
+   for none. The shield's times are the avatar's clock: the HUD runs on another one, and read on
+   it the gauge came back full at once while the shield still recharged."
   (let ((av (the-as bf-avatar (handle->process (-> *bf* avatar))))
         (class (-> *bf* class))
         )
@@ -863,7 +874,7 @@
       ((or (= class BF_CLASS_BLUE_JETPACK) (= class BF_CLASS_RED_JETPACK)) (-> av fuel))
       ((= class BF_CLASS_SPYDROID) (-> av boost))
       ((= class BF_CLASS_ROBOGUARD)
-       (let ((since (the float (- (current-time) (-> av shield-time)))))
+       (let ((since (the float (- (-> av clock frame-counter) (-> av shield-time)))))
          (cond
            ((-> av shield?) (fmax 0.0 (- 1.0 (/ since (the float BF_SHIELD_TIME)))))
            ((zero? (-> av shield-time)) 1.0)
@@ -2683,6 +2694,38 @@
 ;; Player death and hits
 ;; ---------------------------------------------------------------------------------------------
 
+;; Stock sound player, kept the same way.
+(define-perm *bf-stock-sound-play-by-name*
+             (function sound-name sound-id int int int sound-group object sound-id :behavior process-drawable)
+             sound-play-by-name
+             )
+
+(defbehavior sound-play-by-name process-drawable ((name sound-name)
+                                                  (id sound-id)
+                                                  (vol int)
+                                                  (pitch int)
+                                                  (bend int)
+                                                  (group sound-group)
+                                                  (trans object)
+                                                  )
+  "Every sound the game plays by name. During a fight with the class model up, Jak's cry as a hit
+   lands (target-death.gc target-hit, target-handler.gc: oof, hit-up) is his class's instead: the
+   guards' (the jetpack guards' too), the spider robot's, none for the robotguard, which has no cry
+   of its own. The rest is the stock player."
+  (if (and (or (sound-name= name (static-sound-name "oof")) (sound-name= name (static-sound-name "hit-up")))
+           (bf-fighting?)
+           (bf-avatar-alive?)
+           (= self *target*)
+           )
+      (case (-> *bf* class)
+        ((BF_CLASS_ROBOGUARD) id)
+        ((BF_CLASS_SPYDROID) (*bf-stock-sound-play-by-name* (static-sound-name "spydroid-hit") id vol pitch bend group trans))
+        (else (*bf-stock-sound-play-by-name* (static-sound-name "guard-hit") id vol pitch bend group trans))
+        )
+      (*bf-stock-sound-play-by-name* name id vol pitch bend group trans)
+      )
+  )
+
 ;; Stock attack handler of the player, kept the same way.
 (define-perm *bf-stock-target-attacked*
              (function symbol attack-info process touching-shapes-entry (state symbol attack-info target) object :behavior target)
@@ -2698,7 +2741,8 @@
   "Every attack on the player goes through here. During a fight with the class model up: an attack
    from the player's own side is ignored (no damage, no hit reaction: returns #f); any other takes
    its points on the battle's 24 point scale (battlefront-h.gc `bf-attack-damage`, from its sender
-   and its attacker) off Jak's health, his whole bar standing for 24 points (`bf-class-health`);
+   and its attacker) off Jak's health, his whole bar standing for 24 points (`bf-class-health`),
+   and kills when it leaves less than one segment of the ring;
    one the battle does not know keeps its own damage (Jak's health-single-inc when it names none).
    While the robotguard's shield is up, Jak's shield level stops every attack, shot, blast or blow
    (set for each attack, then the stock handler runs)."
@@ -2712,7 +2756,14 @@
            (set! ignore? #t)
            )
           ((<= 0.0 dmg)
-           (set! (-> arg1 damage) (* dmg (/ (-> self fact health-max) 24.0)))
+           (let ((hp (* dmg (/ (-> self fact health-max) 24.0))))
+             ;; the health ring lights (the int health) segments: a hit that leaves less than one
+             ;; shows an empty ring, and took one more hit to die (the author's play). It kills.
+             (if (< (- (-> self fact health) hp) 1.0)
+                 (set! hp (-> self fact health))
+                 )
+             (set! (-> arg1 damage) hp)
+             )
            (logior! (-> arg1 mask) (attack-mask damage))
            )
           )
@@ -2882,7 +2933,11 @@
     (+! (-> *bf* deaths) 1)
     )
   (set! (-> *bf* redeploy-ok?) #f)
-  (bf-avatar-kill)
+  ;; the class model plays its own death (battlefront-player.gc `bf-avatar-dying`), a redeploy none
+  (if (= mode 'bf-redeploy)
+      (bf-avatar-kill)
+      (bf-avatar-die)
+      )
   (set! (-> *bf* respawn-time) (+ (current-time) (if (= mode 'bf-redeploy) 0 BF_RESPAWN_TIME)))
   (set! (-> *bf* spectate) (the-as handle #f))
   (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
@@ -2899,7 +2954,10 @@
   ;; the wait; a death that ends the battle cuts it short, for the result page
   (while (and (bf-fighting?) (< (current-time) (-> *bf* respawn-time)))
     (logior! (-> self draw status) (draw-control-status no-draw))
-    (bf-spectate-follow (-> self control trans))
+    ;; the camera stays on the dying class model, then follows a unit of his side
+    (if (not (bf-avatar-alive?))
+        (bf-spectate-follow (-> self control trans))
+        )
     (suspend)
     )
   ;; the respawn point: his side's base, or a control point it holds, picked on the city's map at

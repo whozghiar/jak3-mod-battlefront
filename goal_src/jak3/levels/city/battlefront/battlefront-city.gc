@@ -477,25 +477,41 @@
   (none)
   )
 
-(defun bf-city-goal-point ((team int) (from vector))
+(defconstant BF_OTHER_GOAL 3) ;; units in 10 (by their process id) that go for another point than the nearest
+
+(defun bf-city-goal-point ((team int) (from vector) (other? symbol))
   "The control point nearest FROM that side TEAM does not hold: its units' objective (battlefront.gc
-   `bf-update-points` captures it once they hold it). -1 when TEAM holds every one."
+   `bf-update-points` captures it once they hold it); OTHER?: the second nearest, when there is one,
+   so the units do not all go for the same point. -1 when TEAM holds every one."
   (let ((best -1)
         (best-d 0.0)
+        (next -1)
+        (next-d 0.0)
         )
     (dotimes (i (-> *bf* point-count))
       (let ((pt (-> *bf* points i)))
         (when (and (not (-> pt base?)) (!= (-> pt owner) team))
           (let ((d (vector-vector-xz-distance (-> pt pos) from)))
-            (when (or (< best 0) (< d best-d))
-              (set! best i)
-              (set! best-d d)
+            (cond
+              ((or (< best 0) (< d best-d))
+               (set! next best)
+               (set! next-d best-d)
+               (set! best i)
+               (set! best-d d)
+               )
+              ((or (< next 0) (< d next-d))
+               (set! next i)
+               (set! next-d d)
+               )
               )
             )
           )
         )
       )
-    best
+    (if (and other? (>= next 0))
+        next
+        best
+        )
     )
   )
 
@@ -555,7 +571,8 @@
    posts: a contested point near it first (`bf-city-contested-point`), to clear it of the other
    side's units so the capture can go on; else the control point it guards, while its side holds it
    (bf-transport.gc `bf-post-point`: one unit in four a transport drops there); else the nearest
-   point its side does not hold (`bf-city-goal-point`), to conquer it; with every control point
+   point its side does not hold (`bf-city-goal-point`), to conquer it, or for BF_OTHER_GOAL units in
+   10 (by their process id) the second nearest, so not all go for the same one; with every control point
    held, the one nearest it (`bf-city-guard-point`). -1 for none."
   (let* ((pos (-> (the-as process-drawable proc) root trans))
          (contest (bf-city-contested-point team pos))
@@ -565,7 +582,7 @@
       ((>= contest 0) contest)
       ((and (>= post 0) (= (-> *bf* points post owner) team)) post)
       (else
-        (let ((goal (bf-city-goal-point team pos)))
+        (let ((goal (bf-city-goal-point team pos (< (mod (-> proc pid) 10) BF_OTHER_GOAL))))
           (if (>= goal 0)
               goal
               (bf-city-guard-point team pos)
@@ -664,6 +681,7 @@
    (from   nav-mesh BF_MARCH_MAX)
    (to     vector   BF_MARCH_MAX :inline)
    (hop    int16    BF_MARCH_MAX)     ;; the bridge it crosses at `to` (100 + 2 k + side), -1 none
+   (point  int16    BF_MARCH_MAX)     ;; the battle point it marches to
    (goal   nav-mesh BF_POINT_MAX)     ;; each point's mesh this tick, #f for none loaded
    )
   )
@@ -683,6 +701,7 @@
    (time          time-frame)                     ;; last build
    (mesh          nav-mesh BF_WAY_MESHES)
    (next          int16    4608)                  ;; BF_POINT_MAX (6) times BF_WAY_MESHES
+   (depth         int16    4608)                  ;; the same: meshes from it to the point's (0 its own)
    (queue         int16    BF_WAY_MESHES)
    (prev          nav-mesh BF_WAY_MESHES)         ;; the meshes listed when the bridges were made
    (prev-count    int32)
@@ -905,9 +924,11 @@
             )
         (dotimes (k (-> w count))
           (set! (-> w next (+ base k)) -1)
+          (set! (-> w depth (+ base k)) -1)
           )
         (when (>= g 0)
           (set! (-> w next (+ base g)) -2)
+          (set! (-> w depth (+ base g)) 0)
           (set! (-> w queue 0) g)
           (set! tail 1)
           (while (< head tail)
@@ -921,6 +942,7 @@
                     (dotimes (b (-> nb link-count))
                       (when (= (-> nb link-array b dest-mesh) cur)
                         (set! (-> w next (+ base nbi)) b)
+                        (set! (-> w depth (+ base nbi)) (+ (-> w depth (+ base (-> w queue head))) 1))
                         (set! (-> w queue tail) nbi)
                         (+! tail 1)
                         (set! b (the-as int (-> nb link-count)))
@@ -942,6 +964,7 @@
                     (when (and (>= other 0) (= (-> w next (+ base other)) -1))
                       ;; from the other end's side: 0 when it is the bridge's mesh-a
                       (set! (-> w next (+ base other)) (+ 100 (* 2 k) (if (= (-> w mesh-a k) other) 0 1)))
+                      (set! (-> w depth (+ base other)) (+ (-> w depth (+ base ci)) 1))
                       (set! (-> w queue tail) other)
                       (+! tail 1)
                       )
@@ -957,6 +980,46 @@
     (set-time! (-> w time))
     )
   (none)
+  )
+
+(defun bf-march-link ((m nav-mesh) (k int) (goal int) (pid int) (first int))
+  "The link of mesh M (`*bf-ways*` mesh K) unit PID crosses toward point GOAL: one of the links of M
+   that lead a mesh nearer the point (`depth`), the same one for a unit each time (by its process
+   id), so the units take the several streets and meshes a way can go by; FIRST (the search's own)
+   when it has no other."
+  (let ((w *bf-ways*)
+        (base (* goal BF_WAY_MESHES))
+        (n 0)
+        )
+    (let ((want (+ (-> w depth (+ base k)) -1)))
+      (dotimes (l (-> m link-count))
+        (let* ((nb (-> m link-array l dest-mesh))
+               (nbi (if nb (bf-ways-index nb) -1))
+               )
+          (if (and (>= nbi 0) (= (-> w depth (+ base nbi)) want))
+              (+! n 1)
+              )
+          )
+        )
+      (when (> n 1)
+        (let ((pick (mod (+ pid goal) n)))
+          (dotimes (l (-> m link-count))
+            (let* ((nb (-> m link-array l dest-mesh))
+                   (nbi (if nb (bf-ways-index nb) -1))
+                   )
+              (when (and (>= nbi 0) (= (-> w depth (+ base nbi)) want))
+                (if (zero? pick)
+                    (return l)
+                    )
+                (+! pick -1)
+                )
+              )
+            )
+          )
+        )
+      )
+    first
+    )
   )
 
 (defun bf-march-waypoint ((unit nav-enemy) (goal int) (pos vector) (out vector))
@@ -979,7 +1042,7 @@
        #t
        )
       ((>= nx 0)
-       (bf-march-through m nx out)
+       (bf-march-through m (bf-march-link m k goal (-> unit pid) nx) out)
        )
       (else
         #f
@@ -1030,6 +1093,7 @@
               )
          (set! (-> w unit (-> w count)) (process->handle unit))
          (set! (-> w from (-> w count)) (-> unit nav state mesh))
+         (set! (-> w point (-> w count)) goal)
          ;; a bridge to cross at the waypoint: its code from the ways
          (let* ((k (bf-ways-index (-> unit nav state mesh)))
                 (nx (if (>= k 0) (-> *bf-ways* next (+ (* goal BF_WAY_MESHES) k)) -1))
@@ -1053,14 +1117,31 @@
    control as target each frame (citizen.gc), the nav control finding the way across the mesh. The
    lanes set it again at a lane's end; this puts it back the next frame. No idle stop on the way
    (wait-time: the 'active trans stops the unit once it is over). A unit that moved onto its next
-   mesh is left to its lanes until the next plan, which sends it on."
+   mesh goes on at once to its next waypoint there (left to its lanes until the next plan, a unit at
+   the edge of a section turned back and circled)."
   (let ((w *bf-march*))
     (dotimes (i (-> w count))
       (let ((unit (the-as citizen (handle->process (-> w unit i)))))
         (when (and unit (bf-city-walking? unit) (-> unit nav))
           (cond
             ((!= (-> unit nav state mesh) (-> w from i))
-             (set! (-> w unit i) (the-as handle #f))
+             ;; onto its next mesh: on at once to its next waypoint. Left to its lanes until the next
+             ;; plan, a unit at the edge of a section turned back and circled there (the author's play)
+             (let* ((pt (-> w point i))
+                    (m (-> unit nav state mesh))
+                    (k (if m (bf-ways-index m) -1))
+                    (nx (if (>= k 0) (-> *bf-ways* next (+ (* pt BF_WAY_MESHES) k)) -1))
+                    )
+               (cond
+                 ((and m (>= pt 0) (bf-march-waypoint unit pt (-> *bf* points pt pos) (-> w to i)))
+                  (set! (-> w from i) m)
+                  (set! (-> w hop i) (if (>= nx 100) nx -1))
+                  )
+                 (else
+                   (set! (-> w unit i) (the-as handle #f))
+                   )
+                 )
+               )
              )
             ;; at a bridge's end: onto the other mesh, just across the seam
             ((and (>= (-> w hop i) 100)

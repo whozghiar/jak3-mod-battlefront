@@ -338,7 +338,9 @@
 
 ;; The war zone: the whole of Haven City. Each side's base is a stock continue point: the Freedom
 ;; League's at the entrance of its headquarters (the point Jak comes out at when he leaves them), the
-;; Krimzon Guard's on the Port's east docks, by its war zone. The battle used to hold one district,
+;; Krimzon Guard's in the middle of the Port, 89 m from where its control point stood before round 23
+;; (the continue point nearest it), the control point on the east docks where the base stood: the
+;; author swapped them. The battle used to hold one district,
 ;; its sections kept loaded and a force field at its edges; the author wanted the whole city.
 (define *bf-zones*
   (new 'static 'boxed-array :type bf-zone
@@ -348,7 +350,7 @@
       :name-fr "Haven City"
       :desc-fr "Toute la ville : un point de contrôle dans chaque quartier, le Port, la zone industrielle, les bas quartiers et le QG de la Ligue."
       :ff-continue "ctyslumc-freehq-exit"
-      :kg-continue "ctyport-bombbot"
+      :kg-continue "ctyport-bbush-8"
       )
     )
   )
@@ -359,9 +361,11 @@
 (define *bf-point-defs*
   (new 'static 'boxed-array :type bf-point-def
     (new 'static 'bf-point-def :name "Freedom League base" :name-fr "Base de la Ligue" :continue "ctyslumc-freehq-exit")
-    (new 'static 'bf-point-def :name "Krimzon Guard base" :name-fr "Base de la Grenagarde" :continue "ctyport-bombbot")
-    (new 'static 'bf-point-def :name "Port" :name-fr "Port" :continue "ctyport-bbush-6"
-      :x 225.08 :y 9.71 :z 1368.35)
+    (new 'static 'bf-point-def :name "Krimzon Guard base" :name-fr "Base de la Grenagarde" :continue "ctyport-bbush-8")
+    ;; on the east docks, where the Krimzon Guard's base stood (its continue point's place, as the
+    ;; battle moved it onto open ground)
+    (new 'static 'bf-point-def :name "Port" :name-fr "Port" :continue "ctyport-bombbot"
+      :x 619.80 :y 7.70 :z 1476.66)
     (new 'static 'bf-point-def :name "Industrial Zone" :name-fr "Zone industrielle" :continue "ctyinda-bbush-5"
       :x 929.45 :y 10.17 :z 854.68)
     (new 'static 'bf-point-def :name "Slums" :name-fr "Bas quartiers" :continue "ctysluma-alley"
@@ -376,9 +380,9 @@
 (define *bf-point-links*
   (new 'static 'array uint32 6
     #b100000  ;; Freedom League base: Freedom HQ
-    #b001100  ;; Krimzon Guard base: Port, Industrial Zone
-    #b001010  ;; Port: Krimzon Guard base, Industrial Zone
-    #b010110  ;; Industrial Zone: Krimzon Guard base, Port, Slums
+    #b000100  ;; Krimzon Guard base (the Port's middle): Port
+    #b001010  ;; Port (the east docks): Krimzon Guard base, Industrial Zone
+    #b010100  ;; Industrial Zone: Port, Slums
     #b101000  ;; Slums: Industrial Zone, Freedom HQ
     #b010001  ;; Freedom HQ: Freedom League base, Slums
     )
@@ -387,9 +391,10 @@
 (define *bf-team-names* (new 'static 'boxed-array :type string "Freedom League" "Krimzon Guard"))
 (define *bf-team-names-fr* (new 'static 'boxed-array :type string "Ligue de la liberté" "Grenagarde"))
 
-;; The guards' help, the same for both colors. The font has no icon for the left D-pad button, only
-;; for its up and down ones and all four: the tazer's line builds it from the icon's parts the way
-;; font_db_jak3.cpp builds <PAD_DPAD_UP>, its left part lit (~3L) instead of its up part.
+;; The guards' help, the same for both colors, a weapon a line. The font has no icon for the left
+;; D-pad button, and its <PAD_DPAD_DOWN> lights the up part too: the tazer's and the rifle's lines
+;; build theirs from the icon's parts the way font_db_jak3.cpp builds <PAD_DPAD_UP>, the left part
+;; lit (~3L) for the tazer, the down part alone for the rifle.
 (define *bf-guard-help*
   (new 'static 'boxed-array :type string
     "24 HP. Rifle 10/20, 5 grenades"
@@ -397,7 +402,8 @@
     "<PAD_L1> Crouch: steadier aim"
     "<PAD_L2> + <PAD_ANALOG_ANY> Dodge    <PAD_R2> + <PAD_ANALOG_ANY> Roll"
     "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Tazer (every 20 s)"
-    "<PAD_DPAD_DOWN> Rifle    <PAD_DPAD_UP> Grenades"
+    "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~3L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Rifle"
+    "<PAD_DPAD_UP> Grenades"
     )
   )
 
@@ -408,7 +414,8 @@
     "<PAD_L1> S'accroupir : tir plus précis"
     "<PAD_L2> + <PAD_ANALOG_ANY> Esquive    <PAD_R2> + <PAD_ANALOG_ANY> Roulade"
     "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Tazer (toutes les 20 s)"
-    "<PAD_DPAD_DOWN> Fusil    <PAD_DPAD_UP> Grenades"
+    "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~3L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Fusil"
+    "<PAD_DPAD_UP> Grenades"
     )
   )
 
@@ -448,7 +455,7 @@
          :desc (new 'static 'boxed-array :type string
                  "24 HP. Slow and heavy."
                  "<PAD_R1> Two shots    <PAD_SQUARE> Punch"
-                 "<PAD_CIRCLE> Shield for 5 s"
+                 "<PAD_CIRCLE> Shield for 5 s, firing behind it"
                  "Shield recharge: 25 s"
                  "<PAD_R2> Ball / stand up"
                  )
@@ -456,7 +463,7 @@
          :desc-fr (new 'static 'boxed-array :type string
                     "24 PV. Lent et lourd."
                     "<PAD_R1> Deux tirs    <PAD_SQUARE> Poing"
-                    "<PAD_CIRCLE> Bouclier pendant 5 s"
+                    "<PAD_CIRCLE> Bouclier 5 s, tir possible derrière"
                     "Recharge du bouclier : 25 s"
                     "<PAD_R2> Boule / redéploiement"
                     )
@@ -464,13 +471,15 @@
     (new 'static 'bf-class-info :name "Spider Robot" :team BF_TEAM_KG
          :desc (new 'static 'boxed-array :type string
                  "12 HP. Fast."
-                 "<PAD_X> 11 m leap    <PAD_CIRCLE> Bite"
+                 "<PAD_X> 11 m leap"
+                 "<PAD_SQUARE> Headbutt: shocks as the tazer"
                  "<PAD_R2> Sprint, 10 s gauge"
                  )
          :name-fr "Araignée robot"
          :desc-fr (new 'static 'boxed-array :type string
                     "12 PV. Rapide."
-                    "<PAD_X> Bond de 11 m    <PAD_CIRCLE> Morsure"
+                    "<PAD_X> Bond de 11 m"
+                    "<PAD_SQUARE> Coup de tête : choc du tazer"
                     "<PAD_R2> Sprint, jauge de 10 s"
                     )
          )
