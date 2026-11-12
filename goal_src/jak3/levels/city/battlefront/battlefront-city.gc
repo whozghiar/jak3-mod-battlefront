@@ -107,11 +107,11 @@
 
 ;; Each side's units in each battle point's zone (BF_ZONE_REACH), counted twice a second from
 ;; `*bf-unit-dots*` (`bf-city-steer`): index BF_POINT_MAX side + point.
-(define *bf-zone-near* (new 'static 'array int32 12))
+(define *bf-zone-near* (new 'static 'array int32 20))
 
 ;; The same within BF_THREAT_REACH: a point's guards (`bf-post-point`) hold it while the other side's
 ;; units are this close, and go on to the next point once none is.
-(define *bf-threat-near* (new 'static 'array int32 12))
+(define *bf-threat-near* (new 'static 'array int32 20))
 
 ;; The units with a foe within BF_ENGAGE_REACH at the last retarget (`bf-city-retarget`): they fight
 ;; instead of marching (`bf-march-plan`). Stopped by a foe up to BF_HATE_REACH (100 m), the units
@@ -638,41 +638,55 @@
   (none)
   )
 
-(defconstant BF_OTHER_GOAL 3) ;; units in 10 (by their process id) that go for another point than the nearest
+(defconstant BF_GOAL_PICK 3) ;; a unit heads for one of this many points its side does not hold, drawn at random
 
-(defun bf-city-goal-point ((team int) (from vector) (other? symbol))
-  "The control point nearest FROM that side TEAM does not hold: its units' objective (battlefront.gc
-   `bf-update-points` captures it once they hold it); OTHER?: the second nearest, when there is one,
-   so the units do not all go for the same point. -1 when TEAM holds every one."
-  (let ((best -1)
-        (best-d 0.0)
-        (next -1)
-        (next-d 0.0)
+(defun bf-city-owners-key ()
+  "A number that changes whenever a point changes hands: each point's owner, two bits a point."
+  (let ((key 0))
+    (dotimes (i (-> *bf* point-count))
+      (set! key (+ (* key 4) (+ (-> *bf* points i owner) 1)))
+      )
+    key
+    )
+  )
+
+(defun bf-city-goal-point ((team int) (pick int))
+  "A control point side TEAM does not hold, its units' objective (battlefront.gc `bf-update-points`
+   captures it once they hold it): of the BF_GOAL_PICK such points nearest TEAM's base (fewer when
+   fewer are left), number PICK modulo how many, from the nearest. Ranked from the base, not from
+   the unit, a pick holds while the unit walks: ranked from the unit, the second nearest became the
+   nearest on the way, and the unit turned to another. -1 when TEAM holds every one."
+  (let ((base (-> *bf* points team pos))
+        (n 0)
+        (taken 0)
+        (best -1)
         )
     (dotimes (i (-> *bf* point-count))
-      (let ((pt (-> *bf* points i)))
-        (when (and (not (-> pt base?)) (!= (-> pt owner) team))
-          (let ((d (vector-vector-xz-distance (-> pt pos) from)))
-            (cond
-              ((or (< best 0) (< d best-d))
-               (set! next best)
-               (set! next-d best-d)
-               (set! best i)
-               (set! best-d d)
-               )
-              ((or (< next 0) (< d next-d))
-               (set! next i)
-               (set! next-d d)
-               )
+      (if (and (not (-> *bf* points i base?)) (!= (-> *bf* points i owner) team))
+          (+! n 1)
+          )
+      )
+    (when (> n 0)
+      (dotimes (r (+ (mod pick (min n BF_GOAL_PICK)) 1))
+        (set! best -1)
+        (let ((best-d 0.0))
+          (dotimes (i (-> *bf* point-count))
+            (let ((pt (-> *bf* points i)))
+              (when (and (not (-> pt base?)) (!= (-> pt owner) team) (not (logtest? taken (ash 1 i))))
+                (let ((d (vector-vector-xz-distance (-> pt pos) base)))
+                  (when (or (< best 0) (< d best-d))
+                    (set! best i)
+                    (set! best-d d)
+                    )
+                  )
+                )
               )
             )
           )
+        (set! taken (logior taken (ash 1 best)))
         )
       )
-    (if (and other? (>= next 0))
-        next
-        best
-        )
+    best
     )
   )
 
@@ -698,12 +712,16 @@
     )
   )
 
+(defconstant BF_CONTEST_RATIO 3) ;; a side's units come to a contested point while fewer than this many per foe, plus 2, stand in its zone
+
 (defun bf-city-contested-point ((team int) (from vector))
   "The contested control point nearest FROM within BF_CONTEST_REACH for side TEAM: units of the other
    side stand in its zone (BF_ZONE_REACH, `*bf-zone-near*`) while TEAM's units stand there too or
    TEAM holds it: its defenders come as the attackers do, before the capture starts. With the
    capture radius (15 m) alone, no point was ever fought over in 10 minutes: the attackers took
-   them empty. -1 for none."
+   them empty. From outside its zone, only while TEAM has fewer than BF_CONTEST_RATIO units per foe,
+   plus 2, in it: every unit within 250 m came, and 25 of a side stood at one point held against a
+   foe or two out of their sight (round 27's tests). -1 for none."
   (let ((best -1)
         (best-d 0.0)
         (foe (bf-other-team team))
@@ -715,7 +733,14 @@
                    (or (> (-> *bf-zone-near* (+ (* BF_POINT_MAX team) i)) 0) (= (-> pt owner) team))
                    )
           (let ((d (vector-vector-xz-distance (-> pt pos) from)))
-            (when (and (< d BF_CONTEST_REACH) (or (< best 0) (< d best-d)))
+            (when (and (< d BF_CONTEST_REACH)
+                       (or (< best 0) (< d best-d))
+                       (or (< d BF_ZONE_REACH)
+                           (< (-> *bf-zone-near* (+ (* BF_POINT_MAX team) i))
+                              (+ 2 (* BF_CONTEST_RATIO (-> *bf-zone-near* (+ (* BF_POINT_MAX foe) i))))
+                              )
+                           )
+                       )
               (set! best i)
               (set! best-d d)
               )
@@ -733,10 +758,11 @@
    side's units so the capture can go on; else the control point it guards, while its side holds it
    and the other side's units come within BF_THREAT_REACH of it (bf-transport.gc `bf-post-point`:
    one unit in four brought there; with no foe coming, the guards stood around the point already
-   taken, the author's play, round 26); else the nearest
-   point its side does not hold (`bf-city-goal-point`), to conquer it, or for BF_OTHER_GOAL units in
-   10 (by their process id) the second nearest, so not all go for the same one; with every control point
-   held, the one nearest it (`bf-city-guard-point`). -1 for none."
+   taken, the author's play, round 26); else one of the BF_GOAL_PICK points its side does not hold
+   nearest its base (`bf-city-goal-point`), to conquer it, drawn at random by its process id and
+   the points' owners (`bf-city-owners-key`): the units spread over the front, and each draws again
+   when a point changes hands (the author's wish, round 27: before, all went for the nearest but 3
+   in 10); with every control point held, the one nearest it (`bf-city-guard-point`). -1 for none."
   (let* ((pos (-> (the-as process-drawable proc) root trans))
          (contest (bf-city-contested-point team pos))
          (post (bf-post-point proc))
@@ -750,7 +776,7 @@
        post
        )
       (else
-        (let ((goal (bf-city-goal-point team pos (< (mod (-> proc pid) 10) BF_OTHER_GOAL))))
+        (let ((goal (bf-city-goal-point team (+ (-> proc pid) (bf-city-owners-key)))))
           (if (>= goal 0)
               goal
               (bf-city-guard-point team pos)
@@ -868,8 +894,8 @@
   ((count         int32)
    (time          time-frame)                     ;; last build
    (mesh          nav-mesh BF_WAY_MESHES)
-   (next          int16    4608)                  ;; BF_POINT_MAX (6) times BF_WAY_MESHES
-   (depth         int16    4608)                  ;; the same: meshes from it to the point's (0 its own)
+   (next          int16    7680)                  ;; BF_POINT_MAX (10) times BF_WAY_MESHES
+   (depth         int16    7680)                  ;; the same: meshes from it to the point's (0 its own)
    (queue         int16    BF_WAY_MESHES)
    (prev          nav-mesh BF_WAY_MESHES)         ;; the meshes listed when the bridges were made
    (prev-count    int32)
@@ -1459,21 +1485,54 @@
        )
   )
 
+(defun bf-city-zone-foe ((team int) (i int) (from vector) (out vector))
+  "OUT: the place of the unit of the other side than TEAM in point I's zone (BF_ZONE_REACH,
+   `*bf-unit-dots*`) nearest FROM. Returns #f when none stands there."
+  (let ((dots *bf-unit-dots*)
+        (best -1)
+        (best-d 0.0)
+        )
+    (dotimes (d (-> dots count))
+      (when (and (!= (-> dots team d) team)
+                 (< (vector-vector-xz-distance (-> dots pos d) (-> *bf* points i pos)) BF_ZONE_REACH)
+                 )
+        (let ((dist (vector-vector-xz-distance (-> dots pos d) from)))
+          (when (or (< best 0) (< dist best-d))
+            (set! best d)
+            (set! best-d dist)
+            )
+          )
+        )
+      )
+    (when (>= best 0)
+      (vector-copy! out (-> dots pos best))
+      #t
+      )
+    )
+  )
+
 (defun bf-march-plan ((unit citizen) (team int))
   "In `bf-city-steer`: UNIT of side TEAM, with no foe in sight (`bf-city-engaged?`: it fights that
    one first), walking its lanes (`bf-city-walking?`) more than BF_MARCH_NEAR from
    its point (`bf-city-unit-goal`) in a loaded section, marches there: `*bf-march*` gets it with its
-   waypoint (`bf-march-waypoint`) and its mesh now. A unit walking its lanes near its point walks
-   again (its walking speed: a march runs)."
+   waypoint (`bf-march-waypoint`) and its mesh now. With units of the other side in the point's
+   zone, it marches at the nearest of them (`bf-city-zone-foe`) instead of the point's middle: sent
+   to the middle, the defenders of a point stood there out of sight of the foe that held them
+   (round 27's tests). A unit walking its lanes near where it goes walks again (its walking speed: a
+   march runs)."
   (let ((w *bf-march*)
         (goal (bf-city-unit-goal unit team))
+        (to (new 'stack-no-clear 'vector))
+        )
+    (if (and (>= goal 0) (not (bf-city-zone-foe team goal (-> unit root trans) to)))
+        (vector-copy! to (-> *bf* points goal pos))
         )
     ;; a unit with a foe in sight fights it (the stock guard's own attack), no march
     (when (and (-> unit nav) (bf-city-walking? unit) (not (bf-city-engaged? unit)))
       (cond
         ((and (>= goal 0) (< (-> w count) BF_MARCH_MAX) (-> w goal goal)
-              (< BF_MARCH_NEAR (vector-vector-xz-distance (-> unit root trans) (-> *bf* points goal pos)))
-              (bf-march-waypoint unit goal (-> *bf* points goal pos) (-> w to (-> w count)))
+              (< BF_MARCH_NEAR (vector-vector-xz-distance (-> unit root trans) to))
+              (bf-march-waypoint unit goal to (-> w to (-> w count)))
               )
          (set! (-> w unit (-> w count)) (process->handle unit))
          (set! (-> w from (-> w count)) (-> unit nav state mesh))
@@ -1677,7 +1736,7 @@
       (set! (-> w goal i) (find-nearest-nav-mesh (-> *bf* points i pos) (meters 2)))
       )
     ;; each side's units in each point's zone (`bf-city-contested-point`)
-    (dotimes (k 12)
+    (dotimes (k (* 2 BF_POINT_MAX))
       (set! (-> *bf-zone-near* k) 0)
       (set! (-> *bf-threat-near* k) 0)
       )
@@ -2049,6 +2108,33 @@
             )
           )
         (format 0 "~%")
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-ways-near ((pt vector) (reach float))
+  "Print every nav poly of the loaded meshes (`*bf-ways*`) whose middle lies within REACH of PT
+   across, the link polys aside: its mesh's index, its middle and how far, for the tests (where to
+   put a control point)."
+  (let ((w *bf-ways*)
+        (c (new 'stack-no-clear 'vector))
+        )
+    (dotimes (k (-> w count))
+      (let ((m (-> w mesh k)))
+        (when (and m (< (vector-vector-xz-distance (the-as vector (-> m bounds)) pt) (+ (-> m bounds r) reach)))
+          (dotimes (i (-> m poly-count))
+            (let ((poly (-> m poly-array i)))
+              (when (not (logtest? (-> poly pat) 4))
+                (poly-centroid m poly c)
+                (if (< (vector-vector-xz-distance c pt) reach)
+                    (format 0 "SMOKE poly mesh ~D at ~M ~M ~M, ~M away~%" k (-> c x) (-> c y) (-> c z) (vector-vector-xz-distance c pt))
+                    )
+                )
+              )
+            )
+          )
         )
       )
     )
@@ -2718,14 +2804,9 @@
                   (if (type? proc citizen)
                       (vector-copy! (-> (the-as citizen proc) dest-point) at)
                       )
-                  (when (zero? (rand-vu-int-count 4))
-                    (let ((n (-> *bf-posts* next)))
-                      (set! (-> *bf-posts* unit n) (process->handle proc))
-                      (set! (-> *bf-posts* point n) point)
-                      (set! (-> *bf-posts* next) (mod (+ n 1) BF_POST_MAX))
-                      )
-                    )
-                  (+! (-> *bf-drops-at* (+ (* 8 team) point)) 1)
+                  ;; one unit in four guards the point (bf-transport.gc `bf-post-set!`)
+                  (bf-post-set! proc (if (zero? (rand-vu-int-count 4)) point -1))
+                  (+! (-> *bf-drops-at* (+ (* BF_POINT_MAX team) point)) 1)
                   (+! done 1)
                   )
                 )

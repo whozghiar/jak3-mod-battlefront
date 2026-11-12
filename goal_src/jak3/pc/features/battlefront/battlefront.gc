@@ -1118,14 +1118,27 @@
   (bf-tr (-> *bf-point-defs* i name) (-> *bf-point-defs* i name-fr))
   )
 
+(defun bf-point-rank ((i int))
+  "Place of control point I in `*bf-point-order*` (battlefront-h.gc), 0 for the first; -1 for a
+   base."
+  (dotimes (r BF_CONTROL_POINTS)
+    (if (= (-> *bf-point-order* r) i)
+        (return r)
+        )
+    )
+  -1
+  )
+
+(define *bf-letters* (new 'static 'boxed-array :type string "A" "B" "C" "D" "E" "F" "G" "H"))
+
 (defun bf-point-letter ((i int))
-  "Letter of control point I on the HUD: A, B, C, D (the bases are not lettered)."
-  (case i
-    ((2) "A")
-    ((3) "B")
-    ((4) "C")
-    ((5) "D")
-    (else "?")
+  "Letter of control point I on the HUD and the minimap: A to H from the Krimzon Guard's base to the
+   Freedom League's (`bf-point-rank`); \"?\" for a base, not lettered."
+  (let ((r (bf-point-rank i)))
+    (if (>= r 0)
+        (-> *bf-letters* r)
+        "?"
+        )
     )
   )
 
@@ -1362,13 +1375,18 @@
     )
   )
 
+(define-extern bf-draw-minimap-letters (function dma-buffer none))
+
 (defun bf-draw-points-hud ((buf dma-buffer))
-  "Under the reserves: each control point's letter in its holder's color (white neutral), and
-   under it the share of a capture under way, in the capturing side's color."
+  "Under the reserves: each control point's letter in its holder's color (white neutral), A to H
+   from left to right (`bf-point-rank`), and under it the share of a capture under way, in the
+   capturing side's color; on the minimap, each control point's letter over its mark
+   (`bf-draw-minimap-letters`)."
+  (bf-draw-minimap-letters buf)
   (dotimes (i (-> *bf* point-count))
     (let ((pt (-> *bf* points i)))
       (when (not (-> pt base?))
-        (let ((x (+ 256.0 (* 36.0 (+ -3.5 (the float i))))))
+        (let ((x (+ 256.0 (* 30.0 (+ -3.5 (the float (bf-point-rank i)))))))
           (bf-draw-text buf (bf-point-letter i) x 66.0 0.7 (bf-team-color (-> pt owner)) #t)
           (when (and (!= (-> pt prog-team) BF_TEAM_NONE) (< 0.0 (-> pt progress)))
             (clear *bf-text*)
@@ -1716,28 +1734,90 @@
   (none)
   )
 
-;; A battle point on the game's minimap: a black disc, larger than a guard's mark (the "guard" dot
-;; of *minimap-class-list*, class 10, scaled), drawn at the point (`bf-point-icons`).
+;; A control point on the game's minimap: a bright red disc, four times a guard's mark (the "guard"
+;; dot of *minimap-class-list*, class 10, scaled), drawn at the point (`bf-point-icons`), its letter
+;; inside it (`bf-draw-minimap-letters`). A base: the same disc in black, smaller (every point's until
+;; round 27). The minimap's color multiplies the class's (128 for 1): 255 lights the red twice.
 (define *bf-point-minimap-class*
   (new 'static 'minimap-class-node
     :default-position (new 'static 'vector :w 1.0)
     :name "bf-point"
+    :icon-xy (new 'static 'vector2ub :data (new 'static 'array uint8 2 #x0 #x1))
+    :scale 4.0
+    :color (new 'static 'rgba :r #xff :g #x18 :b #x18 :a #x80)
+    )
+  )
+
+(define *bf-base-minimap-class*
+  (new 'static 'minimap-class-node
+    :default-position (new 'static 'vector :w 1.0)
+    :name "bf-base"
     :icon-xy (new 'static 'vector2ub :data (new 'static 'array uint8 2 #x0 #x1))
     :scale 1.8
     :color (new 'static 'rgba :a #x80)
     )
   )
 
+;; Where the minimap drew each control point's mark: its center in GS screen units and the frame
+;; (`bf-minimap-icon-at`).
+(deftype bf-icon-spots (structure)
+  ((x     float      BF_POINT_MAX)
+   (y     float      BF_POINT_MAX)
+   (frame time-frame BF_POINT_MAX)
+   )
+  )
+
+(define *bf-icon-spots* (new 'static 'bf-icon-spots))
+
+(defun bf-minimap-icon-at ((c connection-minimap) (at vector))
+  "Called by minimap.gc draw-connection for each mark it draws, AT its center in GS screen units
+   (x, and z for the height): a control point's mark keeps its place and frame in `*bf-icon-spots*`
+   for its letter (`bf-draw-minimap-letters`). Anything else: nothing."
+  (when (= (-> c class) *bf-point-minimap-class*)
+    (dotimes (i (-> *bf* point-count))
+      (when (= (-> *bf* points i icon) c)
+        (set! (-> *bf-icon-spots* x i) (-> at x))
+        (set! (-> *bf-icon-spots* y i) (-> at z))
+        (set! (-> *bf-icon-spots* frame i) (-> *display* base-clock integral-frame-counter))
+        )
+      )
+    )
+  (none)
+  )
+
+(defconstant BF_LETTER_SCALE 0.4) ;; a minimap letter's font scale
+(defconstant BF_LETTER_DX 1.5)    ;; it is drawn this far right of its mark's center (font units): centered, it stood 2 units left at scale 0.6
+(defconstant BF_LETTER_DY 4.7)    ;; its top this far over its mark's center (font units)
+
+(defun bf-draw-minimap-letters ((buf dma-buffer))
+  "Each control point's letter in white over its red mark on the minimap, where the minimap drew it
+   this frame or the one before (`*bf-icon-spots*`): a mark not drawn (out of the minimap, or the
+   minimap hidden) gets no letter. GS units to font units: the 512 by 416 screen starts at 1792,
+   1840 (hud.gc)."
+  (let ((now (-> *display* base-clock integral-frame-counter)))
+    (dotimes (i (-> *bf* point-count))
+      (when (and (not (-> *bf* points i base?)) (>= (-> *bf-icon-spots* frame i) (+ now -1)))
+        (bf-draw-text buf (bf-point-letter i)
+                      (+ -1792.0 BF_LETTER_DX (-> *bf-icon-spots* x i))
+                      (- (+ -1840.0 (-> *bf-icon-spots* y i)) BF_LETTER_DY)
+                      BF_LETTER_SCALE (font-color white) #t
+                      )
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior bf-point-icons bf-director ()
   "Each frame of a fight: every battle point without its mark on the game's minimap gets one, a
    connection of the director at the point's place (minimap.gc add-icon!, class 10, then
-   `*bf-point-minimap-class*`)."
+   `*bf-point-minimap-class*`, or `*bf-base-minimap-class*` for a base)."
   (dotimes (i (-> *bf* point-count))
     (let ((pt (-> *bf* points i)))
       (when (not (-> pt icon))
         (let ((c (add-icon! *minimap* self (the-as uint 10) (the-as int #f) (-> pt pos) 0)))
           (when c
-            (set! (-> c class) *bf-point-minimap-class*)
+            (set! (-> c class) (if (-> pt base?) *bf-base-minimap-class* *bf-point-minimap-class*))
             (set! (-> pt icon) c)
             )
           )
@@ -2092,8 +2172,8 @@
 
 (defun bf-sky-drop! ((pick int) (ground vector))
   "The player respawning at point PICK falls from the sky, as the units brought to a control point
-   do (the author's wish): above a nav poly drawn at random within 45 m of the point (the Haven City
-   side's `bf-city-spawn-spot`, BF_CITY_SKY_SPOT), `bf-sky-height` above it and under the jetpacks'
+   do (the author's wish): above a nav poly drawn at random within 90 m of the point (the Haven City
+   side's `bf-city-spawn-spot`, BF_SPAWN_REACH, BF_CITY_SKY_SPOT), `bf-sky-height` above it and under the jetpacks'
    ceiling, his controls off until he lands (`bf-pad-lock!`, `bf-sky-drop-update`). GROUND: set to
    that poly's middle, where he lands; he falls through the units, meeting the scenery only. Returns
    #t when he falls, #f (GROUND unchanged) when the city found no poly."

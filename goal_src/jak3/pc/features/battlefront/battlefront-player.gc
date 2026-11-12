@@ -227,7 +227,7 @@
    (stab-clip   int32)          ;; guard: the stab's clip playing (BF_CLIP_STAB_IN, BF_CLIP_TAZER, BF_CLIP_STAB_OUT)
    (stab-time   time-frame)     ;; when its zap began
    (top-step    int32)          ;; guard: upper-body clip playing (`bf-avatar-top-update`), 0 none
-   (reload?     symbol)         ;; guard: the weapon in hand is empty and reloads when it can
+   (reload?     symbol)         ;; guard: the rifle reloads when it can (its magazine empty, or Triangle)
    (dive-until  time-frame)     ;; jetpack dive kick flying until then
    (dive-foe    handle)         ;; what the dive aims at
    (fuel        float)          ;; jetpack boost gauge, 0 to 1 (refilled by dark eco only)
@@ -717,9 +717,10 @@
 (defbehavior bf-avatar-top-update bf-avatar ()
   "Guard classes, every frame: the next clip of the upper body once one ends: a rifle reload, the
    stock rifle guard's (guard-rifle.gc rifle-reload: grenade-reload at 1.1
-   times, then cock-gun at half speed), which, as it ends, fills the magazine (BF_MAG_RIFLE) from
-   the reserve (Jak's yellow ammo). A reload starts only when the magazine is empty (`reload?`, set
-   by its last shot) and the reserve has a round."
+   times, then cock-gun at half speed), which, as it ends, fills the magazine up to BF_MAG_RIFLE from
+   the reserve (Jak's yellow ammo), the rounds left in it kept. A reload starts when `reload?` is set
+   (by the shot that empties the magazine, or by Triangle, `bf-avatar-reload-key`) and the reserve
+   has a round."
   (let ((top (-> self skel top-anim)))
     (when (and top (not (-> top frame-targ)))
       (case (-> self top-step)
@@ -729,8 +730,8 @@
          )
         ((3)
          (set! (-> self top-step) 0)
-         (let ((take (min BF_MAG_RIFLE (the int (-> *game-info* gun-ammo BF_AMMO_YELLOW)))))
-           (set! (-> *bf* mag BF_WEAPON_RIFLE) take)
+         (let ((take (min (- BF_MAG_RIFLE (-> *bf* mag BF_WEAPON_RIFLE)) (the int (-> *game-info* gun-ammo BF_AMMO_YELLOW)))))
+           (+! (-> *bf* mag BF_WEAPON_RIFLE) take)
            (+! (-> *game-info* gun-ammo BF_AMMO_YELLOW) (the float (- take)))
            )
          )
@@ -756,6 +757,22 @@
        (= (-> *bf* weapon) BF_WEAPON_RIFLE)
        (or (-> self reload?) (>= (-> self top-step) 2))
        )
+  )
+
+(defbehavior bf-avatar-reload-key bf-avatar ()
+  "Triangle, a guard class's rifle in hand: reload it (the author's wish, round 27), its magazine
+   not full, the reserve not empty and no reload under way. Sets `reload?`: the reload plays once the
+   upper body's clip in progress ends (`bf-avatar-top-update`)."
+  (if (and (cpad-pressed? 0 triangle)
+           (bf-guard-class? (-> self class))
+           (= (-> *bf* weapon) BF_WEAPON_RIFLE)
+           (< (-> *bf* mag BF_WEAPON_RIFLE) BF_MAG_RIFLE)
+           (>= (-> *game-info* gun-ammo BF_AMMO_YELLOW) 1.0)
+           (not (bf-avatar-reloading?))
+           )
+      (set! (-> self reload?) #t)
+      )
+  (none)
   )
 
 (defun bf-tazer-ready? ()
@@ -1603,6 +1620,7 @@
         (set-time! (-> self ground-time))
         )
     (bf-avatar-update-aim)
+    (bf-avatar-reload-key)
     (cond
       ((or (-> self rolling?) (< (current-time) (-> self dodge-until)))
        ;; no attack as a ball or in a roll; the robotguard fires behind its shield

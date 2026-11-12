@@ -115,6 +115,46 @@
   -1
   )
 
+(defconstant BF_POST_PER_POINT 3) ;; units posted on one point at most (round 27)
+
+(defun bf-post-set! ((proc process) (point int))
+  "As unit PROC comes down (out of a ship, or from the sky): any post it kept from a previous life
+   is dropped, then, for POINT 0 or more, it is posted on point POINT (`*bf-posts*`) unless
+   BF_POST_PER_POINT units awake already guard it. A unit of the pools keeps its process and its
+   handle from one life to the next: the posts of the dead ones went on with whatever unit took
+   their process, and grew without end (up to BF_POST_MAX): after 3 minutes of battle, 14 to 26 of
+   a side's units stood within 20 m of one of its points, posted (round 26's tests; the author's
+   play, round 27). Returns #t when posted."
+  (let ((h (process->handle proc))
+        (n 0)
+        )
+    (dotimes (i BF_POST_MAX)
+      (let ((p (handle->process (-> *bf-posts* unit i))))
+        (cond
+          ((= (-> *bf-posts* unit i) h)
+           (set! (-> *bf-posts* unit i) (the-as handle #f))
+           )
+          ((and p
+                (= (-> *bf-posts* point i) point)
+                (-> p next-state)
+                (!= (-> p next-state name) 'inactive)
+                )
+           (+! n 1)
+           )
+          )
+        )
+      )
+    (when (and (>= point 0) (< n BF_POST_PER_POINT))
+      (let ((k (-> *bf-posts* next)))
+        (set! (-> *bf-posts* unit k) h)
+        (set! (-> *bf-posts* point k) point)
+        (set! (-> *bf-posts* next) (mod (+ k 1) BF_POST_MAX))
+        )
+      #t
+      )
+    )
+  )
+
 (defun bf-transport-team-count ((team int) (out (pointer int32)))
   "Units of side TEAM awake now, by kind (*bf-kinds* order), into OUT[0] to OUT[3]: the traffic's
    active lists (its trackers), each unit's side told by `bf-unit-team`. Returns their sum."
@@ -238,9 +278,9 @@
 ;; hold back the side's every unit.
 (define *bf-drop-skip* (new 'static 'array int32 2 -1 -1))
 
-;; Units dropped at each point, side by side (8 points a side: index 8 team + point), for the tests
+;; Units dropped at each point, side by side (index BF_POINT_MAX team + point), for the tests
 ;; (docs/modding/current_mod/battlefront_smoke.gc reads and clears it).
-(define *bf-drops-at* (new 'static 'array int32 16))
+(define *bf-drops-at* (new 'static 'array int32 20))
 
 (defconstant BF_DEFEND_REACH (meters 60))  ;; foes this close to a held point attack it (battlefront-city.gc BF_ZONE_REACH)
 (defconstant BF_DEFEND_SHARE 0.5)          ;; share of a side's units brought to its points under attack
@@ -430,16 +470,15 @@
       (dotimes (k BF_TRANSPORT_BURST)
         (let ((proc (if (= k dropped) (bf-transport-wake this))))
           (when proc
-            ;; one unit in four dropped on a control point guards it
-            (when (and (not (-> *bf* points (-> this point) base?)) (zero? (logand (-> this count-units) 3)))
-              (let ((n (-> *bf-posts* next)))
-                (set! (-> *bf-posts* unit n) (process->handle proc))
-                (set! (-> *bf-posts* point n) (-> this point))
-                (set! (-> *bf-posts* next) (mod (+ n 1) BF_POST_MAX))
+            ;; one unit in four dropped on a control point guards it (`bf-post-set!`)
+            (if (bf-post-set! proc (if (and (not (-> *bf* points (-> this point) base?)) (zero? (logand (-> this count-units) 3)))
+                                       (-> this point)
+                                       -1
+                                       )
+                              )
+                (format 0 "battlefront: side ~D unit dropped to guard control point ~D~%" (-> this team) (-> this point))
                 )
-              (format 0 "battlefront: side ~D unit dropped to guard control point ~D~%" (-> this team) (-> this point))
-              )
-            (+! (-> *bf-drops-at* (+ (* 8 (-> this team)) (-> this point))) 1)
+            (+! (-> *bf-drops-at* (+ (* BF_POINT_MAX (-> this team)) (-> this point))) 1)
             (let ((slot (mod (the-as int (-> this count-units)) BF_TRANSPORT_MAX_UNITS)))
               (set! (-> this drops slot) (process->handle proc))
               (set-time! (-> this drop-at slot))
