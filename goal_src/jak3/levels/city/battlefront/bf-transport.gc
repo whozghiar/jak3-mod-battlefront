@@ -351,6 +351,8 @@
 ;; The most units one try dropped at once, for the tests (docs/modding/current_mod/battlefront_smoke.gc).
 (define *bf-burst-max* (new 'static 'array int32 1 0))
 
+(define-extern bf-city-fall-through! (function process float none))
+
 (defun bf-transport-wake ((this bf-transport))
   "One unit of ship THIS's side, of the kind it lacks most (`bf-transport-next-kind`), woken with
    the traffic's 'activate-object: behavior 6 (each kind's exit-transport), on the nav mesh of the
@@ -397,6 +399,14 @@
             )
           )
         (send-event *traffic-manager* 'activate-object params)
+        ;; a robotguard or a spider falls through everything down to the ground under the ship
+        ;; (battlefront-city.gc): under the Krimzon Guard's ship the spiders stopped on the scenery
+        ;; 6 and 14 m over the street and walked in the air
+        (if (and (-> params proc)
+                 (or (= kind (the-as int (traffic-type roboguard))) (= kind (the-as int (traffic-type spydroid))))
+                 )
+            (bf-city-fall-through! (-> params proc) (-> (bf-transport-ground-point this (new 'stack-no-clear 'vector)) y))
+            )
         )
       )
     (-> params proc)

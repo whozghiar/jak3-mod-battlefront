@@ -252,6 +252,7 @@
    (drop-time     time-frame)     ;; when the fall began (game clock)
    (land-time     time-frame)     ;; when he landed (game clock), 0 none: his class model's landing clip
    (drop-collide  collide-spec)   ;; what Jak collides with, kept while he falls (he meets the scenery only)
+   (still-until   time-frame)     ;; the player stands still until then (game clock): a grenade throw, a tazer stab (`bf-pad-lock!`)
    )
   )
 
@@ -306,7 +307,7 @@
 
 (define *bf-unit-dots* (new 'static 'bf-unit-dots))
 
-;; Set by the Mods menu. While it is on, START > Options shows Gamemode (the battle's pages);
+;; Set by the Mods menu. While it is on, START opens the battle's pause page (battlefront.gc);
 ;; turning it off during a battle loads the last save (battlefront.gc `bf-leave-to-save!`).
 (define *mod-battlefront-enable* #f)
 

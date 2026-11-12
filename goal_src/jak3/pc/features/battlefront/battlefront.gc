@@ -10,10 +10,11 @@
 
   Flow:
     Mods menu (L3 + SELECT, as every mod) > battlefront > Battlefront mode: the mode's switch. On,
-    it adds START > Options > Gamemode > Battlefront, where the battle is chosen and run:
+    START opens the battle's pause page (the game's menu behind its Options entry), where the
+    battle is chosen and run:
       New battle -> page 1: war zone  -> page 2: side  -> page 3: class (turning preview), while
                     the deployment loads the zone under it
-      Change class (the fight goes on), Restart the battle, Quit the battle.
+      Change class (the fight goes on), Redeploy, Restart the battle, Quit the battle.
     Switched off during a battle, it loads the last save.
     Deployment: the director (a process of *pc-pool*, which outlives level changes and deaths)
     owns the settings of the battle (borrowed unit levels, faction strengths) and sends Jak to his
@@ -45,6 +46,7 @@
 (define-extern bf-camp-continue (function continue-point))
 (define-extern bf-camp-loaded? (function continue-point symbol))
 (define-extern bf-can-redeploy? (function symbol))
+(define-extern bf-out-of-combat? (function symbol))
 
 ;; Pages of the battle menu.
 (defconstant BF_PAGE_NONE 0)
@@ -194,15 +196,19 @@
   )
 
 (defun bf-pause-label ((i int))
-  "Label of entry I of the pause page."
+  "Label of entry I of the pause page. Redeploy in combat (`*bf*` redeploy-ok? off) costs a unit."
   (case i
     ((0) (bf-tr "Resume" "Reprendre"))
     ((1) (bf-tr "New battle" "Nouvelle bataille"))
     ((2) (bf-tr "Change class" "Changer de classe"))
-    ((3) (bf-tr "Redeploy" "Se redéployer"))
+    ((3) (if (or (-> *bf* redeploy-ok?) (not (bf-can-redeploy?)))
+             (bf-tr "Redeploy" "Se redéployer")
+             (bf-tr "Redeploy (lose a unit)" "Se redéployer (une perte)")
+             )
+     )
     ((4) (bf-tr "Restart the battle" "Recommencer la bataille"))
     ((5) (bf-tr "Quit the battle" "Quitter la bataille"))
-    (else (bf-tr "Game menu" "Menu du jeu"))
+    (else (bf-tr "Options" "Options"))
     )
   )
 
@@ -211,7 +217,7 @@
   (case i
     ((1) (not (bf-active?)))
     ((2 4) (bf-fighting?))
-    ((3) (-> *bf* redeploy-ok?))
+    ((3) (bf-can-redeploy?))
     ((5) (bf-active?))
     (else #t)
     )
@@ -1669,6 +1675,10 @@
         ;; no stock first-person look around on R3 (logic-target.gc): the camera is the class's
         ;; over the shoulder; L3 shows the battle's overlay (`bf-draw-overlay`)
         (set-setting! 'allow-look-around #f 0.0 0)
+        ;; the city's war music everywhere (the game's own for its assaults on the city: assault-task.gc,
+        ;; ctyport-attack.gc), in place of each district's
+        (remove-setting! 'music)
+        (set-setting! 'music 'portattk 0.0 0)
         (apply-settings *setting-control*)
         (bf-avatar-kill)
         (bf-set-phase! BF_PHASE_DEPLOY)
@@ -1790,6 +1800,7 @@
     (remove-setting! 'airlock)
     (remove-setting! 'disable-parking-spots?)
     (remove-setting! 'allow-look-around)
+    (remove-setting! 'music)
     (apply-settings *setting-control*)
     ;; respawn at the current continue (the side's spawn) the way a death does: every unit of the
     ;; battle is replaced by a stock one
@@ -2166,8 +2177,13 @@
 (defun bf-pad-lock! ((pad cpad-info))
   "While the player falls from the sky in a fight (`*bf*` dropping?), pad 0 gives only START and
    SELECT and a centered left stick: no move, jump, weapon or class move until he lands (the
-   author's wish); the right stick still turns the camera. Returns PAD."
-  (when (and (zero? (-> pad number)) (-> *bf* dropping?) (bf-fighting?))
+   author's wish); the right stick still turns the camera. The same while he stands still for a
+   grenade throw or a tazer stab (`*bf*` still-until, battlefront-player.gc): only the rifle fires
+   on the run (the author's wish). Returns PAD."
+  (when (and (zero? (-> pad number))
+             (or (-> *bf* dropping?) (< (-> *display* game-clock frame-counter) (-> *bf* still-until)))
+             (bf-fighting?)
+             )
     (set! (-> pad button0) (logand (-> pad button0) (the-as uint (pad-buttons start select))))
     (set! (-> pad leftx) (the-as uint 128))
     (set! (-> pad lefty) (the-as uint 128))
@@ -2576,7 +2592,7 @@
   )
 
 (defbehavior bf-restart-battle! bf-director ()
-  "START > Options > Gamemode > Battlefront > Restart the battle: the same zone, side and class from
+  "The pause page's Restart the battle: the same zone, side and class from
    full reserves, at the side's spawn, with a fresh loadout. What the battle set aside goes back to
    Jak first, so that `bf-start-battle!` sets Jak's own aside again."
   (when (bf-active?)
@@ -2632,7 +2648,7 @@
 
 (defbehavior bf-director-update bf-director ()
   "One frame of the battle."
-  ;; requests of the START menu's battle page (`bf-menu-request`), run once that menu is closed
+  ;; requests of the battle's pause page (START), run once that page is closed
   (let ((req *bf-request*))
     (cond
       ((= req BF_REQ_END)
@@ -2672,10 +2688,11 @@
        )
       ((and (= req BF_REQ_REDEPLOY) (bf-can-open-menu?))
        (set! *bf-request* BF_REQ_NONE)
-       ;; the respawn page without a death (`bf-target-death`'s 'bf-redeploy mode)
+       ;; the respawn page at once (`bf-target-death`'s redeploy modes): free out of combat
+       ;; (`*bf*` redeploy-ok?), a unit of the side lost in it
        (when (bf-can-redeploy?)
-         (format 0 "battlefront: redeploy~%")
-         (send-event *target* 'change-state target-death 'bf-redeploy)
+         (format 0 "battlefront: redeploy~A~%" (if (-> *bf* redeploy-ok?) "" ", a unit lost"))
+         (send-event *target* 'change-state target-death (if (-> *bf* redeploy-ok?) 'bf-redeploy 'bf-redeploy-hot))
          )
        )
       )
@@ -2758,7 +2775,7 @@
              )
            (bf-respawn-at-point)
            (bf-sky-drop-update)
-           (set! (-> *bf* redeploy-ok?) (bf-can-redeploy?))
+           (set! (-> *bf* redeploy-ok?) (and (bf-can-redeploy?) (bf-out-of-combat?)))
            (bf-keep-in-zone)
            (bf-spawn-drops)
            )
@@ -3040,7 +3057,7 @@
    back there once its levels are loaded, facing the battlefield, alive, full health, with a fresh
    loadout and three seconds of invulnerability, his class model blinking (`bf-spawn-shield`), and the director draws his class again. MODE
    'bf-redeploy (the START menu's Redeploy, out of combat for BF_REDEPLOY_CALM): no loss and no
-   wait, the respawn page at once. The world runs on meanwhile. The stock death freezes the
+   wait, the respawn page at once; 'bf-redeploy-hot (Redeploy in combat): the same, a unit lost. The world runs on meanwhile. The stock death freezes the
    enemies (a 'process-mask setting), may play a death movie, and its reset ('life, `initialize!`)
    spawned every unit of Haven City again: the battle's units vanished and came back at each death.
    First it sets what the stock death sets that the game reads: Jak dead (units leave him alone),
@@ -3060,11 +3077,13 @@
     )
   (set! (-> *bf* redeploy-ok?) #f)
   ;; the class model plays its own death (battlefront-player.gc `bf-avatar-dying`), a redeploy none
-  (if (= mode 'bf-redeploy)
+  (if (or (= mode 'bf-redeploy) (= mode 'bf-redeploy-hot))
       (bf-avatar-kill)
       (bf-avatar-die)
       )
-  (set! (-> *bf* respawn-time) (+ (current-time) (if (= mode 'bf-redeploy) 0 BF_RESPAWN_TIME)))
+  (set! (-> *bf* respawn-time)
+        (+ (current-time) (if (or (= mode 'bf-redeploy) (= mode 'bf-redeploy-hot)) 0 BF_RESPAWN_TIME))
+        )
   (set! (-> *bf* spectate) (the-as handle #f))
   (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
     (if dir
@@ -3310,61 +3329,8 @@
   )
 
 ;; ---------------------------------------------------------------------------------------------
-;; START > Options > Gamemode > Battlefront
+;; START: the battle's own page, the game's menu behind its Options entry
 ;; ---------------------------------------------------------------------------------------------
-
-;; Labels of these pages: text ids past the game's own (text-h.gc ends at #x136c), answered by the
-;; `lookup-text!` wrapper below, so the game's text files stay as they are.
-(defconstant BF_TEXT_BASE #x7f00)
-(defconstant BF_TEXT_GAMEMODE #x7f00)
-(defconstant BF_TEXT_BATTLEFRONT #x7f01)
-(defconstant BF_TEXT_NEW #x7f02)
-(defconstant BF_TEXT_CLASS #x7f03)
-(defconstant BF_TEXT_RESTART #x7f04)
-(defconstant BF_TEXT_QUIT #x7f05)
-(defconstant BF_TEXT_REDEPLOY #x7f06)
-(defconstant BF_TEXT_COUNT 7)
-
-(define *bf-menu-text*
-  (new 'static 'boxed-array :type string
-    "Gamemode" "Battlefront" "New battle" "Change class" "Restart the battle" "Quit the battle" "Redeploy"
-    )
-  )
-
-(define *bf-menu-text-fr*
-  (new 'static 'boxed-array :type string
-    "Mode de jeu" "Battlefront" "Nouvelle bataille" "Changer de classe" "Recommencer la bataille" "Quitter la bataille"
-    "Se redéployer"
-    )
-  )
-
-;; Each label encoded for the game's font, in its own string (two labels can be drawn at once).
-(define *bf-menu-encoded* (new 'global 'boxed-array string BF_TEXT_COUNT))
-
-(dotimes (i BF_TEXT_COUNT)
-  (set! (-> *bf-menu-encoded* i) (new 'global 'string 64 (the-as string #f)))
-  )
-
-(define-perm *bf-stock-lookup-text* (function game-text-info text-id symbol string)
-             (method-of-type game-text-info lookup-text!)
-             )
-
-(defmethod lookup-text! ((this game-text-info) (arg0 text-id) (arg1 symbol))
-  "Every game text goes through here. The labels of the battle's START pages (BF_TEXT_*) come from
-   `*bf-menu-text*`, in French when the game runs in French, encoded for the game's font; every
-   other id is the stock lookup."
-  (let ((i (- (the-as int arg0) BF_TEXT_BASE)))
-    (cond
-      ((and (>= i 0) (< i BF_TEXT_COUNT))
-       (pc-encode-utf8-string (if (bf-fr?) (-> *bf-menu-text-fr* i) (-> *bf-menu-text* i)) (-> *bf-menu-encoded* i))
-       (-> *bf-menu-encoded* i)
-       )
-      (else
-        (*bf-stock-lookup-text* this arg0 arg1)
-        )
-      )
-    )
-  )
 
 (define-perm *bf-stock-activate-progress* (function process symbol none) activate-progress)
 
@@ -3372,9 +3338,10 @@
   "The game opens its START menu here (main.gc, master mode 'progress) with ARG1 'main. While the
    Battlefront mode is on, START opens the battle's own pause page instead, its entries and the
    city's live map (`bf-draw-page`, BF_PAGE_PAUSE), handed to the director: no menu process, so the
-   game goes back to 'game, and the director pauses it under its page. The page's Game menu entry
-   lets the next one through (`*bf-stock-start?*`). Every other menu (save icons, card errors) is
-   the stock one."
+   game goes back to 'game, and the director pauses it under its page. The page's Options entry
+   lets the next one through (`*bf-stock-start?*`): the game's menu, where a battle shuts Save,
+   Load Game, Secrets and Restart Mission. Every other menu (save icons, card errors) is the stock
+   one."
   (cond
     ((and (= arg1 'main) *mod-battlefront-enable* (not *bf-stock-start?*) *target*)
      (bf-director-ensure!)
@@ -3388,147 +3355,49 @@
   (none)
   )
 
-(defun bf-menu-request ((p progress) (req int))
-  "A button of the Battlefront page: hand REQ to the director (spawned on demand), which runs it
-   once the START menu is closed, and close the menu."
-  (bf-director-ensure!)
-  (set! *bf-request* req)
-  (set-next-state p 'go-away 0)
-  (none)
-  )
-
-;; START > Options > Gamemode: the game modes, Battlefront alone.
-(define *bf-gamemode-page*
-  (progress-new-generic-scrolling-page BF_TEXT_GAMEMODE
-    (new 'static 'menu-generic-button-option
-      :name BF_TEXT_BATTLEFRONT
-      :on-confirm (lambda ((p progress)) (push-state p) (set-next-state p 'bf-battlefront 0) (none))
-      )
-    )
+(defun bf-out-of-combat? ()
+  "#t when the player has been out of combat (no shot, blow or hit taken, `*bf*` combat-time) for
+   BF_REDEPLOY_CALM: his redeploy is free."
+  (< BF_REDEPLOY_CALM (- (-> *display* game-clock frame-counter) (-> *bf* combat-time)))
   )
 
 (defun bf-can-redeploy? ()
-  "#t when the player may redeploy: in a fight, alive with his class, and out of combat (no shot,
-   blow or hit taken, `*bf*` combat-time) for BF_REDEPLOY_CALM."
+  "#t when the player may redeploy (the pause page's Redeploy): in a fight, alive with his class,
+   not falling from the sky. In combat it costs his side a unit (`bf-out-of-combat?`)."
   (if (and (bf-fighting?)
            *target*
            (not (focus-test? *target* dead))
            (bf-avatar-alive?)
-           (< BF_REDEPLOY_CALM (- (-> *display* game-clock frame-counter) (-> *bf* combat-time)))
+           (not (-> *bf* dropping?))
            )
       #t
       #f
       )
   )
 
-;; START > Options > Gamemode > Battlefront: a new battle (its zone, side and class pages), or,
-;; during one, a class change, a restart, the end, or a redeploy (last, out of combat only). The
-;; entries that do not apply are grey.
-(define *bf-battlefront-page*
-  (progress-new-generic-scrolling-page BF_TEXT_BATTLEFRONT
-    (new 'static 'menu-generic-button-option
-      :name BF_TEXT_NEW
-      :should-disable? (lambda () (bf-active?))
-      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_LOBBY) (none))
-      )
-    (new 'static 'menu-generic-button-option
-      :name BF_TEXT_CLASS
-      :should-disable? (lambda () (not (bf-fighting?)))
-      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_CLASS) (none))
-      )
-    (new 'static 'menu-generic-button-option
-      :name BF_TEXT_RESTART
-      :should-disable? (lambda () (not (bf-fighting?)))
-      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_RESTART) (none))
-      )
-    (new 'static 'menu-generic-button-option
-      :name BF_TEXT_QUIT
-      :should-disable? (lambda () (not (bf-active?)))
-      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_END) (none))
-      )
-    (new 'static 'menu-generic-button-option
-      :name BF_TEXT_REDEPLOY
-      ;; the director's answer: this page runs on the menu's clock, which `*bf*` combat-time is not on
-      :should-disable? (lambda () (not (-> *bf* redeploy-ok?)))
-      :on-confirm (lambda ((p progress)) (bf-menu-request p BF_REQ_REDEPLOY) (none))
-      )
-    )
-  )
-
-(define-perm *bf-stock-set-menu-options* (function progress symbol int)
-             (the-as (function progress symbol int) (method-of-type progress set-menu-options))
+;; The game's Quit / Restart page during a battle: Restart Mission is refused with the refusal beep
+;; (a mission's restart would run the game's own reset in the middle of the battle); Quit is the
+;; stock one.
+(define-perm *bf-stock-restart-respond* (function menu-restart-mission-qr-option progress symbol int)
+             (the-as (function menu-restart-mission-qr-option progress symbol int)
+                     (method-of-type menu-qr-option respond-progress)
+                     )
              )
 
-(defmethod set-menu-options ((this progress) (arg0 symbol))
-  "The START menu's pages (pc/progress/progress-pc.gc), plus 'bf-gamemode and 'bf-battlefront, each
-   opened with nothing chosen from a former visit."
-  (case arg0
-    (('bf-gamemode 'bf-battlefront)
-     (let ((page (if (= arg0 'bf-gamemode) *bf-gamemode-page* *bf-battlefront-page*)))
-       (set! (-> (the-as menu-generic-scrolling-page (-> page options 0)) selected-option-index) -1)
-       (set! (-> this current-options) page)
-       )
+(defmethod respond-progress ((this menu-restart-mission-qr-option) (arg0 progress) (arg1 symbol))
+  "Restart Mission's input: during a battle, X is refused with the stock refusal beep; else the
+   stock handling (progress.gc, menu-qr-option)."
+  (cond
+    ((and arg1 (bf-active?) (cpad-pressed? 0 confirm))
+     (cpad-clear! 0 confirm)
+     (sound-play "generic-beep" :pitch -0.6)
      0
      )
     (else
-      (*bf-stock-set-menu-options* this arg0)
+      (*bf-stock-restart-respond* this arg0 arg1)
       )
     )
   )
-
-;; The Gamemode entry of START > Options, shown while the mode is on. The page places its entries at
-;; fractions of its height (offset-y): the entries are spread again to make room for it.
-(define *bf-options-entry*
-  (new 'static 'menu-sub-menu-option :name BF_TEXT_GAMEMODE :offset-y 0.8 :next-state 'bf-gamemode)
-  )
-
-(define-perm *bf-stock-options* (array menu-option) (-> *options-options-pc* options))
-
-;; The stock entries' offsets, kept once (a REPL reload must not keep the spread ones).
-(define-perm *bf-stock-offsets* (array float)
-             (let ((offsets (new 'global 'boxed-array float (-> *bf-stock-options* length))))
-               (dotimes (i (-> *bf-stock-options* length))
-                 (set! (-> offsets i) (-> *bf-stock-options* i offset-y))
-                 )
-               offsets
-               )
-             )
-
-(define *bf-options-with-entry* (new 'global 'boxed-array menu-option (+ (-> *bf-stock-options* length) 1)))
-
-(dotimes (i (-> *bf-stock-options* length))
-  (set! (-> *bf-options-with-entry* i) (-> *bf-stock-options* i))
-  )
-
-(set! (-> *bf-options-with-entry* (-> *bf-stock-options* length)) *bf-options-entry*)
-
-(defun bf-update-options-entry ()
-  "Show the Gamemode entry in START > Options only while the mode is on (`*mod-battlefront-enable*`),
-   the n + 1 entries spread over the stock span; off, the stock list and offsets."
-  (let ((n (-> *bf-stock-options* length)))
-    (cond
-      (*mod-battlefront-enable*
-       (let* ((first (-> *bf-stock-offsets* 0))
-              (step (/ (- (-> *bf-stock-offsets* (+ n -1)) first) (the float n)))
-              )
-         (dotimes (i (+ n 1))
-           (set! (-> *bf-options-with-entry* i offset-y) (+ first (* step (the float i))))
-           )
-         )
-       (set! (-> *options-options-pc* options) *bf-options-with-entry*)
-       )
-      (else
-        (dotimes (i n)
-          (set! (-> *bf-stock-options* i offset-y) (-> *bf-stock-offsets* i))
-          )
-        (set! (-> *options-options-pc* options) *bf-stock-options*)
-        )
-      )
-    )
-  (none)
-  )
-
-(bf-update-options-entry)
 
 ;; ---------------------------------------------------------------------------------------------
 ;; Mods menu (L3 + SELECT, the bind of every mod: mods-menu.gc) > battlefront
@@ -3541,7 +3410,6 @@
            :is-toggled? (lambda () *mod-battlefront-enable*)
            :on-confirm (lambda ()
                          (set! *mod-battlefront-enable* (not *mod-battlefront-enable*))
-                         (bf-update-options-entry)
                          ;; off during a battle: the director loads the last save once this menu
                          ;; is closed
                          (if (and (not *mod-battlefront-enable*) (bf-active?))

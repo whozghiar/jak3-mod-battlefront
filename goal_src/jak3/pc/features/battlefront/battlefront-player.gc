@@ -77,6 +77,7 @@
 (defconstant BF_TAZER_FLASH (seconds 0.35)) ;; the strike's arc stays this long
 (defconstant BF_GRENADE_DELAY (seconds 1))  ;; between two grenades
 (defconstant BF_GRENADE_RANGE (meters 35))  ;; farthest grenade landing point
+(defconstant BF_THROW_MAX (seconds 2.5))     ;; a grenade throw's clip ends by then at the latest
 (defconstant BF_AIM_REACH (meters 80))      ;; length of the free aim's ray
 (defconstant BF_CROSS_X 256.0)              ;; the crosshair, on the 512 x 416 screen: its middle,
 (defconstant BF_CROSS_Y 208.0)              ;; where the battle camera looks (`bf-cam-rig`)
@@ -212,6 +213,8 @@
    (anim-wait   time-frame)     ;; since when a new clip waits for a free blend channel, 0 none
    (fire-time   time-frame)     ;; last shot
    (grenade-time time-frame)    ;; guard: last grenade, its own delay (a rifle shot does not hold it)
+   (throw-step  int32)          ;; guard: the grenade throw's part playing (`bf-avatar-throw-update`), 0 none
+   (throw-until time-frame)     ;; guard: the throw ends by then at the latest
    (fire-side   int32)          ;; alternates the two muzzles
    (shoot-until time-frame)     ;; shooting clip held until then
    (rolling?    symbol)         ;; robotguard: rolling as a ball (R2 switches it)
@@ -712,19 +715,14 @@
   )
 
 (defbehavior bf-avatar-top-update bf-avatar ()
-  "Guard classes, every frame: the next clip of the upper body once one ends. A grenade throw is the
-   stock grenade guard's two parts (guard-grenade.gc: artist frames 1 to 12 at 1.5 times, then 22 to
-   37); a rifle reload, the stock rifle guard's (guard-rifle.gc rifle-reload: grenade-reload at 1.1
+  "Guard classes, every frame: the next clip of the upper body once one ends: a rifle reload, the
+   stock rifle guard's (guard-rifle.gc rifle-reload: grenade-reload at 1.1
    times, then cock-gun at half speed), which, as it ends, fills the magazine (BF_MAG_RIFLE) from
    the reserve (Jak's yellow ammo). A reload starts only when the magazine is empty (`reload?`, set
    by its last shot) and the reserve has a round."
   (let ((top (-> self skel top-anim)))
     (when (and top (not (-> top frame-targ)))
       (case (-> self top-step)
-        ((1)
-         (set! (-> self top-step) 0)
-         (bf-avatar-top-play BF_CLIP_GRENADE 22.0 37.0 1.0 #t)
-         )
         ((2)
          (set! (-> self top-step) 3)
          (bf-avatar-top-play BF_CLIP_COCK 0.0 -1.0 0.5 #t)
@@ -871,29 +869,21 @@
        (set! hold 0)
        )
       ((and guard? (= weapon BF_WEAPON_GRENADE))
-       ;; a guard grenade thrown at the crosshair, 35 m away at most
-       (let ((from (bf-joint-pos self (-> art gun0) (new 'stack-no-clear 'vector)))
-             (to (new 'stack-no-clear 'vector))
-             )
-         (vector-! to (-> self aim) from)
-         (if (< BF_GRENADE_RANGE (vector-length to))
-             (vector-normalize! to BF_GRENADE_RANGE)
-             )
-         (vector+! to to from)
-         (if (and *bf-city-grenade* (= (level-status? *level* 'ctywide #f) 'active))
-             (*bf-city-grenade* from to)
-             )
-         )
+       ;; the stock grenade guard's throw on the whole body, standing still, facing the crosshair:
+       ;; the grenade leaves at its frame 12 (`bf-avatar-throw-update`)
+       (bf-avatar-top-stop)
        (set-time! (-> self grenade-time))
-       (bf-avatar-top-play BF_CLIP_GRENADE 1.0 12.0 1.5 #f)
-       (set! (-> self top-step) 1)
+       (set! (-> self throw-step) 1)
+       (set! (-> self throw-until) (+ (current-time) BF_THROW_MAX))
        (set! hold (seconds 0.7))
        )
       (else
         (bf-avatar-shot)
-        ;; kneeling, its whole-body clip is already the kneeling shot
+        ;; the stock rifle guard's shot (guard-rifle.gc attack: gun-attack, artist frames 12 to 22)
+        ;; on the upper body: the rifle alone fires on the run. Kneeling, its whole-body clip is
+        ;; already the kneeling shot
         (if (and guard? (not (-> self crouch?)))
-            (bf-avatar-top-play (the-as int (-> art shoot)) 0.0 -1.0 1.0 #t)
+            (bf-avatar-top-play (the-as int (-> art shoot)) 12.0 22.0 1.0 #t)
             )
         (case (-> self class)
           ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK BF_CLASS_ROBOGUARD)
@@ -915,6 +905,58 @@
     (if (> hold 0)
         (bf-combat!)
         )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-throw! bf-avatar ()
+  "A guard's grenade leaves its hand for the crosshair, BF_GRENADE_RANGE away at most."
+  (let ((from (bf-joint-pos self (-> (bf-class-art-of (-> self class)) gun0) (new 'stack-no-clear 'vector)))
+        (to (new 'stack-no-clear 'vector))
+        )
+    (vector-! to (-> self aim) from)
+    (if (< BF_GRENADE_RANGE (vector-length to))
+        (vector-normalize! to BF_GRENADE_RANGE)
+        )
+    (vector+! to to from)
+    (if (and *bf-city-grenade* (= (level-status? *level* 'ctywide #f) 'active))
+        (*bf-city-grenade* from to)
+        )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-still! bf-avatar ()
+  "The player stands still this frame and the next: his velocity across dropped, his left stick and
+   buttons off (`*bf*` still-until, battlefront.gc `bf-pad-lock!`)."
+  (set! (-> *bf* still-until) (+ (-> *display* game-clock frame-counter) (seconds 0.1)))
+  (when *target*
+    (set! (-> *target* control transv x) 0.0)
+    (set! (-> *target* control transv z) 0.0)
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-throw-update bf-avatar ()
+  "A guard's grenade throw, on its clip's frame (the clip loop of `bf-avatar-init-by-other`): the
+   stock grenade guard's (guard-grenade.gc): its aim, artist frames 1 to 12 at 1.5 times, the
+   grenade out (`bf-avatar-throw!`), then its follow-through, 22 to 37. Past BF_THROW_MAX it ends,
+   the grenade out if it was not."
+  (case (-> self throw-step)
+    ((1)
+     (ja :num! (seek! (ja-aframe 12.0 0) 1.5))
+     (when (ja-done? 0)
+       (bf-avatar-throw!)
+       (set! (-> self throw-step) 2)
+       (ja :frame-num (ja-aframe 22.0 0))
+       )
+     )
+    ((2)
+     (ja :num! (seek! (ja-aframe 37.0 0)))
+     (if (ja-done? 0)
+         (set! (-> self throw-step) 0)
+         )
+     )
     )
   (none)
   )
@@ -1542,6 +1584,18 @@
     (bf-avatar-spread)
     (bf-avatar-aim-torso)
     (bf-avatar-blink)
+    ;; a grenade throw or a tazer stab: the player stands still, facing the crosshair (only the
+    ;; rifle fires on the run, the author's wish); a throw cut off goes on no longer than BF_THROW_MAX
+    (when (and (> (-> self throw-step) 0) (>= (current-time) (-> self throw-until)))
+      (if (= (-> self throw-step) 1)
+          (bf-avatar-throw!)
+          )
+      (set! (-> self throw-step) 0)
+      )
+    (when (or (> (-> self throw-step) 0) (< (current-time) (-> self stab-until)))
+      (bf-avatar-still!)
+      (set! (-> self shoot-until) (+ (current-time) (seconds 0.1)))
+      )
     ;; speed of the class (Jak's surfaces read it every frame)
     (set! (-> *setting-control* user-default speed-mult) speed)
     (set! (-> self was-ground?) ground?)
@@ -2083,6 +2137,10 @@
        ;; a guard's roll, tucked, or its dodge, its jump to that side (`bf-avatar-dodge`)
        (if (-> self roll?) BF_CLIP_ROLL (-> self dodge-clip))
        )
+      ((> (-> self throw-step) 0)
+       ;; a guard's grenade throw: the stock guard's, on the whole body (`bf-avatar-throw-update`)
+       BF_CLIP_GRENADE
+       )
       ((< (current-time) (-> self stab-until))
        ;; a guard's tazer strike: the stock guard's stab, its clip now (`bf-avatar-tazer`)
        (-> self stab-clip)
@@ -2400,6 +2458,9 @@
              )
            )
          )
+        ((and (> (-> self throw-step) 0) (= (-> self anim) BF_CLIP_GRENADE))
+         (bf-avatar-throw-update)
+         )
         ((and (< (current-time) (-> self stab-until)) (= (-> self anim) (-> self stab-clip)))
          ;; the tazer's stab: the thrust once, the zap looped BF_STAB_ZAP, the arm back once, which
          ;; ends it
@@ -2470,6 +2531,8 @@
   (set! (-> self anim-wait) 0)
   (set! (-> self fire-time) 0)
   (set! (-> self grenade-time) 0)
+  (set! (-> self throw-step) 0)
+  (set! (-> self throw-until) 0)
   (set! (-> self shoot-until) 0)
   (set! (-> self rolling?) #f)
   (set! (-> self flame) 0.35)

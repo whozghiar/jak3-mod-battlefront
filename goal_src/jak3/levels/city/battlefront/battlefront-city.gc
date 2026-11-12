@@ -103,10 +103,15 @@
 (defconstant BF_CONTEST_REACH (meters 250)) ;; a unit this close to a contested point goes to clear it
 (defconstant BF_ZONE_REACH (meters 60))     ;; a point's zone: the other side's units this close contest it
 (defconstant BF_ENGAGE_REACH (meters 40))   ;; a unit with a foe this close stops its march to fight
+(defconstant BF_THREAT_REACH (meters 150))  ;; a point's guards hold it while the other side's units come this close
 
 ;; Each side's units in each battle point's zone (BF_ZONE_REACH), counted twice a second from
 ;; `*bf-unit-dots*` (`bf-city-steer`): index BF_POINT_MAX side + point.
 (define *bf-zone-near* (new 'static 'array int32 12))
+
+;; The same within BF_THREAT_REACH: a point's guards (`bf-post-point`) hold it while the other side's
+;; units are this close, and go on to the next point once none is.
+(define *bf-threat-near* (new 'static 'array int32 12))
 
 ;; The units with a foe within BF_ENGAGE_REACH at the last retarget (`bf-city-retarget`): they fight
 ;; instead of marching (`bf-march-plan`). Stopped by a foe up to BF_HATE_REACH (100 m), the units
@@ -726,7 +731,9 @@
   "The point unit PROC of side TEAM heads for, as Star Wars Battlefront's units take the command
    posts: a contested point near it first (`bf-city-contested-point`), to clear it of the other
    side's units so the capture can go on; else the control point it guards, while its side holds it
-   (bf-transport.gc `bf-post-point`: one unit in four a transport drops there); else the nearest
+   and the other side's units come within BF_THREAT_REACH of it (bf-transport.gc `bf-post-point`:
+   one unit in four brought there; with no foe coming, the guards stood around the point already
+   taken, the author's play, round 26); else the nearest
    point its side does not hold (`bf-city-goal-point`), to conquer it, or for BF_OTHER_GOAL units in
    10 (by their process id) the second nearest, so not all go for the same one; with every control point
    held, the one nearest it (`bf-city-guard-point`). -1 for none."
@@ -736,7 +743,12 @@
          )
     (cond
       ((>= contest 0) contest)
-      ((and (>= post 0) (= (-> *bf* points post owner) team)) post)
+      ((and (>= post 0)
+            (= (-> *bf* points post owner) team)
+            (> (-> *bf-threat-near* (+ (* BF_POINT_MAX (bf-other-team team)) post)) 0)
+            )
+       post
+       )
       (else
         (let ((goal (bf-city-goal-point team pos (< (mod (-> proc pid) 10) BF_OTHER_GOAL))))
           (if (>= goal 0)
@@ -861,6 +873,7 @@
    (queue         int16    BF_WAY_MESHES)
    (prev          nav-mesh BF_WAY_MESHES)         ;; the meshes listed when the bridges were made
    (prev-count    int32)
+   (deck-y        float    BF_WAY_MESHES)         ;; each mesh's upper deck: its polys over this height (`bf-deck-via`), far up for none
    (bridge-count  int32)
    (mesh-a        int16    BF_BRIDGE_MAX)
    (mesh-b        int16    BF_BRIDGE_MAX)
@@ -870,6 +883,56 @@
   )
 
 (define *bf-ways* (new 'static 'bf-ways))
+
+;; The upper decks: a mesh's polys BF_DECK_RISE over its most common height, 4 at least (the
+;; Industrial Zone's walkways, 27 m up its stairs from the 8 m streets). One guard in BF_DECK_SHARE
+;; goes by them once on its way through that mesh (`bf-deck-via`), when that way is at most
+;; BF_DECK_DETOUR times the direct one plus 20 m: by the streets alone, the shortest ways, no unit
+;; ever went up there (the author's play, round 26).
+(defconstant BF_DECK_RISE (meters 8))
+(defconstant BF_DECK_SHARE 3)
+(defconstant BF_DECK_DETOUR 1.6)
+(defconstant BF_DECK_DONE_MAX 128)
+
+(deftype bf-deck-done (structure)
+  "The guards that have been on a mesh's upper deck on their way: each one's handle and that mesh."
+  ((unit  handle   BF_DECK_DONE_MAX)
+   (mesh  nav-mesh BF_DECK_DONE_MAX)
+   (next  int32)
+   )
+  )
+
+(define *bf-deck-done* (new 'static 'bf-deck-done))
+
+(dotimes (i BF_DECK_DONE_MAX)
+  (set! (-> *bf-deck-done* unit i) (the-as handle #f))
+  )
+
+(defun bf-deck-done? ((unit process) (m nav-mesh))
+  "#t when UNIT has been on mesh M's upper deck (`*bf-deck-done*`)."
+  (let ((h (process->handle unit))
+        (d *bf-deck-done*)
+        )
+    (dotimes (i BF_DECK_DONE_MAX)
+      (if (and (= (-> d unit i) h) (= (-> d mesh i) m))
+          (return #t)
+          )
+      )
+    )
+  #f
+  )
+
+(defun bf-deck-done! ((unit process) (m nav-mesh))
+  "UNIT has been on mesh M's upper deck: it goes on (`bf-deck-via`)."
+  (let* ((d *bf-deck-done*)
+         (n (-> d next))
+         )
+    (set! (-> d unit n) (process->handle unit))
+    (set! (-> d mesh n) m)
+    (set! (-> d next) (mod (+ n 1) BF_DECK_DONE_MAX))
+    )
+  (none)
+  )
 
 (define *bf-march* (new 'static 'bf-march))
 
@@ -1110,6 +1173,42 @@
           )
         )
       )
+    ;; each mesh's upper deck (`bf-deck-via`): its polys BF_DECK_RISE over its most common height
+    ;; (5 m bands), 4 at least
+    (let ((band (new 'stack-no-clear 'array 'int32 24))
+          (c (new 'stack-no-clear 'vector))
+          )
+      (dotimes (k (-> w count))
+        (let ((m (-> w mesh k))
+              (best 0)
+              (bk 0)
+              (above 0)
+              )
+          (dotimes (b 24)
+            (set! (-> band b) 0)
+            )
+          (dotimes (i (-> m poly-count))
+            (poly-centroid m (-> m poly-array i) c)
+            (+! (-> band (max 0 (min 23 (the int (/ (+ (-> c y) (meters 40)) (meters 5)))))) 1)
+            )
+          (dotimes (b 24)
+            (when (< best (-> band b))
+              (set! best (-> band b))
+              (set! bk b)
+              )
+            )
+          (let ((deck (+ (- (* (+ (the float bk) 0.5) (meters 5)) (meters 40)) BF_DECK_RISE)))
+            (dotimes (i (-> m poly-count))
+              (poly-centroid m (-> m poly-array i) c)
+              (if (< deck (-> c y))
+                  (+! above 1)
+                  )
+              )
+            (set! (-> w deck-y k) (if (>= above 4) deck (meters 100000)))
+            )
+          )
+        )
+      )
     ;; the bridges again when the meshes listed changed (a search over every pair of polys)
     (let ((same? (= (-> w count) (-> w prev-count))))
       (dotimes (k (-> w count))
@@ -1231,14 +1330,90 @@
     )
   )
 
+(defun bf-deck-via ((unit nav-enemy) (k int) (out vector))
+  "In `bf-march-waypoint`: one guard in BF_DECK_SHARE (by its process id) on mesh K of the ways,
+   when it has an upper deck (`*bf-ways*` deck-y), goes by it once on its way: OUT, where it runs,
+   becomes the middle of the deck's poly that makes its shortest way to OUT, when that way is at
+   most BF_DECK_DETOUR times the direct one plus 20 m and OUT is 40 m away or more. On the deck, or
+   at that poly, the unit has been there (`bf-deck-done!`) and goes on to OUT as before."
+  (let ((m (-> unit nav state mesh)))
+    (when (and m
+               (>= k 0)
+               (= (-> unit type symbol) 'crimson-guard)
+               (= (mod (-> unit pid) BF_DECK_SHARE) 1)
+               (< (-> *bf-ways* deck-y k) (meters 1000))
+               (not (bf-deck-done? unit m))
+               )
+      (let ((deck (-> *bf-ways* deck-y k))
+            (poly (-> unit nav state current-poly))
+            (pos (-> unit root trans))
+            (c (new 'stack-no-clear 'vector))
+            )
+        (if poly
+            (poly-centroid m poly c)
+            (vector-copy! c pos)
+            )
+        (cond
+          ((< deck (-> c y))
+           ;; on the deck: done, on its way again
+           (bf-deck-done! unit m)
+           )
+          (else
+            (let ((direct (vector-vector-xz-distance pos out))
+                  (best 0.0)
+                  (bi -1)
+                  )
+              (when (< (meters 40) direct)
+                (dotimes (i (-> m poly-count))
+                  (poly-centroid m (-> m poly-array i) c)
+                  (when (< deck (-> c y))
+                    (let ((d (+ (vector-vector-xz-distance pos c) (vector-vector-xz-distance c out))))
+                      (when (or (< bi 0) (< d best))
+                        (set! best d)
+                        (set! bi i)
+                        )
+                      )
+                    )
+                  )
+                (when (and (>= bi 0) (< best (+ (* BF_DECK_DETOUR direct) (meters 20))))
+                  (poly-centroid m (-> m poly-array bi) c)
+                  (if (and (< (vector-vector-xz-distance pos c) (meters 5)) (< (fabs (- (-> pos y) (-> c y))) (meters 3)))
+                      (bf-deck-done! unit m)
+                      (vector-copy! out c)
+                      )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(define-extern bf-march-target (function nav-enemy int vector vector nav-mesh int int symbol))
+
 (defun bf-march-waypoint ((unit nav-enemy) (goal int) (pos vector) (out vector))
   "Where UNIT runs now on its way to point GOAL at POS: POS itself on the point's mesh; else just
    past the link poly of its own mesh that starts its way there (`*bf-ways*`, `bf-march-through`),
-   or the end of a bridge on its mesh (`bf-ways-bridges`). #f when no way."
+   or the end of a bridge on its mesh (`bf-ways-bridges`); for one guard in three, by the upper deck
+   of its mesh first (`bf-deck-via`). #f when no way."
   (let* ((m (-> unit nav state mesh))
          (k (if m (bf-ways-index m) -1))
          (nx (if (>= k 0) (-> *bf-ways* next (+ (* goal BF_WAY_MESHES) k)) -1))
+         (ok (bf-march-target unit goal pos out m k nx))
          )
+    (if ok
+        (bf-deck-via unit k out)
+        )
+    ok
+    )
+  )
+
+(defun bf-march-target ((unit nav-enemy) (goal int) (pos vector) (out vector) (m nav-mesh) (k int) (nx int))
+  "`bf-march-waypoint` before the deck: OUT, the point or the way's next link or bridge."
+  (begin
     (cond
       ((= nx -2)
        (vector-copy! out pos)
@@ -1504,12 +1679,20 @@
     ;; each side's units in each point's zone (`bf-city-contested-point`)
     (dotimes (k 12)
       (set! (-> *bf-zone-near* k) 0)
+      (set! (-> *bf-threat-near* k) 0)
       )
     (dotimes (d (-> *bf-unit-dots* count))
       (dotimes (i (-> *bf* point-count))
-        (if (< (vector-vector-xz-distance (-> *bf-unit-dots* pos d) (-> *bf* points i pos)) BF_ZONE_REACH)
-            (+! (-> *bf-zone-near* (+ (* BF_POINT_MAX (-> *bf-unit-dots* team d)) i)) 1)
-            )
+        (let ((dist (vector-vector-xz-distance (-> *bf-unit-dots* pos d) (-> *bf* points i pos)))
+              (k (+ (* BF_POINT_MAX (-> *bf-unit-dots* team d)) i))
+              )
+          (if (< dist BF_ZONE_REACH)
+              (+! (-> *bf-zone-near* k) 1)
+              )
+          (if (< dist BF_THREAT_REACH)
+              (+! (-> *bf-threat-near* k) 1)
+              )
+          )
         )
       )
     ;; the ways to the points over every loaded mesh, built again every 10 s
@@ -1634,6 +1817,206 @@
       )
     n
     )
+  )
+
+(defun bf-ways-islands ()
+  "For the tests: each nav mesh the ways know cut into its islands, the polys joined by their edges
+   (`adj-poly`, 255 for none): each island's polys, link polys, height range of its polys' middles
+   and its middle. An island with no link poly reaches no other mesh."
+  (let ((w *bf-ways*)
+        (isl (new 'stack-no-clear 'array 'int16 256))
+        (queue (new 'stack-no-clear 'array 'int16 256))
+        (c (new 'stack-no-clear 'vector))
+        (sum (new 'stack-no-clear 'vector))
+        )
+    (dotimes (k (-> w count))
+      (let* ((m (-> w mesh k))
+             (n (the-as int (-> m poly-count)))
+             (count 0)
+             )
+        (dotimes (i n)
+          (set! (-> isl i) -1)
+          )
+        (dotimes (i n)
+          (when (< (-> isl i) 0)
+            (let ((head 0)
+                  (tail 1)
+                  (polys 0)
+                  (links 0)
+                  (lo 1000000000.0)
+                  (hi -1000000000.0)
+                  )
+              (vector-reset! sum)
+              (set! (-> queue 0) i)
+              (set! (-> isl i) count)
+              (while (< head tail)
+                (let ((poly (-> m poly-array (-> queue head))))
+                  (+! head 1)
+                  (+! polys 1)
+                  (if (logtest? (-> poly pat) 4)
+                      (+! links 1)
+                      )
+                  (poly-centroid m poly c)
+                  (set! lo (fmin lo (-> c y)))
+                  (set! hi (fmax hi (-> c y)))
+                  (vector+! sum sum c)
+                  (dotimes (e (-> poly vertex-count))
+                    (let ((adj (-> poly adj-poly e)))
+                      (when (and (!= adj 255) (< adj n) (< (-> isl adj) 0))
+                        (set! (-> isl adj) count)
+                        (set! (-> queue tail) (the-as int adj))
+                        (+! tail 1)
+                        )
+                      )
+                    )
+                  )
+                )
+              (vector-float*! sum sum (/ 1.0 (the float polys)))
+              (format 0 "SMOKE island mesh ~D #~D: ~D polys ~D links y ~M to ~M" k count polys links lo hi)
+              (format 0 " at ~M ~M~%" (-> sum x) (-> sum z))
+              (+! count 1)
+              )
+            )
+          )
+        (format 0 "SMOKE mesh ~D: ~D polys, ~D islands~%" k n count)
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-ways-pats ((only int))
+  "For the tests: each nav mesh's polys by type (`pat` bits: 1 a gap a walker jumps or does not
+   cross, 2 a poly the walks avoid, 4 a link to another mesh, 8 the last kind), and for mesh ONLY
+   (-1 none) each poly: its index, type, height and middle, and its neighbours with their types
+   and heights."
+  (let ((w *bf-ways*)
+        (c (new 'stack-no-clear 'vector))
+        (d (new 'stack-no-clear 'vector))
+        )
+    (dotimes (k (-> w count))
+      (let ((m (-> w mesh k))
+            (n1 0)
+            (n2 0)
+            (n4 0)
+            (n8 0)
+            )
+        (dotimes (i (-> m poly-count))
+          (let ((pat (-> m poly-array i pat)))
+            (if (logtest? pat 1) (+! n1 1))
+            (if (logtest? pat 2) (+! n2 1))
+            (if (logtest? pat 4) (+! n4 1))
+            (if (logtest? pat 8) (+! n8 1))
+            )
+          )
+        (format 0 "SMOKE pats mesh ~D: ~D polys, gap ~D, avoid ~D, link ~D, other ~D~%" k (-> m poly-count) n1 n2 n4 n8)
+        (when (= k only)
+          (dotimes (i (-> m poly-count))
+            (let ((poly (-> m poly-array i)))
+              (poly-centroid m poly c)
+              (format 0 "SMOKE poly ~D ~D: pat ~D y ~M at ~M ~M adj" k i (-> poly pat) (-> c y) (-> c x) (-> c z))
+              (dotimes (e (-> poly vertex-count))
+                (let ((adj (-> poly adj-poly e)))
+                  (when (!= adj 255)
+                    (poly-centroid m (-> m poly-array adj) d)
+                    (format 0 " ~D/~D/~M" adj (-> m poly-array adj pat) (-> d y))
+                    )
+                  )
+                )
+              (format 0 "~%")
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(define *bf-test-counts* (new 'static 'array int32 4 0 0 0 0))
+
+(defun bf-city-test-counts ()
+  "For the tests, into `*bf-test-counts*`: 0 the guards standing on an upper deck (`bf-deck-via`),
+   1 the guards that have been on one (`*bf-deck-done*`), 2 the posted units within 20 m of their
+   point while no unit of the other side is within BF_THREAT_REACH of it, 3 the posted units."
+  (dotimes (i 4)
+    (set! (-> *bf-test-counts* i) 0)
+    )
+  (dotimes (i BF_DECK_DONE_MAX)
+    (if (handle->process (-> *bf-deck-done* unit i))
+        (+! (-> *bf-test-counts* 1) 1)
+        )
+    )
+  (iterate-process-tree
+    *active-pool*
+    (lambda ((p process))
+      (when (and (type? p nav-enemy) (>= (bf-unit-team p) 0) (-> p next-state) (!= (-> p next-state name) 'inactive))
+        (let* ((u (the-as nav-enemy p))
+               (m (if (nonzero? (-> u nav)) (-> u nav state mesh)))
+               (poly (if (nonzero? (-> u nav)) (-> u nav state current-poly)))
+               (k (if m (bf-ways-index m) -1))
+               (post (bf-post-point p))
+               )
+          (when (and (= (-> p type symbol) 'crimson-guard) m poly (>= k 0))
+            (let ((c (poly-centroid m poly (new 'stack-no-clear 'vector))))
+              (if (< (-> *bf-ways* deck-y k) (-> c y))
+                  (+! (-> *bf-test-counts* 0) 1)
+                  )
+              )
+            )
+          (when (>= post 0)
+            (+! (-> *bf-test-counts* 3) 1)
+            (if (and (< (vector-vector-xz-distance (-> u root trans) (-> *bf* points post pos)) (meters 20))
+                     (zero? (-> *bf-threat-near* (+ (* BF_POINT_MAX (bf-other-team (bf-unit-team p))) post)))
+                     )
+                (+! (-> *bf-test-counts* 2) 1)
+                )
+            )
+          )
+        )
+      #t
+      )
+    *null-kernel-context*
+    )
+  (none)
+  )
+
+(defun bf-city-unit-report ()
+  "For the tests: each unit of the battle awake: its type, process id, side, state, place, goal
+   point (`bf-city-unit-goal`) and how far, the way from its mesh to it (`*bf-ways*` next: -2 on
+   the point's mesh, -1 none), its mesh's index, its march and fight, and how high it stands over
+   its nav poly's middle (that middle lies 0.5 to 1.4 m under the street)."
+  (iterate-process-tree
+    *active-pool*
+    (lambda ((p process))
+      (when (and (type? p nav-enemy) (>= (bf-unit-team p) 0) (-> p next-state) (!= (-> p next-state name) 'inactive))
+        (let* ((u (the-as nav-enemy p))
+               (team (bf-unit-team p))
+               (goal (bf-city-unit-goal p team))
+               (nav? (and (nonzero? (-> u nav)) (-> u nav)))
+               (m (if nav? (-> u nav state mesh)))
+               (poly (if nav? (-> u nav state current-poly)))
+               (k (if m (bf-ways-index m) -1))
+               (way (if (and (>= goal 0) (>= k 0)) (-> *bf-ways* next (+ (* goal BF_WAY_MESHES) k)) -9))
+               (c (new 'stack-no-clear 'vector))
+               )
+          (if (and m poly)
+              (poly-centroid m poly c)
+              (vector-copy! c (-> u root trans))
+              )
+          (format 0 "SMOKE unit ~A ~D side ~D ~A" (-> p type symbol) (-> p pid) team (-> p next-state name))
+          (format 0 " at ~M ~M ~M" (-> u root trans x) (-> u root trans y) (-> u root trans z))
+          (format 0 " goal ~D ~M way ~D mesh ~D" goal
+                  (if (>= goal 0) (vector-vector-xz-distance (-> u root trans) (-> *bf* points goal pos)) -1.0) way k
+                  )
+          (format 0 " march ~A fight ~A over ~M~%" (bf-marching? p) (bf-city-engaged? p) (- (-> u root trans y) (-> c y)))
+          )
+        )
+      #t
+      )
+    *null-kernel-context*
+    )
+  (none)
   )
 
 (defun bf-ways-dump ()
@@ -2058,7 +2441,7 @@
   (none)
   )
 
-(defconstant BF_SPAWN_REACH (meters 45)) ;; units appear on the nav meshes this close to their control point
+(defconstant BF_SPAWN_REACH (meters 90)) ;; units appear on the nav meshes this close to their control point (45 m until round 26)
 
 ;; When each side may bring units in at a control point again (`bf-city-spawn-tick`).
 (define *bf-spawn-time* (new 'static 'array time-frame 2))
@@ -2121,10 +2504,40 @@
    (unit    handle       BF_SKY_WAIT_MAX)
    (collide collide-spec BF_SKY_WAIT_MAX)
    (frames  int32        BF_SKY_WAIT_MAX)
+   (ground  float        BF_SKY_WAIT_MAX)   ;; the height of the nav poly it falls onto
    )
   )
 
+(defconstant BF_FALL_FREE (meters 3)) ;; a unit falls through everything until this high over its nav poly
+
 (define *bf-sky-fall* (new 'static 'bf-sky-fall))
+
+(defun bf-city-fall-through! ((proc process) (ground float))
+  "A robotguard or a spider robot falling from the sky or out of a ship's hatch (exit-transport,
+   enemy-falling-post) onto a nav poly at height GROUND meets nothing until BF_FALL_FREE over it,
+   then the scenery only, until it leaves that state (`*bf-sky-fall*`, `bf-city-sky-tick`): over a
+   control point they landed on the jetpacks hovering there; under the Krimzon Guard's ship, at its
+   base, the spiders met the scenery 13 and 22 m up (6 m and 14 m over the street), stood there and
+   walked in the air (the author's play and the tests, round 26)."
+  (when (< (-> *bf-sky-fall* count) BF_SKY_WAIT_MAX)
+    (let ((n (-> *bf-sky-fall* count))
+          (cs (the-as collide-shape (-> (the-as process-drawable proc) root)))
+          )
+      (set! (-> *bf-sky-fall* unit n) (process->handle proc))
+      (set! (-> *bf-sky-fall* collide n) (-> cs root-prim prim-core collide-with))
+      (set! (-> *bf-sky-fall* frames n) 0)
+      (set! (-> *bf-sky-fall* ground n) ground)
+      (set! (-> cs root-prim prim-core collide-with)
+            (if (< (+ ground BF_FALL_FREE) (-> (the-as process-drawable proc) root trans y))
+                (the-as collide-spec 0)
+                (collide-spec backgnd)
+                )
+            )
+      (+! (-> *bf-sky-fall* count) 1)
+      )
+    )
+  (none)
+  )
 
 (defun bf-city-sky-tick ()
   "Every frame of the fight: each unit waiting to go up (`*bf-sky-wait*`), once in its 'active (its
@@ -2181,10 +2594,19 @@
             ((and (< (-> f frames i) 600)
                   (or (< (-> f frames i) 2) (and (-> p next-state) (= (-> p next-state name) 'exit-transport)))
                   )
+             ;; BF_FALL_FREE over its poly: the scenery again, to land on the street
+             (let ((cs (the-as collide-shape (-> p root))))
+               (if (and (zero? (-> cs root-prim prim-core collide-with))
+                        (< (-> p root trans y) (+ (-> f ground i) BF_FALL_FREE))
+                        )
+                   (set! (-> cs root-prim prim-core collide-with) (collide-spec backgnd))
+                   )
+               )
              (when (!= n i)
                (set! (-> f unit n) (-> f unit i))
                (set! (-> f collide n) (-> f collide i))
                (set! (-> f frames n) (-> f frames i))
+               (set! (-> f ground n) (-> f ground i))
                )
              (+! (-> f frames n) 1)
              (+! n 1)
@@ -2281,18 +2703,10 @@
                       )
                     (logior! (-> (the-as process-drawable proc) draw status) (draw-control-status no-draw))
                     )
-                  ;; a robotguard or a spider falls through the units (`*bf-sky-fall*`)
-                  (when (and (= (-> params behavior) 6) (< (-> *bf-sky-fall* count) BF_SKY_WAIT_MAX))
-                    (let ((n (-> *bf-sky-fall* count))
-                          (cs (the-as collide-shape (-> (the-as process-drawable proc) root)))
-                          )
-                      (set! (-> *bf-sky-fall* unit n) (process->handle proc))
-                      (set! (-> *bf-sky-fall* collide n) (-> cs root-prim prim-core collide-with))
-                      (set! (-> *bf-sky-fall* frames n) 0)
-                      (set! (-> cs root-prim prim-core collide-with) (collide-spec backgnd))
-                      (+! (-> *bf-sky-fall* count) 1)
+                  ;; a robotguard or a spider falls through the units (`bf-city-fall-through!`)
+                  (if (= (-> params behavior) 6)
+                      (bf-city-fall-through! proc (-> at y))
                       )
-                    )
                   (let ((n (mod (-> *bf-sky-log* count) BF_SKY_LOG)))
                     (set! (-> *bf-sky-log* unit n) (process->handle proc))
                     (set! (-> *bf-sky-log* kind n) kind)
