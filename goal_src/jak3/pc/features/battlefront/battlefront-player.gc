@@ -54,7 +54,9 @@
 (defconstant BF_BOOST_TIME 10.0)            ;; seconds of spider sprint in a full blue eco gauge
 (defconstant BF_BOOST_SPEED 2.0)            ;; spider speed multiplier while it sprints
 (defconstant BF_SPIDER_LEAP_HEIGHT (meters 11)) ;; height of the spider robot's leap (X)
-(defconstant BF_ROLL_SPEED 2.4)             ;; robotguard speed multiplier as a ball (1.6 before round 22: x1.5)
+(defconstant BF_ROLL_SPEED 3.6)             ;; robotguard speed multiplier as a ball (2.4 before round 25, 1.6 before round 22)
+(defconstant BF_FLAME_BOOST 1.8)            ;; the jetpack's flames this much longer while R2 boosts
+(defconstant BF_LAND_TIME (seconds 0.7))    ;; the class model's landing clip after a fall from the sky
 (defconstant BF_SALVO_GAP (seconds 0.12))   ;; between the two shots of a jetpack or robotguard salvo
 (defconstant BF_SHIELD_TIME (seconds 5))    ;; robotguard: its shield stops every hit this long
 (defconstant BF_SHIELD_RECHARGE (seconds 25)) ;; then it needs this long to come back
@@ -260,6 +262,8 @@
    (back?       symbol)         ;; it walks backward: its walk or run clip plays reversed
    (side        int32)          ;; jetpack: 0 still or forward, 1 right, 2 left, 3 back
    (aim         vector :inline) ;; where the class weapon aims this frame
+   (flame       float)          ;; jetpack: its flames' size, 0.35 hovering to 1 flying fast, BF_FLAME_BOOST boosting (`bf-avatar-flames`)
+   (boost?      symbol)         ;; jetpack: R2 boosts this frame
    )
   (:state-methods
     idle
@@ -1456,6 +1460,7 @@
             )
            )
          )
+       (set! (-> self boost?) (and (cpad-hold? 0 r2) (< 0.0 (-> self fuel))))
        ;; R2 held while the boost gauge lasts (BF_JET_BOOST_TIME for a full one, refilled by dark
        ;; eco only): BF_JET_BOOST_SPEED toward where the left stick points, or ahead
        (when (and (cpad-hold? 0 r2) (< 0.0 (-> self fuel)))
@@ -2022,6 +2027,37 @@
   (none)
   )
 
+(defun bf-class-fall-clip ((class int))
+  "Clip of CLASS's model falling from the sky after a respawn (battlefront.gc `bf-sky-drop!`): the
+   guards' jump-high, the robotguard's ball, the spider's attack jump; -1 for a jetpack, which flies
+   down on its hover clips."
+  (case class
+    ((BF_CLASS_BLUE_GUARD BF_CLASS_RED_GUARD) BF_CLIP_ROLL)
+    ((BF_CLASS_ROBOGUARD) 13)
+    ((BF_CLASS_SPYDROID) 6)
+    (else -1)
+    )
+  )
+
+(defun bf-class-land-clip ((class int))
+  "Clip of CLASS's model landing from that fall: the guards' notice, the stock guard's own jump
+   landing (guard.gc jump-land-anim 7, from its frame 9), the robotguard's ball-to-idle, the
+   spider's attack-land; -1 for a jetpack."
+  (case class
+    ((BF_CLASS_BLUE_GUARD BF_CLASS_RED_GUARD) 7)
+    ((BF_CLASS_ROBOGUARD) 14)
+    ((BF_CLASS_SPYDROID) 7)
+    (else -1)
+    )
+  )
+
+(defun bf-avatar-landing? ()
+  "#t for BF_LAND_TIME after the player landed from a fall from the sky (`*bf*` land-time)."
+  (and (nonzero? (-> *bf* land-time))
+       (< (- (-> *display* game-clock frame-counter) (-> *bf* land-time)) BF_LAND_TIME)
+       )
+  )
+
 (defbehavior bf-avatar-pick-anim bf-avatar ()
   "Clip of the class for Jak's current motion."
   (let* ((art (bf-class-art-of (-> self class)))
@@ -2032,6 +2068,13 @@
       ((not *target*)
        ;; Jak is being respawned (`stop` clears *target*): keep the clip
        (-> self anim)
+       )
+      ;; falling from the sky after a respawn, then landing (battlefront.gc `bf-sky-drop!`)
+      ((and (-> *bf* dropping?) (>= (bf-class-fall-clip (-> self class)) 0))
+       (bf-class-fall-clip (-> self class))
+       )
+      ((and (bf-avatar-landing?) (>= (bf-class-land-clip (-> self class)) 0))
+       (bf-class-land-clip (-> self class))
        )
       ((and (>= (-> art special) 0) (= (-> self class) BF_CLASS_ROBOGUARD) (-> self rolling?))
        (-> art special)
@@ -2238,11 +2281,60 @@
   (none)
   )
 
+;; The jetpack classes' flames: a copy in GAME of the stock jetpack guards' (flying-turret.gc part
+;; 4709, level code), its length and width set before each draw. Free id after the points' beams.
+(defpart 5203
+  :init-specs ((:texture (gun-yellow-muzzleflash level-default-sprite))
+    (:birth-func 'birth-func-set-quat)
+    (:num 1.0)
+    (:scale-x (meters 0.4))
+    (:scale-y (meters 3))
+    (:r 128.0 128.0)
+    (:g 32.0 96.0)
+    (:b :copy g)
+    (:a 128.0 64.0)
+    (:timer (seconds 0.017))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3))
+    )
+  )
+
+(defbehavior bf-avatar-flames bf-avatar ()
+  "The jetpack classes' two flames out of the model's turbines (`bf-hover-nozzle!`), drawn as the
+   stock jetpack guards draw theirs (flying-turret.gc flying-turret-method-229): 0.9 m long
+   hovering, up to 2.1 m flying fast, BF_FLAME_BOOST times that while R2 boosts (the author's
+   wish), the size easing toward its target (`flame`). None while the model dies or is hidden."
+  (when (and (or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
+             (not (-> self dying?))
+             (not (logtest? (-> self draw status) (draw-control-status no-draw)))
+             )
+    (let* ((v (if *target* (-> *target* control transv) *zero-vector*))
+           (speed (sqrtf (+ (* (-> v x) (-> v x)) (* (-> v z) (-> v z)))))
+           (want (if (-> self boost?) BF_FLAME_BOOST (lerp-scale 0.35 1.0 speed 0.0 (meters 12))))
+           )
+      (seek! (-> self flame) want (* 3.0 (seconds-per-frame)))
+      (let ((len (* (lerp 3072.0 8601.6 (fmin 1.0 (-> self flame))) (fmax 1.0 (-> self flame))))
+            (pos (new 'stack-no-clear 'vector))
+            (dir (new 'stack-no-clear 'vector))
+            )
+        (set! (-> *part-id-table* 5203 init-specs 4 initial-valuef) len)
+        (set! (-> *part-id-table* 5203 init-specs 3 initial-valuef) (/ len 2))
+        (dotimes (side 2)
+          (if (bf-hover-nozzle! self pos dir side)
+              (draw-beam (-> *part-id-table* 5203) pos dir #f)
+              )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defstate idle (bf-avatar)
   :virtual #t
   :trans (behavior ()
     (bf-avatar-follow)
-    (if (and *target* (not (focus-test? *target* dead)) (not (-> self dying?)))
+    ;; no class move while the player falls from the sky after a respawn (battlefront.gc `bf-sky-drop!`)
+    (if (and *target* (not (focus-test? *target* dead)) (not (-> self dying?)) (not (-> *bf* dropping?)))
         (bf-avatar-moves)
         )
     (bf-avatar-zap-update)
@@ -2281,6 +2373,10 @@
             (set-time! (-> self anim-time))
             (set! (-> self anim-wait) 0)
             (ja :group! (-> self draw art-group data want) :num! min)
+            ;; a guard lands as the stock guard does: its notice clip from frame 9
+            (if (and (bf-guard-class? (-> self class)) (= want (bf-class-land-clip (-> self class))) (bf-avatar-landing?))
+                (ja :frame-num (ja-aframe 9.0 0))
+                )
             )
           )
         )
@@ -2330,6 +2426,12 @@
              )
            )
          )
+        ((or (and (bf-avatar-landing?) (= (-> self anim) (bf-class-land-clip (-> self class))))
+             (and (-> *bf* dropping?) (= (-> self anim) (bf-class-fall-clip (-> self class))) (!= (-> self class) BF_CLASS_ROBOGUARD))
+             )
+         ;; the fall's and the landing's clips play once and hold their end (the ball loops)
+         (ja :num! (seek!))
+         )
         ((and (< (current-time) (-> self dodge-until))
               (or (= (-> self anim) BF_CLIP_ROLL) (= (-> self anim) BF_CLIP_DODGE_RIGHT) (= (-> self anim) BF_CLIP_DODGE_LEFT))
               )
@@ -2345,6 +2447,7 @@
     )
   :post (behavior ()
     (ja-post)
+    (bf-avatar-flames)
     )
   )
 
@@ -2369,6 +2472,8 @@
   (set! (-> self grenade-time) 0)
   (set! (-> self shoot-until) 0)
   (set! (-> self rolling?) #f)
+  (set! (-> self flame) 0.35)
+  (set! (-> self boost?) #f)
   (set! (-> self salvo-left) 0)
   (set! (-> self salvo-time) 0)
   (set! (-> self melee-time) 0)

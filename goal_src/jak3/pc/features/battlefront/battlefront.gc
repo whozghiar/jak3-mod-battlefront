@@ -2077,6 +2077,109 @@
   (none)
   )
 
+(defconstant BF_DROP_MAX_TIME (seconds 6)) ;; a fall from the sky ends this long after it began, landed or not
+
+(defun bf-sky-drop! ((pick int) (ground vector))
+  "The player respawning at point PICK falls from the sky, as the units brought to a control point
+   do (the author's wish): above a nav poly drawn at random within 45 m of the point (the Haven City
+   side's `bf-city-spawn-spot`, BF_CITY_SKY_SPOT), `bf-sky-height` above it and under the jetpacks'
+   ceiling, his controls off until he lands (`bf-pad-lock!`, `bf-sky-drop-update`). GROUND: set to
+   that poly's middle, where he lands; he falls through the units, meeting the scenery only. Returns
+   #t when he falls, #f (GROUND unchanged) when the city found no poly."
+  (set! (-> *bf* sky-point) pick)
+  (set! (-> *bf* sky-found?) #f)
+  (bf-city-call BF_CITY_SKY_SPOT)
+  (cond
+    ((-> *bf* sky-found?)
+     (vector-copy! ground (-> *bf* sky-ground))
+     (let ((sky (vector-copy! (new 'stack-no-clear 'vector) ground))
+           (h (bf-sky-height ground))
+           )
+       ;; a jetpack starts under its force field's ceiling
+       (+! (-> sky y) h)
+       (if (or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK))
+           (set! (-> sky y) (fmax (-> ground y) (fmin (-> sky y) (- (-> *bf* ceiling) (meters 1)))))
+           )
+       (format 0 "battlefront: respawn from the sky at ~S, ~M over the ground (~M up, the ceiling ~M up)~%"
+               (bf-point-name pick) (- (-> sky y) (-> ground y)) (-> ground y) (-> *bf* ceiling))
+       (move-to-point! (-> *target* control) sky)
+       (vector-reset! (-> *target* control transv))
+       )
+     ;; through the units: he met the scenery only (one fall stopped 21 m up for 6 s, on a unit
+     ;; in the air over the point); `bf-sky-drop-update` gives his collision back as he lands
+     (when (not (-> *bf* dropping?))
+       (set! (-> *bf* drop-collide) (-> *target* control root-prim prim-core collide-with))
+       (set! (-> *target* control root-prim prim-core collide-with) (collide-spec backgnd))
+       )
+     (set! (-> *bf* dropping?) #t)
+     (set! (-> *bf* drop-time) (-> *display* game-clock frame-counter))
+     (set! (-> *bf* land-time) 0)
+     #t
+     )
+    (else
+      #f
+      )
+    )
+  )
+
+(defun bf-sky-drop-update ()
+  "Every frame of a fight (the director): the player's fall from the sky (`bf-sky-drop!`) ends once
+   he stands on the ground, BF_DROP_MAX_TIME after it began at the latest: his controls come back,
+   his class model plays its landing (`*bf*` land-time, battlefront-player.gc), and the spawn shield
+   starts again from there (`bf-spawn-shield`). Until then Jak falls straight down, never up: the X that picked the
+   point on the respawn page made him jump as he appeared (the page clears its confirm, not X, and
+   Jak's jump reads the presses of the last 15 frames)."
+  (when (-> *bf* dropping?)
+    (when *target*
+      (if (< 0.0 (-> *target* control transv y))
+          (set! (-> *target* control transv y) 0.0)
+          )
+      ;; straight down: nothing pushes him off his poly (a unit falling beside him did, 7 m)
+      (set! (-> *target* control transv x) 0.0)
+      (set! (-> *target* control transv z) 0.0)
+      )
+    (let ((now (-> *display* game-clock frame-counter)))
+      (when (or (not *target*)
+                (focus-test? *target* dead)
+                (and (logtest? (-> *target* control status) (collide-status on-surface))
+                     (< (seconds 0.2) (- now (-> *bf* drop-time)))
+                     )
+                (< BF_DROP_MAX_TIME (- now (-> *bf* drop-time)))
+                )
+        (set! (-> *bf* dropping?) #f)
+        (set! (-> *bf* land-time) now)
+        (if *target*
+            (set! (-> *target* control root-prim prim-core collide-with) (-> *bf* drop-collide))
+            )
+        (if (and *target* (not (focus-test? *target* dead)))
+            (bf-spawn-shield)
+            )
+        )
+      )
+    )
+  (none)
+  )
+
+;; The pad read (pad.gc cpad-get-data, the kernel's), kept before `bf-pad-lock!` wraps it.
+(define-perm *bf-stock-cpad-get-data* (function cpad-info cpad-info) cpad-get-data)
+
+(defun bf-pad-lock! ((pad cpad-info))
+  "While the player falls from the sky in a fight (`*bf*` dropping?), pad 0 gives only START and
+   SELECT and a centered left stick: no move, jump, weapon or class move until he lands (the
+   author's wish); the right stick still turns the camera. Returns PAD."
+  (when (and (zero? (-> pad number)) (-> *bf* dropping?) (bf-fighting?))
+    (set! (-> pad button0) (logand (-> pad button0) (the-as uint (pad-buttons start select))))
+    (set! (-> pad leftx) (the-as uint 128))
+    (set! (-> pad lefty) (the-as uint 128))
+    )
+  pad
+  )
+
+(defun cpad-get-data ((pad cpad-info))
+  "The stock pad read, then `bf-pad-lock!`."
+  (bf-pad-lock! (*bf-stock-cpad-get-data* pad))
+  )
+
 (defbehavior bf-respawn-at-point bf-director ()
   "After a far respawn's reset (`bf-target-death`): once Jak stands at the point's continue point,
    its levels in, move him onto the point (`*bf*` respawn-at), with his class's full health, a fresh
@@ -2089,11 +2192,14 @@
              (logtest? (-> *target* control status) (collide-status on-surface))
              (< (-> *game-info* blackout-time) (current-time))
              )
-    (let ((at (-> *bf* points (-> *bf* respawn-at) pos)))
+    (let ((at (vector-copy! (new 'stack-no-clear 'vector) (-> *bf* points (-> *bf* respawn-at) pos))))
       (format 0 "battlefront: respawned at ~S after the reset~%" (bf-point-name (-> *bf* respawn-at)))
+      ;; from the sky onto a nav poly around the point (`bf-sky-drop!`, AT set to it), else on the point
+      (when (not (bf-sky-drop! (-> *bf* respawn-at) at))
+        (move-to-point! (-> *target* control) at)
+        (vector-reset! (-> *target* control transv))
+        )
       (set! (-> *bf* respawn-at) -1)
-      (move-to-point! (-> *target* control) at)
-      (vector-reset! (-> *target* control transv))
       (vector-copy! (-> *bf* safe) at)
       (set! (-> *bf* safe-level) (-> *load-state* vis-nick))
       (set! (-> *bf* safe-time) 0)
@@ -2651,6 +2757,7 @@
               )
              )
            (bf-respawn-at-point)
+           (bf-sky-drop-update)
            (set! (-> *bf* redeploy-ok?) (bf-can-redeploy?))
            (bf-keep-in-zone)
            (bf-spawn-drops)
@@ -3034,14 +3141,19 @@
         (initialize! *game-info* 'life (the-as game-save #f) (the-as string #f) (the-as resetter-spec #f))
         (sleep-code)
         )
-      ;; near, its sections loaded: there at once, the levels left as they are; the point is the
-      ;; safe place of a fall (`bf-keep-in-zone`), not where he died
-      (move-to-point! (-> self control) at)
-      (vector-reset! (-> self control transv))
-      (if cont
-          (set! (-> *bf* safe-level) (-> cont level))
+      ;; near, its sections loaded: there at once, the levels left as they are, from the sky onto a
+      ;; nav poly around the point (`bf-sky-drop!`), else on the point; where he lands is the safe
+      ;; place of a fall (`bf-keep-in-zone`), not where he died
+      (let ((ground (vector-copy! (new 'stack-no-clear 'vector) at)))
+        (when (not (bf-sky-drop! pick ground))
+          (move-to-point! (-> self control) at)
+          (vector-reset! (-> self control transv))
           )
-      (vector-copy! (-> *bf* safe) at)
+        (if cont
+            (set! (-> *bf* safe-level) (-> cont level))
+            )
+        (vector-copy! (-> *bf* safe) ground)
+        )
       (set! (-> *bf* safe-time) 0)
       (format 0 "battlefront: respawned at ~S~%" (bf-point-name pick))
       )

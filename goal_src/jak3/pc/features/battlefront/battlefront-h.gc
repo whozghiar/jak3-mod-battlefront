@@ -244,6 +244,14 @@
    (bag-deaths    int32)          ;; unit deaths left in the pickup bag (`bf-queue-drop`), 0 for a new bag
    (bag-drops     int32)          ;; pickups left in it
    (overlay?      symbol)         ;; L3 shows the kills, the deaths and the whole city's map (battlefront.gc)
+   ;; The player's fall from the sky after a respawn (battlefront.gc `bf-sky-drop!`)
+   (sky-point     int32)          ;; the point the Haven City side looks around (BF_CITY_SKY_SPOT)
+   (sky-found?    symbol)         ;; it found a nav poly there
+   (sky-ground    vector :inline) ;; that poly's middle, where the player lands
+   (dropping?     symbol)         ;; he falls now: his controls are off until he lands (`bf-pad-lock!`)
+   (drop-time     time-frame)     ;; when the fall began (game clock)
+   (land-time     time-frame)     ;; when he landed (game clock), 0 none: his class model's landing clip
+   (drop-collide  collide-spec)   ;; what Jak collides with, kept while he falls (he meets the scenery only)
    )
   )
 
@@ -264,6 +272,8 @@
 (set! (-> *bf* endless-light?) #f)
 (set! (-> *bf* view-set?) #f)
 (set! (-> *bf* respawn-at) -1)
+(set! (-> *bf* sky-found?) #f)
+(set! (-> *bf* dropping?) #f)
 
 (defun bf-combat! ()
   "The player is in combat now (a shot, a blow, a hit taken): `*bf*` combat-time, on the game clock.
@@ -305,6 +315,7 @@
 (defconstant BF_CITY_UPDATE 1)    ;; every frame of the fight
 (defconstant BF_CITY_RESET 2)     ;; the battle ends
 (defconstant BF_CITY_FREE_NAVS 3) ;; just before an `initialize!` 'life: the units give back the default nav mesh
+(defconstant BF_CITY_SKY_SPOT 4)  ;; a nav poly at random around `*bf*` sky-point, into sky-ground (sky-found?)
 
 ;; Factions of a battle: Freedom League and Krimzon Guard both strong everywhere, Metal Heads
 ;; out; guards at the "combat" spawn level (guard-a 13), KG robots at "war" (roboguard 5,
@@ -609,6 +620,73 @@
   "#t while losses count."
   (= (-> *bf* phase) BF_PHASE_FIGHT)
   )
+
+(defconstant BF_ROLL_SCALE 1.5) ;; the robotguards' ball rolls this much faster in a battle (round 25)
+
+(defun bf-roll-scale ()
+  "Called by roboguard-city's roll-chase (levels/city/protect/roboguard-city.gc), which rolls the
+   robot as a ball at 20 m/s: its speed scale, BF_ROLL_SCALE during a battle (the author's wish: the
+   ball faster, 30 m/s), 1.0 otherwise (the stock speed)."
+  (if (bf-active?) BF_ROLL_SCALE 1.0)
+  )
+
+(defconstant BF_SKY_HEIGHT (meters 30)) ;; a unit or the player brought to a control point falls from this high
+
+(defun bf-sky-height ((ground vector))
+  "How far above GROUND (a nav poly's middle) a unit or the respawned player starts its fall onto
+   it: BF_SKY_HEIGHT under the open sky, else 2.5 m under the first scenery above (a platform, a
+   bridge, a roof), 0 when a probe down from there, 2 m wide, still meets something more than 2 m
+   over the spot (the city's floors have no underside: a probe up goes through them): the fall then
+   starts on the ground. The poly's middle lies up to 1.4 m under the ground's collision (0.5 to 0.7 m in
+   the streets): a probe down to 0.5 m over it met the street itself."
+  (let ((cq (new 'stack-no-clear 'collide-query))
+        (h BF_SKY_HEIGHT)
+        )
+    (vector-copy! (-> cq start-pos) ground)
+    (+! (-> cq start-pos y) (meters 1))
+    (set-vector! (-> cq move-dist) 0.0 (- BF_SKY_HEIGHT (meters 1)) 0.0 1.0)
+    (set! (-> cq radius) (meters 0.5))
+    (set! (-> cq collide-with) (collide-spec backgnd))
+    (set! (-> cq ignore-process0) #f)
+    (set! (-> cq ignore-process1) #f)
+    (set! (-> cq ignore-pat) (new 'static 'pat-surface :noentity #x1 :nojak #x1 :probe #x1 :noendlessfall #x1 :board #x1))
+    (set! (-> cq action-mask) (collide-action solid))
+    (let ((u (fill-and-probe-using-line-sphere *collide-cache* cq)))
+      (if (>= u 0.0)
+          (set! h (fmax 0.0 (- (+ (meters 1) (* u (- BF_SKY_HEIGHT (meters 1)))) (meters 2.5))))
+          )
+      )
+    (when (< (meters 2.5) h)
+      ;; as wide as a spider: with a thin probe, falling spiders stopped on pipes and walkways
+      ;; beside the line (6 in 14 stayed 11 m up on average)
+      (set! (-> cq radius) (meters 2))
+      (vector-copy! (-> cq start-pos) ground)
+      (+! (-> cq start-pos y) h)
+      (set-vector! (-> cq move-dist) 0.0 (- (meters 4) h) 0.0 1.0)
+      (if (>= (fill-and-probe-using-line-sphere *collide-cache* cq) 0.0)
+          (set! h 0.0)
+          )
+      )
+    h
+    )
+  )
+
+;; The units the control points brought down from the sky (levels/city/battlefront/battlefront-city.gc
+;; `bf-city-spawn-near`), the last BF_SKY_LOG, for the tests (docs/modding/current_mod/battlefront_smoke.gc).
+(defconstant BF_SKY_LOG 64)
+
+(deftype bf-sky-log (structure)
+  "Each unit's handle, traffic type, the nav poly's middle it falls onto, and the height it starts
+   from; COUNT units logged in all, the last at (COUNT - 1) mod BF_SKY_LOG."
+  ((count   int32)
+   (unit    handle BF_SKY_LOG)
+   (kind    int32  BF_SKY_LOG)
+   (ground  vector BF_SKY_LOG :inline)
+   (height  float  BF_SKY_LOG)
+   )
+  )
+
+(define *bf-sky-log* (new 'static 'bf-sky-log))
 
 (defun bf-set-phase! ((phase int))
   "Enter PHASE and stamp its start time."

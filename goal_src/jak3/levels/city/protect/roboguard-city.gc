@@ -5,6 +5,9 @@
 ;; name in dgo: roboguard-city
 ;; dgos: CTYPESC
 
+;; MOD battlefront -- the ball rolls faster in a battle (pc/features/battlefront/battlefront-h.gc, GAME)
+(define-extern bf-roll-scale (function float))
+
 ;; +++robo-flag
 (defenum robo-flag
   :type uint16
@@ -915,7 +918,7 @@
         (go-virtual roll-exit)
         )
     (let ((v1-9 (-> self nav)))
-      (set! (-> v1-9 target-speed) 81920.0)
+      (set! (-> v1-9 target-speed) (* 81920.0 (bf-roll-scale))) ;; MOD battlefront -- 81920.0
       )
     0
     (let ((v1-11 (-> self nav)))

@@ -63,10 +63,25 @@
                                   )
   )
 
+;; A robotguard marching to a point farther than BF_ROLL_REACH rolls there as a ball (the author's
+;; wish), until BF_ROLL_STOP from it (`bf-city-roll!`).
+(defconstant BF_ROLL_REACH (meters 35))       ;; the stock robot rolls toward a foe this far (roboguard-city-method-235)
+(defconstant BF_ROLL_STOP (meters 25))
+(defconstant BF_ROBOT_KIND 2)                 ;; its index in `*bf-kinds*`
+(defconstant BF_ROBOT_RUN_CLIP 11)            ;; roboguard-city-ag run, its stock anim-run
+(defconstant BF_ROBOT_BALL_CLIP 13)           ;; roboguard-city-ag ball
+(defconstant BF_ROBOT_ROLL_SPEED (meters 30)) ;; the stock roll's 20 m/s times BF_ROLL_SCALE (battlefront-h.gc)
+(defconstant BF_ROBOT_BALL_DIST 43690.0)      ;; ground a loop of the ball clip covers: the stock roll's pace
+                                              ;; (roll-chase plays it at speed / 40960, the travel clip at
+                                              ;; 16 speed / 15 dist)
+
+(define-extern bf-marching? (function process symbol))
+
 (defun bf-city-unit-pace ((proc process))
   "Unit PROC of the battle (a citizen) at BF_UNIT_PACE times its kind's stock walk and run speeds
    and clip grounds (`*bf-unit-stock-pace*`): written each time, so a unit woken again (its init
-   sets the stock values back) is paced within half a second."
+   sets the stock values back) is paced within half a second. A robotguard not marching gets its
+   stock run clip back (a march's roll gives it the ball, `bf-city-roll!`)."
   (let ((k (bf-unit-kind proc))
         (unit (the-as citizen proc))
         )
@@ -77,10 +92,14 @@
         (set! (-> unit dist-walk-anim) (* BF_UNIT_PACE (-> *bf-unit-stock-pace* (+ base 2))))
         (set! (-> unit dist-run-anim) (* BF_UNIT_PACE (-> *bf-unit-stock-pace* (+ base 3))))
         )
+      (if (and (= k BF_ROBOT_KIND) (not (bf-marching? unit)))
+          (set! (-> unit anim-run) BF_ROBOT_RUN_CLIP)
+          )
       )
     )
   (none)
   )
+
 (defconstant BF_CONTEST_REACH (meters 250)) ;; a unit this close to a contested point goes to clear it
 (defconstant BF_ZONE_REACH (meters 60))     ;; a point's zone: the other side's units this close contest it
 (defconstant BF_ENGAGE_REACH (meters 40))   ;; a unit with a foe this close stops its march to fight
@@ -854,6 +873,59 @@
 
 (define *bf-march* (new 'static 'bf-march))
 
+;; For the tests (docs/modding/current_mod/battlefront_smoke.gc, `bf-city-roll-sample`): robotguards
+;; marching far from their point, those of them on their ball clip, those faster than 24 m/s;
+;; robotguards in the stock roll-chase, those of them rolling at BF_ROLL_SCALE times its 20 m/s.
+(define *bf-roll-sample* (new 'static 'array int32 5 0 0 0 0 0))
+
+(defun bf-city-roll-sample ()
+  "Adds the battle's robotguards now to `*bf-roll-sample*`: [0] marching more than BF_ROLL_REACH
+   plus 5 m from their point, [1] of them with the ball as run clip, [2] of them faster than
+   24 m/s, [3] in 'roll-chase, [4] of them aimed at over 28 m/s."
+  (let ((te *traffic-engine*))
+    (when (and te (nonzero? te))
+      (dotimes (ti 2)
+        (let ((tr (-> te tracker-array ti)))
+          (dotimes (i (-> tr active-object-count))
+            (let ((proc (handle->process (-> tr active-object-list i))))
+              (when (and proc (= (-> proc type symbol) 'roboguard-city) (>= (bf-unit-team proc) 0))
+                (let ((unit (the-as citizen proc))
+                      (w *bf-march*)
+                      )
+                  (when (-> unit nav)
+                    (dotimes (j (-> w count))
+                      (when (and (= (-> w unit j) (process->handle proc)) (>= (-> w point j) 0)
+                                 (< (+ BF_ROLL_REACH (meters 5))
+                                    (vector-vector-xz-distance (-> unit root trans) (-> *bf* points (-> w point j) pos))
+                                    )
+                                 )
+                        (+! (-> *bf-roll-sample* 0) 1)
+                        (if (= (-> unit anim-run) BF_ROBOT_BALL_CLIP)
+                            (+! (-> *bf-roll-sample* 1) 1)
+                            )
+                        (if (< (meters 24) (-> unit nav state speed))
+                            (+! (-> *bf-roll-sample* 2) 1)
+                            )
+                        )
+                      )
+                    (when (and (-> unit next-state) (= (-> unit next-state name) 'roll-chase))
+                      (+! (-> *bf-roll-sample* 3) 1)
+                      (if (< (meters 28) (-> unit nav target-speed))
+                          (+! (-> *bf-roll-sample* 4) 1)
+                          )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  0
+  )
+
 (defun bf-march-link-poly ((m nav-mesh) (link int) (out vector))
   "OUT gets the centroid of mesh M's poly for LINK (pat 4, its link field LINK): a nav-enemy standing
    on it moves onto the mesh beyond (nav-enemy-method-188). #f when M has none."
@@ -1248,6 +1320,40 @@
   (none)
   )
 
+(defun bf-city-roll! ((unit citizen) (point int))
+  "In `bf-march-apply`, every frame: robotguard UNIT marching to POINT rolls as a ball while it is
+   farther than BF_ROLL_REACH from it, BF_ROLL_STOP once it rolls (the author's wish): its run clip,
+   which the march's run plays (citizen-travel-anim, get-run-anim), becomes its ball, at
+   BF_ROBOT_ROLL_SPEED, shown at once (its run blend full). Nearer, its stock run clip and the
+   battle's run speed (`bf-city-unit-pace`)."
+  (let* ((ball? (= (-> unit anim-run) BF_ROBOT_BALL_CLIP))
+         (far? (and (>= point 0)
+                    (< (if ball? BF_ROLL_STOP BF_ROLL_REACH)
+                       (vector-vector-xz-distance (-> unit root trans) (-> *bf* points point pos))
+                       )
+                    )
+               )
+         )
+    (cond
+      (far?
+       (set! (-> unit speed-run) BF_ROBOT_ROLL_SPEED)
+       (set! (-> unit dist-run-anim) BF_ROBOT_BALL_DIST)
+       (when (not ball?)
+         (set! (-> unit anim-run) BF_ROBOT_BALL_CLIP)
+         (set! (-> unit interp) 1.0)
+         (logior! (-> unit flags) (citizen-flag run-mode))
+         (logclear! (-> unit flags) (citizen-flag shuffle-mode))
+         )
+       )
+      (ball?
+       (set! (-> unit anim-run) BF_ROBOT_RUN_CLIP)
+       (bf-city-unit-pace unit)
+       )
+      )
+    )
+  (none)
+  )
+
 (defun bf-march-apply ()
   "Every frame of the fight: each marching unit (`*bf-march*`), still walking its lanes (`bf-city-walking?`),
    runs to its waypoint: its controller's dest-point, which the citizen's 'active post gives its nav
@@ -1297,6 +1403,9 @@
             (else
               (vector-copy! (-> unit dest-point) (-> w to i))
               (set! (-> unit wait-time) (seconds 3600))
+              (if (= (-> unit type symbol) 'roboguard-city)
+                  (bf-city-roll! unit (-> w point i))
+                  )
               (set! (-> unit nav target-speed) (* (-> unit speed-scale) (-> unit speed-run)))
               )
             )
@@ -1345,13 +1454,14 @@
   "In `bf-city-steer`: robotguard UNIT of the battle, which sees foes within BF_ROBOT_SIGHT only
    (`bf-city-foe-ok?`), standing in its hostile states with no foe left ('hostile, 'hostile-stand,
    'reposition), walks its lanes again ('active, `go-process`): its focus kept it there, on a foe
-   it no longer had."
+   it no longer had. So does one rolling after no foe ('roll-chase): a robotguard falling from the
+   sky as a ball lands in it (`bf-city-spawn-near`)."
   (let ((info (-> unit attacker-info)))
     (when (and info (nonzero? info))
       (when (and (not (handle->process (-> info enemy)))
                  (-> unit next-state)
                  (let ((st (-> unit next-state name)))
-                   (or (= st 'hostile) (= st 'hostile-stand) (= st 'reposition))
+                   (or (= st 'hostile) (= st 'hostile-stand) (= st 'reposition) (= st 'roll-chase))
                    )
                  )
         (set! (-> unit focus handle) (the-as handle #f))
@@ -1986,25 +2096,164 @@
     )
   )
 
+;; The guards and jetpacks woken at a control point wait for their first frame awake before they go
+;; up (`bf-city-sky-tick`): an event sent to a unit just woken reaches its sleeping state, and a
+;; guard sent the 'jump at once stayed in the air, still walking.
+(defconstant BF_SKY_WAIT_MAX 16)
+(defconstant BF_SKY_JET_MAX (meters 15)) ;; a jetpack goes up this far at most: its flight holds it 18 m above the ground at most
+
+(deftype bf-sky-wait (structure)
+  ((count   int32)
+   (unit    handle BF_SKY_WAIT_MAX)
+   (ground  vector BF_SKY_WAIT_MAX :inline)
+   (height  float  BF_SKY_WAIT_MAX)
+   (frames  int32  BF_SKY_WAIT_MAX)
+   )
+  )
+
+(define *bf-sky-wait* (new 'static 'bf-sky-wait))
+
+;; The robotguards and spiders falling from the sky (exit-transport, enemy-falling-post) meet the
+;; scenery only, their collision kept here until they leave that state (`bf-city-sky-tick`): they
+;; landed on the jetpacks hovering over the point (2 spiders in 8 stayed 12 m up).
+(deftype bf-sky-fall (structure)
+  ((count   int32)
+   (unit    handle       BF_SKY_WAIT_MAX)
+   (collide collide-spec BF_SKY_WAIT_MAX)
+   (frames  int32        BF_SKY_WAIT_MAX)
+   )
+  )
+
+(define *bf-sky-fall* (new 'static 'bf-sky-fall))
+
+(defun bf-city-sky-tick ()
+  "Every frame of the fight: each unit waiting to go up (`*bf-sky-wait*`), once in its 'active (its
+   first frame awake), shows and goes up its height above its poly: a guard is sent the stock 'jump
+   onto the poly (its landing is the stock guard's out of a ship), a jetpack flies down from
+   BF_SKY_JET_MAX at most. A unit not 'active within 10 frames shows where it is. Each robotguard
+   or spider falling (`*bf-sky-fall*`) gets its collision back once out of its exit-transport (10 s
+   at most)."
+  (let ((w *bf-sky-wait*)
+        (n 0)
+        )
+    (dotimes (i (-> w count))
+      (let ((p (the-as process-drawable (handle->process (-> w unit i)))))
+        (when p
+          (cond
+            ((and (-> p next-state) (= (-> p next-state name) 'active))
+             (logclear! (-> p draw status) (draw-control-status no-draw))
+             (cond
+               ((= (-> p type symbol) 'crimson-guard)
+                (+! (-> p root trans y) (-> w height i))
+                (send-event p 'jump 0 (-> w ground i))
+                )
+               (else
+                 (+! (-> p root trans y) (fmin (-> w height i) BF_SKY_JET_MAX))
+                 )
+               )
+             )
+            ((< (-> w frames i) 10)
+             (when (!= n i)
+               (set! (-> w unit n) (-> w unit i))
+               (vector-copy! (-> w ground n) (-> w ground i))
+               (set! (-> w height n) (-> w height i))
+               (set! (-> w frames n) (-> w frames i))
+               )
+             (+! (-> w frames n) 1)
+             (+! n 1)
+             )
+            (else
+              (logclear! (-> p draw status) (draw-control-status no-draw))
+              )
+            )
+          )
+        )
+      )
+    (set! (-> w count) n)
+    )
+  (let ((f *bf-sky-fall*)
+        (n 0)
+        )
+    (dotimes (i (-> f count))
+      (let ((p (the-as process-drawable (handle->process (-> f unit i)))))
+        (when p
+          (cond
+            ((and (< (-> f frames i) 600)
+                  (or (< (-> f frames i) 2) (and (-> p next-state) (= (-> p next-state name) 'exit-transport)))
+                  )
+             (when (!= n i)
+               (set! (-> f unit n) (-> f unit i))
+               (set! (-> f collide n) (-> f collide i))
+               (set! (-> f frames n) (-> f frames i))
+               )
+             (+! (-> f frames n) 1)
+             (+! n 1)
+             )
+            (else
+              (set! (-> (the-as collide-shape (-> p root)) root-prim prim-core collide-with) (-> f collide i))
+              )
+            )
+          )
+        )
+      )
+    (set! (-> f count) n)
+    )
+  (none)
+  )
+
 (defun bf-city-spawn-near ((team int) (point int))
   "Up to BF_TRANSPORT_BURST units of side TEAM, each of the kind it lacks most
-   (`bf-transport-next-kind`), woken by the traffic's 'activate-object walking ('active, behavior
-   2) on a nav poly drawn at random around control point POINT (`bf-city-spawn-spot`): the author
-   wanted no ship there, the units anywhere on the meshes near the point, platforms too. One in four
-   is posted on the point. Returns how many came."
+   (`bf-transport-next-kind`), over a nav poly drawn at random around control point POINT
+   (`bf-city-spawn-spot`): the author wanted no ship there, the units anywhere on the meshes near
+   the point, platforms too, coming down from the sky with their landing (round 25), from
+   `bf-sky-height` above the poly (of up to 3 drawn, the first with 6 m of sky over it). A guard or a jetpack is woken walking or flying ('active, traffic
+   behavior 2) on the poly, hidden, and goes up on its first frame awake (`bf-city-sky-tick`): the
+   guard then jumps onto the poly, the jetpack flies down. A robotguard and a spider are woken in
+   their way out of a ship (behavior 6, exit-transport, which needs no ship), up there: the
+   robotguard falls as a ball, the spider tumbling (its jump has no clips: a 'jump would read none).
+   One in four is posted on the point; each is logged for the tests (`*bf-sky-log*`). Returns how
+   many came."
   (let ((done 0))
     (dotimes (k BF_TRANSPORT_BURST)
       (when (= k done)
         (let* ((kind (bf-transport-next-kind team))
                (at (new 'stack-no-clear 'vector))
+               (sky (new 'stack-no-clear 'vector))
                (mesh (if (>= kind 0) (bf-city-spawn-spot (-> *bf* points point pos) at)))
+               (h (if mesh (bf-sky-height at) 0.0))
                )
+          ;; up to 3 polys drawn for one under the open sky
+          (dotimes (try 2)
+            (when (and mesh (< h (meters 6)))
+              (let ((m2 (bf-city-spawn-spot (-> *bf* points point pos) sky)))
+                (when m2
+                  (let ((h2 (bf-sky-height sky)))
+                    (when (< h h2)
+                      (set! mesh m2)
+                      (set! h h2)
+                      (vector-copy! at sky)
+                      )
+                    )
+                  )
+                )
+              )
+            )
           (set! *bf-wake-kind* kind)
           (when (and mesh *traffic-manager* (bf-transport-mesh-room? mesh kind))
-            (let ((params (new 'stack 'traffic-object-spawn-params)))
+            (let ((params (new 'stack 'traffic-object-spawn-params))
+                  (guard? (= kind (the-as int (traffic-type guard-a))))
+                  )
+              (vector-copy! sky at)
+              (+! (-> sky y) h)
               (set! (-> params proc) #f)
               (set! (-> params object-type) (the-as traffic-type kind))
-              (set! (-> params behavior) (the-as uint 2))
+              (set! (-> params behavior)
+                    (the-as uint (if (or (= kind (the-as int (traffic-type roboguard))) (= kind (the-as int (traffic-type spydroid))))
+                                     6
+                                     2
+                                     )
+                            )
+                    )
               (set! (-> params id) (the-as uint 0))
               (set! (-> params nav-mesh) mesh)
               (set! (-> params nav-branch) #f)
@@ -2015,11 +2264,42 @@
               (set! (-> params guard-type) (the-as uint 11))
               (set! (-> params entity) #f)
               (vector-reset! (-> params velocity))
-              (vector-copy! (-> params position) at)
+              (vector-copy! (-> params position) (if (= (-> params behavior) 6) sky at))
               (quaternion-axis-angle! (-> params rotation) 0.0 1.0 0.0 (* 65536.0 (rand-vu)))
               (send-event *traffic-manager* 'activate-object params)
               (let ((proc (-> params proc)))
                 (when proc
+                  ;; a guard or a jetpack goes up on its first frame awake (`bf-city-sky-tick`),
+                  ;; hidden until then
+                  (when (and (not (= (-> params behavior) 6)) (< (-> *bf-sky-wait* count) BF_SKY_WAIT_MAX))
+                    (let ((n (-> *bf-sky-wait* count)))
+                      (set! (-> *bf-sky-wait* unit n) (process->handle proc))
+                      (vector-copy! (-> *bf-sky-wait* ground n) at)
+                      (set! (-> *bf-sky-wait* height n) h)
+                      (set! (-> *bf-sky-wait* frames n) 0)
+                      (+! (-> *bf-sky-wait* count) 1)
+                      )
+                    (logior! (-> (the-as process-drawable proc) draw status) (draw-control-status no-draw))
+                    )
+                  ;; a robotguard or a spider falls through the units (`*bf-sky-fall*`)
+                  (when (and (= (-> params behavior) 6) (< (-> *bf-sky-fall* count) BF_SKY_WAIT_MAX))
+                    (let ((n (-> *bf-sky-fall* count))
+                          (cs (the-as collide-shape (-> (the-as process-drawable proc) root)))
+                          )
+                      (set! (-> *bf-sky-fall* unit n) (process->handle proc))
+                      (set! (-> *bf-sky-fall* collide n) (-> cs root-prim prim-core collide-with))
+                      (set! (-> *bf-sky-fall* frames n) 0)
+                      (set! (-> cs root-prim prim-core collide-with) (collide-spec backgnd))
+                      (+! (-> *bf-sky-fall* count) 1)
+                      )
+                    )
+                  (let ((n (mod (-> *bf-sky-log* count) BF_SKY_LOG)))
+                    (set! (-> *bf-sky-log* unit n) (process->handle proc))
+                    (set! (-> *bf-sky-log* kind n) kind)
+                    (vector-copy! (-> *bf-sky-log* ground n) at)
+                    (set! (-> *bf-sky-log* height n) h)
+                    (+! (-> *bf-sky-log* count) 1)
+                    )
                   ;; its lanes' goal on itself until its march sends it on (`bf-march-apply`)
                   (if (type? proc citizen)
                       (vector-copy! (-> (the-as citizen proc) dest-point) at)
@@ -2075,12 +2355,44 @@
   (none)
   )
 
+(defun bf-city-sky-spot ()
+  "BF_CITY_SKY_SPOT, for the player's respawn from the sky (battlefront.gc `bf-sky-drop!`): a nav
+   poly drawn at random around point `*bf*` sky-point (`bf-city-spawn-spot`), the one with the most
+   sky over it of up to 6 (`bf-sky-height`), into sky-ground, sky-found? #t when there is one. The meshes are listed again first: after a far respawn's reset
+   the list could name meshes of levels gone."
+  (let ((pt (-> *bf* sky-point))
+        (best 0.0)
+        (spot (new 'stack-no-clear 'vector))
+        )
+    (bf-ways-build)
+    (set! (-> *bf* sky-found?) #f)
+    ;; up to 6 polys drawn, the one with the most sky over it
+    (when (and (>= pt 0) (< pt (-> *bf* point-count)))
+      (dotimes (try 6)
+        (when (and (< best (meters 20)) (bf-city-spawn-spot (-> *bf* points pt pos) spot))
+          (let ((h (bf-sky-height spot)))
+            (when (or (not (-> *bf* sky-found?)) (< best h))
+              (set! best h)
+              (vector-copy! (-> *bf* sky-ground) spot)
+              (set! (-> *bf* sky-found?) #t)
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-city-command ((cmd int))
   "`*bf-city-hook*`. CMD: BF_CITY_PREPARE once the zone is loaded, BF_CITY_UPDATE every frame of
    the fight, BF_CITY_RESET when the battle ends. The unit pools are not rebuilt here: the director
    respawns the player with `initialize!` 'life at both ends of a battle (battlefront.gc), which
    rebuilds them the way a death does."
   (cond
+    ((= cmd BF_CITY_SKY_SPOT)
+     (bf-city-sky-spot)
+     )
     ((= cmd BF_CITY_PREPARE)
      (bf-city-restore-hatred)
      (bf-city-ships-down)
@@ -2094,6 +2406,7 @@
        (bf-city-steer)
        )
      (bf-march-apply)
+     (bf-city-sky-tick)
      (bf-city-dots)
      ;; a death reset (ctywide activates again) or a task change restores the stock faction
      ;; state: apply the battle's every 2 seconds
