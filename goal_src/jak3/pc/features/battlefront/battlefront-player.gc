@@ -78,6 +78,7 @@
 (defconstant BF_GRENADE_DELAY (seconds 1))  ;; between two grenades
 (defconstant BF_GRENADE_RANGE (meters 35))  ;; farthest grenade landing point
 (defconstant BF_THROW_MAX (seconds 2.5))     ;; a grenade throw's clip ends by then at the latest
+(defconstant BF_RIFLE_MAX (seconds 0.8))     ;; a rifle shot's clip ends by then at the latest
 (defconstant BF_AIM_REACH (meters 80))      ;; length of the free aim's ray
 (defconstant BF_CROSS_X 256.0)              ;; the crosshair, on the 512 x 416 screen: its middle,
 (defconstant BF_CROSS_Y 208.0)              ;; where the battle camera looks (`bf-cam-rig`)
@@ -215,6 +216,8 @@
    (grenade-time time-frame)    ;; guard: last grenade, its own delay (a rifle shot does not hold it)
    (throw-step  int32)          ;; guard: the grenade throw's part playing (`bf-avatar-throw-update`), 0 none
    (throw-until time-frame)     ;; guard: the throw ends by then at the latest
+   (rifle-step  int32)          ;; guard: the rifle shot's part playing on the whole body (`bf-avatar-rifle-update`), 0 none
+   (rifle-until time-frame)     ;; guard: the shot's clip ends by then at the latest
    (fire-side   int32)          ;; alternates the two muzzles
    (shoot-until time-frame)     ;; shooting clip held until then
    (rolling?    symbol)         ;; robotguard: rolling as a ball (R2 switches it)
@@ -864,6 +867,8 @@
   (none)
   )
 
+(define-extern bf-avatar-still! (function none :behavior bf-avatar))
+
 (defbehavior bf-avatar-fire bf-avatar ()
   "R1: fire the class weapon if its ammo lasts: a shot, a grenade, or the first shot of a salvo
    (jetpacks and robotguard: a second shot follows BF_SALVO_GAP later, `bf-avatar-moves`). A guard's
@@ -896,12 +901,16 @@
        )
       (else
         (bf-avatar-shot)
-        ;; the stock rifle guard's shot (guard-rifle.gc attack: gun-attack, artist frames 12 to 22)
-        ;; on the upper body: the rifle alone fires on the run. Kneeling, its whole-body clip is
-        ;; already the kneeling shot
-        (if (and guard? (not (-> self crouch?)))
-            (bf-avatar-top-play (the-as int (-> art shoot)) 12.0 22.0 1.0 #t)
-            )
+        ;; the stock rifle guard's shot (guard-rifle.gc attack: gun-attack, the whole clip) on the
+        ;; whole body, the player still and facing the crosshair (`bf-avatar-rifle-update`;
+        ;; the author's wish, round 28: on the upper body, round 26, he fired on the run). Kneeling,
+        ;; its whole-body clip is already the kneeling shot
+        (when (and guard? (not (-> self crouch?)))
+          (set! (-> self rifle-step) 1)
+          (set! (-> self rifle-until) (+ (current-time) BF_RIFLE_MAX))
+          ;; still from the shot's own frame
+          (bf-avatar-still!)
+          )
         (case (-> self class)
           ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK BF_CLASS_ROBOGUARD)
            (set! (-> self salvo-left) 1)
@@ -972,6 +981,27 @@
      (ja :num! (seek! (ja-aframe 37.0 0)))
      (if (ja-done? 0)
          (set! (-> self throw-step) 0)
+         )
+     )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-rifle-update bf-avatar ()
+  "A guard's rifle shot on its clip's frame (the clip loop of `bf-avatar-init-by-other`): the stock
+   rifle guard's shot clip (gun-attack) on the whole body, from its first frame to its last, as the
+   stock guard plays it (guard-rifle.gc attack: `seek! max`); the shot left as R1 fired it
+   (`bf-avatar-fire`). Its artist frames 12 to 22 (round 26) lie before the clip's own first one:
+   seeking them ended the shot at once (round 28's tests)."
+  (case (-> self rifle-step)
+    ((1)
+     (ja :frame-num 0.0)
+     (set! (-> self rifle-step) 2)
+     )
+    ((2)
+     (ja :num! (seek!))
+     (if (ja-done? 0)
+         (set! (-> self rifle-step) 0)
          )
      )
     )
@@ -1601,15 +1631,19 @@
     (bf-avatar-spread)
     (bf-avatar-aim-torso)
     (bf-avatar-blink)
-    ;; a grenade throw or a tazer stab: the player stands still, facing the crosshair (only the
-    ;; rifle fires on the run, the author's wish); a throw cut off goes on no longer than BF_THROW_MAX
+    ;; a grenade throw, a rifle shot or a tazer stab: the player stands still, facing the crosshair
+    ;; (the author's wish: the rifle too since round 28); a throw cut off goes on no longer than
+    ;; BF_THROW_MAX, a shot than BF_RIFLE_MAX; kneeling, the kneeling clip is the shot
     (when (and (> (-> self throw-step) 0) (>= (current-time) (-> self throw-until)))
       (if (= (-> self throw-step) 1)
           (bf-avatar-throw!)
           )
       (set! (-> self throw-step) 0)
       )
-    (when (or (> (-> self throw-step) 0) (< (current-time) (-> self stab-until)))
+    (if (or (-> self crouch?) (>= (current-time) (-> self rifle-until)))
+        (set! (-> self rifle-step) 0)
+        )
+    (when (or (> (-> self throw-step) 0) (> (-> self rifle-step) 0) (< (current-time) (-> self stab-until)))
       (bf-avatar-still!)
       (set! (-> self shoot-until) (+ (current-time) (seconds 0.1)))
       )
@@ -1723,19 +1757,14 @@
   (none)
   )
 
+(defconstant BF_DIE_SPARKS 8) ;; sparks a frame while the class model dissolves (3 until round 27: none seen)
+
 (defbehavior bf-avatar-sparks bf-avatar ()
   "The purple sparks of the game's death-default effect (merc-death.gc part 53, which the merc
-   dissolve launches from each vertex) from three of the model's joints: the mod's build-actor
-   models cannot take the merc dissolve itself (battlefront-h.gc `do-effect`)."
-  (let ((n (-> self node-list length)))
-    (when (< 2 n)
-      (dotimes (k 3)
-        (let ((pos (bf-joint-pos self (+ 1 (rand-vu-int-count (+ n -1))) (new 'stack-no-clear 'vector))))
-          (launch-particles (-> *part-id-table* 53) pos)
-          )
-        )
-      )
-    )
+   dissolve launches from each vertex) from BF_DIE_SPARKS of the model's joints a frame
+   (battlefront-h.gc `bf-fizz-sparks`): the mod's build-actor models cannot take the merc dissolve
+   itself (battlefront-h.gc `do-effect`)."
+  (bf-fizz-sparks self BF_DIE_SPARKS)
   (none)
   )
 
@@ -1779,11 +1808,13 @@
             )
           )
          (else
-           (bf-avatar-sparks)
-           (if (< (seconds 0.6) t)
+           ;; the dissolve: sparks for a second, the body hidden then (0.6 s until round 27: it
+           ;; went at once, the author saw no sparks), the model gone once they fade
+           (if (< t (seconds 1))
+               (bf-avatar-sparks)
                (logior! (-> self draw status) (draw-control-status no-draw))
                )
-           (if (< (seconds 1.2) t)
+           (if (< (seconds 2) t)
                (deactivate self)
                )
            )
@@ -1964,6 +1995,8 @@
   out
   )
 
+(defconstant BF_DEATH_PITCH (degrees -30)) ;; the battle camera looks down at the dying class model this steeply
+
 (defbehavior bf-cam-rig-update bf-cam-rig ()
   "Turn the view by the right stick (not while the game is paused), then set the camera's bone: its
    rotation looks along the view (yaw, pitch), its place is behind the pivot (`bf-cam-pivot`) by
@@ -2001,19 +2034,28 @@
         )
       )
     (let* ((art (bf-class-art-of (-> *bf* class)))
+           (av (the-as bf-avatar (handle->process (-> *bf* avatar))))
+           (dying? (and av (-> av dying?)))
            (yaw (-> *bf* view-yaw))
-           (pitch (-> *bf* view-pitch))
+           ;; the class model dying: the camera looks down at it, centered (round 28: kept over the
+           ;; shoulder and level, it framed the body at the bottom left, under the HUD)
+           (pitch (if dying? BF_DEATH_PITCH (-> *bf* view-pitch)))
            (mat (-> self cam-bone transform))
            (fwd (new 'stack-no-clear 'vector))
            (pivot (bf-cam-pivot (new 'stack-no-clear 'vector)))
            (want (new 'stack-no-clear 'vector))
            (cq (new 'stack-no-clear 'collide-query))
            )
+      (if dying?
+          (set! (-> pivot y) (+ (-> *target* control trans y) (meters 0.6)))
+          )
       (set-vector! fwd (* (sin yaw) (cos pitch)) (sin pitch) (* (cos yaw) (cos pitch)) 1.0)
       (forward-down->inv-matrix mat fwd (new 'static 'vector :y -1.0 :w 1.0))
       (vector+float*! want pivot fwd (- (fmax (meters 5.5) (* 1.6 (meters 1) (-> art height)))))
       ;; rvec points to the screen's left (`bf-view-right`): the camera goes the other way
-      (vector+float*! want want (-> mat rvec) (* -0.3 (meters 1) (-> art height)))
+      (if (not dying?)
+          (vector+float*! want want (-> mat rvec) (* -0.3 (meters 1) (-> art height)))
+          )
       (+! (-> want y) (meters 0.8))
       (set! (-> cq radius) (meters 0.4))
       (set! (-> cq collide-with) (collide-spec backgnd obstacle))
@@ -2158,6 +2200,10 @@
       ((> (-> self throw-step) 0)
        ;; a guard's grenade throw: the stock guard's, on the whole body (`bf-avatar-throw-update`)
        BF_CLIP_GRENADE
+       )
+      ((> (-> self rifle-step) 0)
+       ;; a guard's rifle shot: the stock guard's, on the whole body (`bf-avatar-rifle-update`)
+       (the-as int (-> art shoot))
        )
       ((< (current-time) (-> self stab-until))
        ;; a guard's tazer strike: the stock guard's stab, its clip now (`bf-avatar-tazer`)
@@ -2479,6 +2525,9 @@
         ((and (> (-> self throw-step) 0) (= (-> self anim) BF_CLIP_GRENADE))
          (bf-avatar-throw-update)
          )
+        ((and (> (-> self rifle-step) 0) (= (-> self anim) (the-as int (-> (bf-class-art-of (-> self class)) shoot))))
+         (bf-avatar-rifle-update)
+         )
         ((and (< (current-time) (-> self stab-until)) (= (-> self anim) (-> self stab-clip)))
          ;; the tazer's stab: the thrust once, the zap looped BF_STAB_ZAP, the arm back once, which
          ;; ends it
@@ -2551,6 +2600,8 @@
   (set! (-> self grenade-time) 0)
   (set! (-> self throw-step) 0)
   (set! (-> self throw-until) 0)
+  (set! (-> self rifle-step) 0)
+  (set! (-> self rifle-until) 0)
   (set! (-> self shoot-until) 0)
   (set! (-> self rolling?) #f)
   (set! (-> self flame) 0.35)

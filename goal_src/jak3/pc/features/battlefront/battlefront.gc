@@ -1517,14 +1517,15 @@
     (if (not (time-elapsed? (-> self field-time) (seconds 1)))
         (bf-draw-text buf (bf-tr "CEILING" "PLAFOND") 0.0 150.0 0.6 (font-color red) #t)
         )
-    ;; the player waits to respawn (`bf-target-death`)
-    (when (and (nonzero? (-> *bf* respawn-time)) (< (-> *bf* respawn-pick) 0))
+    ;; the dead player watches the battle, then chooses (`bf-target-death`): X his respawn point,
+    ;; Triangle his class first
+    (when (and (nonzero? (-> *bf* respawn-time)) (< (-> *bf* respawn-pick) 0) (not (-> *bf* redeploying?)))
       (bf-draw-text buf (bf-tr "YOU WERE KILLED" "VOUS ÊTES MORT") 0.0 250.0 0.8 (font-color red) #t)
-      (clear *bf-text*)
-      (format *bf-text* (bf-tr "Back in ~D" "Retour dans ~D")
-              (+ 1 (max 0 (/ (- (-> *bf* respawn-time) (current-time) 1) (seconds 1))))
-              )
-      (bf-draw-text buf *bf-text* 0.0 282.0 0.6 (font-color default) #t)
+      (if (>= (current-time) (-> *bf* respawn-time))
+          (bf-draw-text buf (bf-tr "<PAD_X> Respawn    <PAD_TRIANGLE> Change class" "<PAD_X> Réapparaître    <PAD_TRIANGLE> Changer de classe")
+                        0.0 282.0 0.6 (font-color default) #t
+                        )
+          )
       )
     )
   (if (and *target* (not (focus-test? *target* dead)))
@@ -2173,7 +2174,7 @@
 (defun bf-sky-drop! ((pick int) (ground vector))
   "The player respawning at point PICK falls from the sky, as the units brought to a control point
    do (the author's wish): above a nav poly drawn at random within 90 m of the point (the Haven City
-   side's `bf-city-spawn-spot`, BF_SPAWN_REACH, BF_CITY_SKY_SPOT), `bf-sky-height` above it and under the jetpacks'
+   side's `bf-city-spawn-spot`, BF_RESPAWN_REACH, BF_CITY_SKY_SPOT), `bf-sky-height` above it and under the jetpacks'
    ceiling, his controls off until he lands (`bf-pad-lock!`, `bf-sky-drop-update`). GROUND: set to
    that poly's middle, where he lands; he falls through the units, meeting the scenery only. Returns
    #t when he falls, #f (GROUND unchanged) when the city found no poly."
@@ -2258,8 +2259,9 @@
   "While the player falls from the sky in a fight (`*bf*` dropping?), pad 0 gives only START and
    SELECT and a centered left stick: no move, jump, weapon or class move until he lands (the
    author's wish); the right stick still turns the camera. The same while he stands still for a
-   grenade throw or a tazer stab (`*bf*` still-until, battlefront-player.gc): only the rifle fires
-   on the run (the author's wish). Returns PAD."
+   grenade throw, a rifle shot or a tazer stab (`*bf*` still-until, battlefront-player.gc): no
+   weapon fires on the run since round 28 (the author's wish; the rifle did in rounds 26 and 27).
+   Returns PAD."
   (when (and (zero? (-> pad number))
              (or (-> *bf* dropping?) (< (-> *display* game-clock frame-counter) (-> *bf* still-until)))
              (bf-fighting?)
@@ -2827,6 +2829,8 @@
            (set! (-> self want-avatar?) #t)
            )
          (bf-point-icons)
+         ;; the red guards dissolving (battlefront-h.gc `bf-fizz-tick`)
+         (bf-fizz-tick)
          ;; no Jak on the battlefield: hidden while his class model is away (a class change, a
          ;; respawn, the frames before the model is in), which used to show him for a moment
          (if (and *target* (!= (-> *bf* class) BF_CLASS_JAK) (not (bf-avatar-alive?)))
@@ -3129,15 +3133,46 @@
     )
   )
 
+(defbehavior bf-death-class-page target ()
+  "In `bf-target-death`: the class page of the player's side (the director's, the game paused under
+   it, `*bf-request*` BF_REQ_CLASS), until he has picked his class; then the death goes on to the
+   respawn page. The class page's X sets his class and health (`bf-menu-confirm`); his class model
+   comes with his respawn."
+  (set! *bf-request* BF_REQ_CLASS)
+  (let ((t0 (current-time))
+        (opened? #f)
+        )
+    (until (or (not (bf-fighting?))
+               (and opened? (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
+                              (or (not dir) (= (-> dir page) BF_PAGE_NONE))
+                              )
+                    )
+               (and (not opened?) (time-elapsed? t0 (seconds 3)))
+               )
+      (logior! (-> self draw status) (draw-control-status no-draw))
+      (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
+        (if (and dir (= (-> dir page) BF_PAGE_CLASS))
+            (set! opened? #t)
+            )
+        )
+      (suspend)
+      )
+    )
+  (none)
+  )
+
 (defbehavior bf-target-death target ((mode symbol))
   "Jak's death during a fight, in place of the stock one (`target-death` below): his side loses a
-   unit and his class model goes; for BF_RESPAWN_TIME the camera follows a living unit of his side
-   (`bf-spectate-follow`) while the HUD counts down (`bf-draw-hud`); then he picks his respawn point
-   on the city's map, his side's base or a control point it holds (`bf-draw-respawn-pick`), and is
-   back there once its levels are loaded, facing the battlefield, alive, full health, with a fresh
-   loadout and three seconds of invulnerability, his class model blinking (`bf-spawn-shield`), and the director draws his class again. MODE
-   'bf-redeploy (the START menu's Redeploy, out of combat for BF_REDEPLOY_CALM): no loss and no
-   wait, the respawn page at once; 'bf-redeploy-hot (Redeploy in combat): the same, a unit lost. The world runs on meanwhile. The stock death freezes the
+   unit and his class model plays its death (the camera on it), then the camera follows a living
+   unit of his side (`bf-spectate-follow`) until he chooses (the author's wish, round 28): after
+   BF_RESPAWN_TIME, X opens the respawn page, Triangle the class page and then the respawn page
+   (`bf-death-class-page`), the HUD saying so (`bf-draw-hud`). On the respawn page he picks his
+   base or a control point his side holds on the city's map (`bf-draw-respawn-pick`), and is back
+   there once its levels are loaded, facing the battlefield, alive, full health, with a fresh
+   loadout and three seconds of invulnerability, his class model blinking (`bf-spawn-shield`), and
+   the director draws his class again. MODE 'bf-redeploy (the START menu's Redeploy, out of combat
+   for BF_REDEPLOY_CALM): no loss and no wait, the class page at once, then the respawn page;
+   'bf-redeploy-hot (Redeploy in combat): the same, a unit lost. The world runs on meanwhile. The stock death freezes the
    enemies (a 'process-mask setting), may play a death movie, and its reset ('life, `initialize!`)
    spawned every unit of Haven City again: the battle's units vanished and came back at each death.
    First it sets what the stock death sets that the game reads: Jak dead (units leave him alone),
@@ -3164,6 +3199,7 @@
   (set! (-> *bf* respawn-time)
         (+ (current-time) (if (or (= mode 'bf-redeploy) (= mode 'bf-redeploy-hot)) 0 BF_RESPAWN_TIME))
         )
+  (set! (-> *bf* redeploying?) (or (= mode 'bf-redeploy) (= mode 'bf-redeploy-hot)))
   (set! (-> *bf* spectate) (the-as handle #f))
   (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
     (if dir
@@ -3176,15 +3212,39 @@
   (set-setting! 'string-max-length 'abs (meters 14) 0)
   (set-setting! 'string-min-height 'abs (meters 4) 0)
   (set-setting! 'string-max-height 'abs (meters 6) 0)
-  ;; the wait; a death that ends the battle cuts it short, for the result page
-  (while (and (bf-fighting?) (< (current-time) (-> *bf* respawn-time)))
-    (logior! (-> self draw status) (draw-control-status no-draw))
-    ;; the camera stays on the dying class model, then follows a unit of his side
-    (if (not (bf-avatar-alive?))
-        (bf-spectate-follow (-> self control trans))
+  ;; the wait for his choice; a death that ends the battle cuts it short, for the result page. A
+  ;; redeploy goes to the class page at once
+  (let ((class? (-> *bf* redeploying?))
+        (chosen? (-> *bf* redeploying?))
         )
-    (suspend)
+    (cpad-clear! 0 confirm)
+    (cpad-clear! 0 triangle)
+    (while (and (bf-fighting?) (not chosen?))
+      (logior! (-> self draw status) (draw-control-status no-draw))
+      ;; the camera stays on the dying class model, then follows a unit of his side
+      (if (not (bf-avatar-alive?))
+          (bf-spectate-follow (-> self control trans))
+          )
+      (when (>= (current-time) (-> *bf* respawn-time))
+        (cond
+          ((cpad-pressed? 0 confirm)
+           (set! chosen? #t)
+           )
+          ((cpad-pressed? 0 triangle)
+           (set! chosen? #t)
+           (set! class? #t)
+           )
+          )
+        )
+      (suspend)
+      )
+    (cpad-clear! 0 confirm)
+    (cpad-clear! 0 triangle)
+    (if (and class? (bf-fighting?))
+        (bf-death-class-page)
+        )
     )
+  (set! (-> *bf* redeploying?) #f)
   ;; the respawn point: his side's base, or a control point it holds, picked on the city's map at
   ;; every death (`bf-draw-respawn-pick`: D-pad, then X) while the battle goes on
   (set! (-> *bf* respawn-pick) (-> *bf* team))
@@ -3490,11 +3550,20 @@
            :is-toggled? (lambda () *mod-battlefront-enable*)
            :on-confirm (lambda ()
                          (set! *mod-battlefront-enable* (not *mod-battlefront-enable*))
-                         ;; off during a battle: the director loads the last save once this menu
-                         ;; is closed
-                         (if (and (not *mod-battlefront-enable*) (bf-active?))
+                         (cond
+                           ;; off during a battle: the director loads the last save once this
+                           ;; menu is closed
+                           ((and (not *mod-battlefront-enable*) (bf-active?))
+                            (mods-menu-close!)
+                            )
+                           ;; on: this menu closes and the battle's page opens at once (the
+                           ;; director, once this menu is closed; the author's wish, round 28)
+                           (*mod-battlefront-enable*
                              (mods-menu-close!)
+                             (bf-director-ensure!)
+                             (set! *bf-request* BF_REQ_PAUSE)
                              )
+                           )
                          (none)
                          )
            )

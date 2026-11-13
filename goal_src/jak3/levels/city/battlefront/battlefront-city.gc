@@ -882,7 +882,10 @@
 
 (defconstant BF_BRIDGE_MAX 8)           ;; bridges between meshes the ways know, at most
 (defconstant BF_BRIDGE_GAP (meters 6))  ;; two meshes this close, with no link, get a bridge
-(defconstant BF_BRIDGE_HOP (meters 2.5)) ;; a unit this close to a bridge's end crosses it
+;; A unit this close to a bridge's end crosses it. At 2.5 m (until round 27) the guards stopped 3.5 to
+;; 4.5 m from the end between Slums B and Slums A, an end 1.5 m inside its poly from a corner, and
+;; waited there up to 24 s, two at a time (the author's play, round 28's tests)
+(defconstant BF_BRIDGE_HOP (meters 6))
 
 (deftype bf-ways (structure)
   "The way to each battle point from every nav mesh of the active levels (`bf-ways-build`): for
@@ -2141,6 +2144,52 @@
   (none)
   )
 
+(defun bf-ways-bridge-report ()
+  "For the tests: each bridge of `*bf-ways*` (its meshes and ends), then each unit of the battle
+   awake within 30 m of one of its ends: its process id, side, state, mesh index, how far from each
+   end, its march and the bridge it hops."
+  (let ((w *bf-ways*))
+    (dotimes (b (-> w bridge-count))
+      (format 0 "SMOKE bridge ~D meshes ~D ~D a ~M ~M ~M" b (-> w mesh-a b) (-> w mesh-b b)
+              (-> w end-a b x) (-> w end-a b y) (-> w end-a b z))
+      (format 0 " b ~M ~M ~M~%" (-> w end-b b x) (-> w end-b b y) (-> w end-b b z))
+      )
+    )
+  (iterate-process-tree
+    *active-pool*
+    (lambda ((p process))
+      (when (and (type? p nav-enemy) (>= (bf-unit-team p) 0) (-> p next-state) (!= (-> p next-state name) 'inactive))
+        (let ((u (the-as nav-enemy p))
+              (w *bf-ways*)
+              )
+          (dotimes (b (-> w bridge-count))
+            (let ((da (vector-vector-xz-distance (-> u root trans) (-> w end-a b)))
+                  (db (vector-vector-xz-distance (-> u root trans) (-> w end-b b)))
+                  (hop -1)
+                  )
+              (when (< (fmin da db) (meters 30))
+                (dotimes (i (-> *bf-march* count))
+                  (if (= (-> *bf-march* unit i) (process->handle p))
+                      (set! hop (-> *bf-march* hop i))
+                      )
+                  )
+                (format 0 "SMOKE near bridge ~D: ~A ~D side ~D ~A mesh ~D" b (-> p type symbol) (-> p pid) (bf-unit-team p)
+                        (-> p next-state name)
+                        (if (and (nonzero? (-> u nav)) (-> u nav state mesh)) (bf-ways-index (-> u nav state mesh)) -1))
+                (format 0 " a ~M b ~M march ~A hop ~D" da db (bf-marching? p) hop)
+                (format 0 " goal ~D at ~M ~M~%" (bf-city-unit-goal p (bf-unit-team p)) (-> u root trans x) (-> u root trans z))
+                )
+              )
+            )
+          )
+        )
+      #t
+      )
+    *null-kernel-context*
+    )
+  (none)
+  )
+
 (defun bf-ways-gap ((a int) (b int))
   "Print the two polys of meshes A and B (`*bf-ways*` indices) whose centroids are nearest, and
    their distance, for the tests."
@@ -2527,15 +2576,20 @@
   (none)
   )
 
-(defconstant BF_SPAWN_REACH (meters 90)) ;; units appear on the nav meshes this close to their control point (45 m until round 26)
+(defconstant BF_SPAWN_REACH (meters 250))  ;; units appear on the nav meshes this close to their control point (45 m until round 26, 90 m until round 27)
+(defconstant BF_RESPAWN_REACH (meters 90)) ;; the player comes down from the sky this close to the point he picked
 
 ;; When each side may bring units in at a control point again (`bf-city-spawn-tick`).
 (define *bf-spawn-time* (new 'static 'array time-frame 2))
 
-(defun bf-city-spawn-spot ((pt vector) (out vector))
+(defun bf-city-spawn-spot ((pt vector) (out vector) (reach float) (low? symbol))
   "OUT: the middle of a nav poly drawn at random among those of the loaded meshes (`*bf-ways*`)
-   within BF_SPAWN_REACH of PT across and 20 m up or down, the link polys aside: a street, a
-   platform. Returns its mesh, #f for none."
+   within REACH of PT across and 20 m up or down, the link polys aside: a street, a platform; LOW?:
+   no poly of an upper deck (`*bf-ways*` deck-y, the Industrial Zone's walkways): a jetpack guard
+   brought down there stayed stuck on them (the author's play, round 27). Returns its mesh, #f for
+   none.
+   The units come down within BF_SPAWN_REACH of their point (the author's wish, round 28: the
+   fights spread over the city), the player within BF_RESPAWN_REACH of the point he picked."
   (let ((w *bf-ways*)
         (n 0)
         (found (the-as nav-mesh #f))
@@ -2543,12 +2597,15 @@
         )
     (dotimes (k (-> w count))
       (let ((m (-> w mesh k)))
-        (when (and m (< (vector-vector-xz-distance (the-as vector (-> m bounds)) pt) (+ (-> m bounds r) BF_SPAWN_REACH)))
+        (when (and m (< (vector-vector-xz-distance (the-as vector (-> m bounds)) pt) (+ (-> m bounds r) reach)))
           (dotimes (i (-> m poly-count))
             (let ((poly (-> m poly-array i)))
               (when (not (logtest? (-> poly pat) 4))
                 (poly-centroid m poly c)
-                (when (and (< (vector-vector-xz-distance c pt) BF_SPAWN_REACH) (< (fabs (- (-> c y) (-> pt y))) (meters 20)))
+                (when (and (< (vector-vector-xz-distance c pt) reach)
+                           (< (fabs (- (-> c y) (-> pt y))) (meters 20))
+                           (or (not low?) (< (-> c y) (-> w deck-y k)))
+                           )
                   (+! n 1)
                   (when (zero? (rand-vu-int-count n))
                     (vector-copy! out c)
@@ -2727,13 +2784,15 @@
         (let* ((kind (bf-transport-next-kind team))
                (at (new 'stack-no-clear 'vector))
                (sky (new 'stack-no-clear 'vector))
-               (mesh (if (>= kind 0) (bf-city-spawn-spot (-> *bf* points point pos) at)))
+               ;; a jetpack guard never over the walkways (`bf-city-spawn-spot` LOW?)
+               (low? (= kind (the-as int (traffic-type flying-turret))))
+               (mesh (if (>= kind 0) (bf-city-spawn-spot (-> *bf* points point pos) at BF_SPAWN_REACH low?)))
                (h (if mesh (bf-sky-height at) 0.0))
                )
           ;; up to 3 polys drawn for one under the open sky
           (dotimes (try 2)
             (when (and mesh (< h (meters 6)))
-              (let ((m2 (bf-city-spawn-spot (-> *bf* points point pos) sky)))
+              (let ((m2 (bf-city-spawn-spot (-> *bf* points point pos) sky BF_SPAWN_REACH low?)))
                 (when m2
                   (let ((h2 (bf-sky-height sky)))
                     (when (< h h2)
@@ -2864,7 +2923,7 @@
     ;; up to 6 polys drawn, the one with the most sky over it
     (when (and (>= pt 0) (< pt (-> *bf* point-count)))
       (dotimes (try 6)
-        (when (and (< best (meters 20)) (bf-city-spawn-spot (-> *bf* points pt pos) spot))
+        (when (and (< best (meters 20)) (bf-city-spawn-spot (-> *bf* points pt pos) spot BF_RESPAWN_REACH #f))
           (let ((h (bf-sky-height spot)))
             (when (or (not (-> *bf* sky-found?)) (< best h))
               (set! best h)

@@ -91,7 +91,7 @@
 (defconstant BF_BAG_DROPS 6)          ;; pickups left by every 10 fallen units (`bf-queue-drop`)
 (defconstant BF_DROP_LIFE (seconds 10)) ;; a pickup left by a fallen unit goes this long after it appears
 (defconstant BF_UNIT_RESPAWN (seconds 5)) ;; a fallen unit's place in its side's army waits this long
-(defconstant BF_RESPAWN_TIME (seconds 4)) ;; a dead player watches the battle this long, then respawns
+(defconstant BF_RESPAWN_TIME (seconds 2)) ;; a dead player watches the battle at least this long before he chooses (4 s, then the respawn page, until round 27)
 
 ;; Army caps: at most 40 units per side on the street at once. Freedom League: 28 blue guards and
 ;; 12 blue jetpack guards. Krimzon Guard: 8 red riflemen, 8 red grenadiers, 8 red jetpack guards, 8
@@ -195,7 +195,8 @@
    (center        vector :inline) ;; battlefield sphere: xyz center, w radius
    (spawn         vector 2 :inline) ;; each side's spawn point
    (phase-time    time-frame)     ;; when `phase` last changed
-   (respawn-time  time-frame)     ;; the dead player respawns then (battlefront.gc `bf-target-death`), 0 alive
+   (respawn-time  time-frame)     ;; the dead player may choose from then (battlefront.gc `bf-target-death`), 0 alive
+   (redeploying?  symbol)         ;; the player's death is a redeploy: the class page at once
    (safe          vector :inline) ;; the player's last place standing inside the zone's levels
    (safe-level    symbol)         ;; the level he was in there
    (safe-time     time-frame)     ;; when that place was taken
@@ -788,6 +789,8 @@
     )
   )
 
+(define-extern bf-fizz-start! (function process-drawable symbol))
+
 ;; Stock effect step, kept across REPL reloads of this file (Lisp wiki jak3 4.10).
 (define-perm *bf-stock-do-effect* (function effect-control string float int none)
              (method-of-type effect-control do-effect)
@@ -810,10 +813,108 @@
                 )
               )
         )
-    (if (and name (string-prefix= "death-" name) (-> this process) (bf-custom-model? (-> this process)))
-        (none)
+    (cond
+      ((and name (string-prefix= "death-" name) (-> this process) (bf-custom-model? (-> this process)))
+       ;; a red guard of the battle dissolves as the blue ones do, in the dissolve's sparks
+       ;; (`bf-fizz-start!`; the author's wish, round 28: its body stayed until the pool took it)
+       (if (= (-> this process type symbol) 'crimson-guard)
+           (bf-fizz-start! (the-as process-drawable (-> this process)))
+           )
+       )
+      (else
         (*bf-stock-do-effect* this arg0 arg1 arg2)
         )
+      )
+    )
+  (none)
+  )
+
+;; The red guards' death: the blue guards' dissolve (the death-default effect, merc-death.gc), which
+;; a build-actor model cannot take (`do-effect`), made of its purple sparks (Lisp wiki jak3 4.35).
+(defconstant BF_FIZZ_MAX 16)
+(defconstant BF_FIZZ_SPARKS 4)           ;; sparks a frame from a dissolving red guard
+(defconstant BF_FIZZ_HIDE (seconds 1))   ;; its body hidden then
+(defconstant BF_FIZZ_TIME (seconds 1.5)) ;; and let go then
+
+(deftype bf-fizz (structure)
+  "The red guards dissolving (`bf-fizz-start!`, `bf-fizz-tick`)."
+  ((unit  handle     BF_FIZZ_MAX)
+   (time  time-frame BF_FIZZ_MAX)
+   )
+  )
+
+(define *bf-fizz* (new 'static 'bf-fizz))
+
+;; no unit yet: a 0 handle is read as a process at address 0 and crashes (Lisp wiki common.md, `handle->process`)
+(dotimes (i BF_FIZZ_MAX)
+  (set! (-> *bf-fizz* unit i) (the-as handle #f))
+  )
+
+(defun bf-fizz-sparks ((proc process-drawable) (n int))
+  "N purple sparks of the game's dissolve (merc-death.gc part 53, which the dissolve launches from
+   each vertex) from as many joints of PROC drawn at random. Side effects: particles."
+  (let ((joints (-> proc node-list length))
+        (pos (new 'stack-no-clear 'vector))
+        )
+    (when (< 2 joints)
+      (dotimes (k n)
+        (vector<-cspace! pos (-> proc node-list data (+ 1 (rand-vu-int-count (+ joints -1)))))
+        (launch-particles (-> *part-id-table* 53) pos)
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-fizz-start! ((proc process-drawable))
+  "Called by `do-effect` for a red guard's death effect, skipped: PROC dissolves in sparks
+   (`bf-fizz-tick`), with the dissolve's sound (enemy-fizz). Returns #t when it starts, #f when it
+   dissolves already or no room is left."
+  (let ((h (process->handle proc))
+        (now (-> *display* game-clock frame-counter))
+        )
+    (dotimes (i BF_FIZZ_MAX)
+      (if (= (-> *bf-fizz* unit i) h)
+          (return #f)
+          )
+      )
+    (dotimes (i BF_FIZZ_MAX)
+      (when (not (handle->process (-> *bf-fizz* unit i)))
+        (set! (-> *bf-fizz* unit i) h)
+        (set! (-> *bf-fizz* time i) now)
+        (sound-play "enemy-fizz" :position (-> proc root trans))
+        (return #t)
+        )
+      )
+    )
+  #f
+  )
+
+(defun bf-fizz-tick ()
+  "Every frame of a battle (the director): each red guard dissolving (`*bf-fizz*`) launches
+   BF_FIZZ_SPARKS sparks a frame (`bf-fizz-sparks`) until BF_FIZZ_HIDE, when its body is hidden;
+   let go at BF_FIZZ_TIME, or at once once it is no longer dead (its pool woke it again: its reset,
+   citizen.gc citizen-method-194, shows it again)."
+  (let ((now (-> *display* game-clock frame-counter)))
+    (dotimes (i BF_FIZZ_MAX)
+      (let ((p (the-as process-focusable (handle->process (-> *bf-fizz* unit i)))))
+        (when p
+          (let ((t (- now (-> *bf-fizz* time i))))
+            (cond
+              ((or (>= t BF_FIZZ_TIME) (not (focus-test? p dead)))
+               (set! (-> *bf-fizz* unit i) (the-as handle #f))
+               )
+              ((< t BF_FIZZ_HIDE)
+               (bf-fizz-sparks p BF_FIZZ_SPARKS)
+               )
+              (else
+                (logior! (-> p draw status) (draw-control-status no-draw))
+                )
+              )
+            )
+          )
+        )
+      )
     )
   (none)
   )
