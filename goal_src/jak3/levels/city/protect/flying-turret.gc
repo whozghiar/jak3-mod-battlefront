@@ -12,6 +12,7 @@
 (define-extern bf-hover-animate (function process-drawable float none))
 (define-extern bf-hover-nozzle! (function process-drawable vector vector int symbol))
 (define-extern bf-hover-ceiling! (function nav-enemy float float))
+(define-extern bf-hover-turn-fix! (function process-drawable quaternion quaternion none))
 
 ;; DECOMP BEGINS
 
@@ -541,6 +542,8 @@
         (flying-turret-method-226 this)
         )
     (flying-turret-method-227 this)
+    ;; MOD battlefront -- a turn that is not a number put back to none (round 32)
+    (bf-hover-turn-fix! this (-> this last-heading-quat) (-> this last-roll-quat))
     ;; MOD battlefront -- a jetpack guard loops its idle or flying clip
     (bf-hover-animate this (vector-length (-> this root transv)))
     (let* ((f0-0 (vector-length (-> this root transv)))

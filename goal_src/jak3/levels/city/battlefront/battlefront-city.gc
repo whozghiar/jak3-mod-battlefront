@@ -3094,6 +3094,102 @@
   (none)
   )
 
+(define *bf-nan-sleeps* (new 'static 'array int32 1 0)) ;; for the tests: units put to sleep at NaN
+
+(define *bf-bone-fixes* (new 'static 'array int32 1 0)) ;; for the tests: units whose bones were put back
+
+(defun bf-unit-bones-at! ((u nav-enemy) (pos vector) (w float))
+  "Every bone of unit U: no rotation, its place POS with W (1.0 a place, 0.0 none: vector<-cspace!
+   reads a bone with w 0 as the origin, never NaN). Its joint math overwrites them the next time
+   the unit is drawn."
+  (dotimes (i (-> u node-list length))
+    (let ((c (-> u node-list data i)))
+      (when (and (nonzero? (-> c bone)) (-> c bone))
+        (let ((m (-> c bone transform)))
+          (matrix-identity! m)
+          (vector-copy! (-> m trans) pos)
+          (set! (-> m trans w) w)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-unit-bones-bad? ((u nav-enemy))
+  "#t when unit U's bullseye bone (its enemy info's bullseye-joint, the point its foes aim at:
+   get-trans 3) is NaN."
+  (let ((j (-> u enemy-info bullseye-joint)))
+    (and (< j (-> u node-list length))
+         (let ((c (-> u node-list data j)))
+           (and (nonzero? (-> c bone))
+                (-> c bone)
+                (or (bf-nan? (-> c bone transform trans x)) (bf-nan? (-> c bone transform trans w)))
+                )
+           )
+         )
+    )
+  )
+
+(defun bf-city-nan-sweep ()
+  "Every frame of the fight: each unit of the battle awake whose place, velocity or turn is not a
+   number goes back to its pool (`bf-transport-sleep`), its place free for the next one (round 32). The
+   stock unit code was written against the player alone, and in unit against unit fights it made a
+   unit's place NaN now and then: a jetpack guard's turn went NaN (`bf-hover-turn-fix!` mends it
+   since), so did its bones and its shots, and each guard such a shot knocked flew off at NaN. Such a unit never died, kept its side's place (its side stopped
+   coming down at the points: 32 units of 80 in 7 minutes, scenario 60), and every unit that took
+   it as its foe chased or shot at NaN and became NaN in turn. Its bones keep NaN until it is drawn
+   again, awake elsewhere too, and the jetpack guards aim at a foe's bullseye bone (flying-turret.gc
+   update-focus, get-trans 3): asleep, its bones are cleared (`bf-unit-bones-at!`); awake, a unit
+   whose bullseye bone is NaN gets its bones on its place (4 jetpacks of 6 NaN
+   units came from one guard woken with NaN bones, scenario 60). Returns nothing; logs each one."
+  (let ((te *traffic-engine*)
+        (bad (new 'stack-no-clear 'array 'uint64 16))
+        (n 0)
+        )
+    (when (and te (nonzero? te))
+      (dotimes (ti 2)
+        (let ((tr (-> te tracker-array ti)))
+          (dotimes (i (-> tr active-object-count))
+            (let ((p (handle->process (-> tr active-object-list i))))
+              (when (and p (< n 16) (type? p nav-enemy) (>= (bf-unit-team p) 0))
+                (let ((u (the-as nav-enemy p)))
+                  (cond
+                    ((or (bf-nan? (-> u root trans x)) (bf-nan? (-> u root trans y)) (bf-nan? (-> u root trans z))
+                         (bf-nan? (-> u root transv x)) (bf-nan? (-> u root transv z)) (bf-nan? (-> u root quat x))
+                         )
+                     (set! (-> bad n) (the-as uint (-> tr active-object-list i)))
+                     (+! n 1)
+                     )
+                    ((bf-unit-bones-bad? u)
+                     (bf-unit-bones-at! u (-> u root trans) 1.0)
+                     (+! (-> *bf-bone-fixes* 0) 1)
+                     )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      ;; put to sleep once the lists are read: a sleep takes the unit out of its list
+      (dotimes (k n)
+        (let ((p (handle->process (the-as handle (-> bad k)))))
+          (when p
+            (format 0 "battlefront: unit ~D (~A) at NaN in ~A, put back to sleep~%" (-> p pid) (-> p type symbol)
+                    (if (-> p next-state) (-> p next-state name) '-)
+                    )
+            (bf-unit-bones-at! (the-as nav-enemy p) *null-vector* 0.0)
+            (bf-transport-sleep p)
+            (+! (-> *bf-nan-sleeps* 0) 1)
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-city-command ((cmd int))
   "`*bf-city-hook*`. CMD: BF_CITY_PREPARE once the zone is loaded, BF_CITY_UPDATE every frame of
    the fight, BF_CITY_RESET when the battle ends. The unit pools are not rebuilt here: the director
@@ -3109,6 +3205,7 @@
      (bf-city-sleep-all)
      )
     ((= cmd BF_CITY_UPDATE)
+     (bf-city-nan-sweep)
      (bf-city-apply-hatred)
      (when (time-elapsed? (-> *bf-city-saved* retarget-time) (seconds 0.5))
        (set-time! (-> *bf-city-saved* retarget-time))

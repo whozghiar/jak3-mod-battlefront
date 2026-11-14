@@ -2608,21 +2608,58 @@
       )
   )
 
+(defconstant BF_DROP_PROBE (meters 80)) ;; how far down a dead unit's pickups look for the ground
+
+(defun bf-ground-under ((pos vector))
+  "The height a pickup rests at under POS: the centre of a 0.3 m sphere probed straight down
+   BF_DROP_PROBE onto the scenery, so 0.3 m over the ground. POS's own height when nothing is there
+   (over the sea, off the map)."
+  (let ((cq (new 'stack-no-clear 'collide-query)))
+    (vector-copy! (-> cq start-pos) pos)
+    (set-vector! (-> cq move-dist) 0.0 (- BF_DROP_PROBE) 0.0 1.0)
+    (set! (-> cq radius) (meters 0.3))
+    (set! (-> cq collide-with) (collide-spec backgnd))
+    (set! (-> cq ignore-process0) #f)
+    (set! (-> cq ignore-process1) #f)
+    (set! (-> cq ignore-pat) (new 'static 'pat-surface :noentity #x1 :nojak #x1 :probe #x1 :noendlessfall #x1 :board #x1))
+    (set! (-> cq action-mask) (collide-action solid))
+    (let ((u (fill-and-probe-using-line-sphere *collide-cache* cq)))
+      (if (>= u 0.0)
+          (- (-> pos y) (* u BF_DROP_PROBE))
+          (-> pos y)
+          )
+      )
+    )
+  )
+
 (defbehavior bf-spawn-drops bf-director ()
   "Spawn the pickups the dead units left (battlefront-h.gc `bf-queue-drop`): the stock ammo, health
    and dark eco pickups, which give Jak ammo and health the stock way, each gone BF_DROP_LIFE after
    it appears (`*bf-drop-fact*`). Dark eco comes as 3 pills (6 units), a full jetpack's worth
-   (battlefront-player.gc BF_DARK_FUEL)."
+   (battlefront-player.gc BF_DARK_FUEL).
+   They pop up from where the unit died and fall onto the ground under it (round 32, the author's
+   wish): a pickup born moving bounces (collectables.gc `deploy`: gravity, no collision) down to its
+   `base`, the height it was born at, so a jetpack guard's pickups stayed in the air. Each one born
+   here gets the ground's height (`bf-ground-under`) as its `base`."
   (dotimes (i (-> *bf* drop-count))
     (let ((pos (vector-copy! (new 'stack-no-clear 'vector) (-> *bf* drop-pos i))))
       (+! (-> pos y) (meters 1))
       (let ((kind (the-as pickup-type (-> *bf* drop-kind i))))
-        (let ((pp (birth-pickup-at-point pos kind (if (= kind (pickup-type eco-pill-dark)) 6.0 1.0) #t *entity-pool* *bf-drop-fact*)))
-          ;; an ammo pickup takes no fade time from its fact (collectables.gc initialize-ammo-by-other:
-          ;; 15 s): set on the one born
-          (if (and pp (nonzero? pp) (-> pp 0) (type? (-> pp 0) collectable))
-              (set! (-> (the-as collectable (-> pp 0)) fadeout-timeout) BF_DROP_LIFE)
-              )
+        (birth-pickup-at-point pos kind (if (= kind (pickup-type eco-pill-dark)) 6.0 1.0) #t *entity-pool* *bf-drop-fact*)
+        )
+      ;; the pickups just born head *entity-pool*'s children (gkernel.gc change-parent puts a new
+      ;; child first), their base where they were born; an ammo pickup also takes no fade time
+      ;; from its fact (collectables.gc initialize-ammo-by-other: 15 s)
+      (let ((y (fmin (-> pos y) (bf-ground-under pos)))
+            (p (-> *entity-pool* child))
+            )
+        (while (and p
+                    (type? (-> p 0) collectable)
+                    (= (vector-vector-distance (-> (the-as collectable (-> p 0)) base) pos) 0.0)
+                    )
+          (set! (-> (the-as collectable (-> p 0)) base y) y)
+          (set! (-> (the-as collectable (-> p 0)) fadeout-timeout) BF_DROP_LIFE)
+          (set! p (-> p 0 brother))
           )
         )
       )

@@ -1529,6 +1529,26 @@
                                            ;; BF_TRANSPORT_HOVER_MAX, 14 m), the middle ~1 m under the street
 (defconstant BF_HOVER_RISE (meters 6))     ;; the most the scenery under it lifts its flight
 
+(defun bf-nan? ((f float))
+  "#t when F is a NaN or an infinity: its exponent bits all set."
+  (= (logand (the-as int f) #x7f800000) #x7f800000)
+  )
+
+(defun bf-hover-turn-fix! ((this process-drawable) (heading quaternion) (roll quaternion))
+  "Called by enemy-common-post (flying-turret.gc) after the stock flight (flying-turret-method-227)
+   turned the unit: during a battle, a turn that is not a number (the flight normalizes its thrust's
+   direction across the ground, and a thrust straight up or none has no such direction) is put back
+   to none: its HEADING and ROLL quaternions and its root's. A NaN turn stayed NaN for good (each
+   frame blends into the last), and so did its bones and the shots its gun bone aims: each guard
+   such a shot knocked flew off at NaN (round 32, scenario 60: a jetpack's 16 shots, 5 guards)."
+  (when (and (bf-active?) (or (bf-nan? (-> this root quat x)) (bf-nan? (-> heading x)) (bf-nan? (-> roll x))))
+    (quaternion-identity! heading)
+    (quaternion-identity! roll)
+    (quaternion-identity! (-> this root quat))
+    )
+  (none)
+  )
+
 (defun bf-hover-ceiling! ((this nav-enemy) (ground float))
   "Called by enemy-common-post (flying-turret.gc) after the stock flight set its height:
    during a battle, a jetpack guard's GROUND (the stock ground-height: the first surface a probe 25

@@ -5076,6 +5076,294 @@
   0
   )
 
+(define-extern bf-ground-under (function vector float))
+
+(defun smoke-r32-drops-report ((tag string) (from vector))
+  "Round 32: each pickup in *entity-pool* within 15 m of FROM across: its type, state, height, its
+   base's height and the ground under it (`bf-ground-under`, 0.3 m over the ground). Returns how many
+   rest within 0.5 m of their ground."
+  (let ((ok 0)
+        (p (-> *entity-pool* child))
+        )
+    (while p
+      (let ((c (-> p 0)))
+        (when (and (type? c collectable)
+                   (< (vector-vector-xz-distance (-> (the-as collectable c) root trans) from) (meters 15))
+                   )
+          (let* ((col (the-as collectable c))
+                 (probe (vector-copy! (new 'stack-no-clear 'vector) (-> col root trans)))
+                 )
+            (+! (-> probe y) (meters 2))
+            (let ((g (bf-ground-under probe)))
+              (format 0 "SMOKE ~S drop ~A ~A y ~M base ~M ground ~M~%" tag (-> c type symbol)
+                      (if (-> col next-state) (-> col next-state name) '-) (-> col root trans y) (-> col base y) g)
+              (if (< (fabs (- (-> col root trans y) g)) (meters 0.5))
+                  (+! ok 1)
+                  )
+              )
+            )
+          )
+        )
+      (set! p (-> p 0 brother))
+      )
+    ok
+    )
+  )
+
+(defbehavior smoke-s58 process ()
+  "Scenario 58 (`smoke-scenario-late`), round 32: four pickups queued 15 m up, 8 m in front of the
+   player (`bf-spawn-drops`, as a jetpack guard's): dark eco, yellow ammo, red ammo, health. They
+   must fall and rest on the ground under them."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (smoke-wait 3.0)
+  (let ((at (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans))))
+    (vector+float*! at at (-> *target* control c-R-w fvec) (meters 8))
+    (+! (-> at y) (meters 15))
+    (dotimes (k 4)
+      (let ((i (-> *bf* drop-count)))
+        (set! (-> *bf* drop-kind i) (the-as int (-> *bf-drop-types* (-> (new 'static 'array int32 4 0 1 2 4) k))))
+        (vector-copy! (-> *bf* drop-pos i) at)
+        (+! (-> *bf* drop-pos i x) (* (meters 1.5) (the float k)))
+        (+! (-> *bf* drop-count) 1)
+        )
+      )
+    (smoke-wait 0.3)
+    (smoke-check "the pickups were born up there" (= (smoke-r32-drops-report "born" at) 0))
+    (smoke-shot "r32-drops-falling")
+    (smoke-wait 4.0)
+    (let ((n (smoke-r32-drops-report "landed" at)))
+      (format 0 "SMOKE drops on the ground: ~D~%" n)
+      (smoke-check "the pickups rest on the ground under them" (>= n 4))
+      )
+    (smoke-shot "r32-drops-landed")
+    )
+  0
+  )
+
+(define *smoke-r32-sky* (new 'static 'array int32 1 0))
+(define-extern bf-transport-asleep-count (function int (pointer int32) int))
+(define-extern *bf-nan-sleeps* (pointer int32))
+(define-extern *bf-bone-fixes* (pointer int32))
+(define-extern bf-ways-index (function nav-mesh int))
+(define-extern bf-unit-kind-name (function process symbol))
+
+(defun smoke-r32-sides ()
+  "Round 32 diagnosis, one line a side: its units awake, asleep in the traffic's pools and fallen
+   less than BF_UNIT_RESPAWN ago, by kind (*bf-kinds* order); then the units the control points
+   brought down since the last look (`*bf-sky-log*`): their kind and the poly they fall onto."
+  (dotimes (team 2)
+    (let ((now (new 'stack-no-clear 'array 'int32 4))
+          (sleep (new 'stack-no-clear 'array 'int32 4))
+          )
+      (bf-transport-team-count team now)
+      (bf-transport-asleep-count team sleep)
+      (format 0 "SMOKE side ~D awake ~D ~D ~D ~D" team (-> now 0) (-> now 1) (-> now 2) (-> now 3))
+      (format 0 " asleep ~D ~D ~D ~D" (-> sleep 0) (-> sleep 1) (-> sleep 2) (-> sleep 3))
+      (format 0 " fallen ~D ~D ~D ~D~%" (bf-fallen-count team 0) (bf-fallen-count team 1) (bf-fallen-count team 2)
+              (bf-fallen-count team 3))
+      )
+    )
+  (let ((from (max (-> *smoke-r32-sky* 0) (- (-> *bf-sky-log* count) BF_SKY_LOG))))
+    (while (< from (-> *bf-sky-log* count))
+      (let* ((n (mod from BF_SKY_LOG))
+             (u (handle->process (-> *bf-sky-log* unit n)))
+             )
+        (format 0 "SMOKE sky ~D kind ~D pid ~D" from (-> *bf-sky-log* kind n) (if u (-> u pid) -1))
+        (format 0 " ground ~M ~M ~M height ~M~%" (-> *bf-sky-log* ground n x) (-> *bf-sky-log* ground n y)
+                (-> *bf-sky-log* ground n z) (-> *bf-sky-log* height n))
+        )
+      (+! from 1)
+      )
+    (set! (-> *smoke-r32-sky* 0) (-> *bf-sky-log* count))
+    )
+  (none)
+  )
+
+(defun smoke-r32-units ()
+  "Round 32 diagnosis: each unit of the battle awake: its process id, kind, side, state, place; its
+   focus (the stock's own target, the one a guard's 'rifle-hostile and 'rifle-reload read): its kind,
+   state and whether it is gone, dead, disabled or ignored ('bad); its nav mesh (none, default, or its
+   `*bf-ways*` index) and whether it stands in it within 1 m (nav-control is-in-mesh?); its march
+   and fight."
+  (iterate-process-tree
+    *active-pool*
+    (lambda ((p process))
+      (when (and (type? p nav-enemy) (>= (bf-unit-team p) 0) (-> p next-state) (!= (-> p next-state name) 'inactive))
+        (let* ((u (the-as nav-enemy p))
+               (f (handle->process (-> u focus handle)))
+               (nav? (and (nonzero? (-> u nav)) (-> u nav)))
+               (m (if nav? (-> u nav state mesh)))
+               )
+          (format 0 "SMOKE u ~D ~A ~D ~A" (-> p pid) (bf-unit-kind-name p) (bf-unit-team p) (-> p next-state name))
+          (format 0 " at ~M ~M ~M" (-> u root trans x) (-> u root trans y) (-> u root trans z))
+          (format 0 " focus ~A ~A ~A" (if f (bf-unit-kind-name f) '-) (if (and f (-> f next-state)) (-> f next-state name) '-)
+                  (if (and f (type? f process-focusable)
+                           (not (logtest? (-> (the-as process-focusable f) focus-status) (focus-status disable dead ignore grabbed inactive)))
+                           )
+                      'ok
+                      'bad
+                      )
+                  )
+          (format 0 " mesh ~A in ~A march ~A fight ~A~%"
+                  (cond
+                    ((not m) 'none)
+                    ((= m *default-nav-mesh*) 'default)
+                    (else (bf-ways-index m))
+                    )
+                  (if m (is-in-mesh? (-> u nav) (-> u root trans) (meters 1)) #f)
+                  (bf-marching? p)
+                  (bf-city-engaged? p)
+                  )
+          )
+        )
+      #t
+      )
+    *null-kernel-context*
+    )
+  (none)
+  )
+
+(defbehavior smoke-s59 process ()
+  "Scenario 59 (`smoke-scenario-late`), round 32 diagnosis: a battle watched 7 minutes from the
+   South Industrial Zone's point (E), the player invulnerable: every 10 s each side's units awake,
+   asleep and fallen, the units brought down since (`smoke-r32-sides`), every unit's state, focus,
+   nav mesh, march and fight (`smoke-r32-units`). For the author's play: the guards stopped coming
+   down at the points after a while, most stood reloading, some appeared off the map and walked
+   through walls."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (move-to-point! (-> *target* control) (-> *bf* points 8 pos))
+  (set! (-> *smoke-r32-sky* 0) (-> *bf-sky-log* count))
+  (smoke-wait 5.0)
+  (dotimes (n 42)
+    (format 0 "SMOKE look ~D~%" n)
+    (smoke-r32-sides)
+    (smoke-r32-units)
+    (if (zero? (mod n 7))
+        (smoke-shot (if (zero? n) "r32-watch-0" "r32-watch"))
+        )
+    (smoke-wait 10.0)
+    )
+  (smoke-check "the diagnosis ran" #t)
+  0
+  )
+
+(defun smoke-nan? ((f float))
+  "#t when F is a NaN or an infinity: its exponent bits all set."
+  (= (logand (the-as int f) #x7f800000) #x7f800000)
+  )
+
+(deftype smoke-trap (structure)
+  "Round 32: each unit's last frame, by process id modulo 512: its state, place, velocity, its focus's
+   state and place; SEEN once its NaN was reported."
+  ((pid    int32  512)
+   (seen   int32  512)
+   (state  symbol 512)
+   (fstate symbol 512)
+   (pos    vector 512 :inline)
+   (vel    vector 512 :inline)
+   (fpos   vector 512 :inline)
+   )
+  )
+
+(define *smoke-trap* (new 'static 'smoke-trap))
+
+(defun smoke-r32-trap ()
+  "Round 32, every frame: each unit of the battle whose place or velocity turned NaN (`smoke-nan?`)
+   is reported once, with its last frame before (`*smoke-trap*`) and this one."
+  (iterate-process-tree
+    *active-pool*
+    (lambda ((p process))
+      (when (and (type? p nav-enemy) (>= (bf-unit-team p) 0) (-> p next-state))
+        (let* ((u (the-as nav-enemy p))
+               (t *smoke-trap*)
+               (k (logand (-> p pid) 511))
+               (f (handle->process (-> u focus handle)))
+               (bad? (or (smoke-nan? (-> u root trans x)) (smoke-nan? (-> u root trans z))
+                         (smoke-nan? (-> u root transv x)) (smoke-nan? (-> u root transv z))
+                         )
+                     )
+               )
+          (when (!= (-> t pid k) (-> p pid))
+            (set! (-> t seen k) 0)
+            (set! (-> t state k) #f)
+            )
+          (when (and bad? (zero? (-> t seen k)))
+            (set! (-> t seen k) 1)
+            (format 0 "SMOKE NaN ~D ~A ~D now ~A before ~A~%" (-> p pid) (bf-unit-kind-name p) (bf-unit-team p)
+                    (-> p next-state name) (-> t state k))
+            (format 0 "SMOKE NaN  before at ~M ~M ~M" (-> t pos k x) (-> t pos k y) (-> t pos k z))
+            (format 0 " vel ~M ~M ~M~%" (-> t vel k x) (-> t vel k y) (-> t vel k z))
+            (format 0 "SMOKE NaN  now at ~M ~M ~M" (-> u root trans x) (-> u root trans y) (-> u root trans z))
+            (format 0 " vel ~M ~M ~M~%" (-> u root transv x) (-> u root transv y) (-> u root transv z))
+            (format 0 "SMOKE NaN  focus ~A ~A before ~A at ~M ~M" (if f (bf-unit-kind-name f) '-)
+                    (if (and f (-> f next-state)) (-> f next-state name) '-) (-> t fstate k) (-> t fpos k x) (-> t fpos k z))
+            (if (and f (type? f process-drawable))
+                (format 0 " now ~M ~M ~M~%" (-> (the-as process-drawable f) root trans x) (-> (the-as process-drawable f) root trans y)
+                        (-> (the-as process-drawable f) root trans z))
+                (format 0 "~%")
+                )
+            (when (and (nonzero? (-> u nav)) (-> u nav))
+              (format 0 "SMOKE NaN  nav vel ~M ~M target ~M ~M" (-> u nav state velocity x) (-> u nav state velocity z)
+                      (-> u nav state target-pos x) (-> u nav state target-pos z))
+              (format 0 " travel ~M ~M~%" (-> u nav state travel x) (-> u nav state travel z))
+              )
+            (format 0 "SMOKE NaN  hit-points ~f flags ~X~%" (-> u hit-points) (-> u enemy-flags))
+            (when (and f (type? f process-focusable))
+              (let ((b (get-trans (the-as process-focusable f) 3)))
+                (format 0 "SMOKE NaN  focus pid ~D bullseye ~M ~M ~M~%" (-> f pid) (-> b x) (-> b y) (-> b z))
+                )
+              )
+            )
+          (set! (-> t pid k) (-> p pid))
+          (when (not bad?)
+            (set! (-> t state k) (-> p next-state name))
+            (vector-copy! (-> t pos k) (-> u root trans))
+            (vector-copy! (-> t vel k) (-> u root transv))
+            (set! (-> t fstate k) (if (and f (-> f next-state)) (-> f next-state name) '-))
+            (if (and f (type? f process-drawable))
+                (vector-copy! (-> t fpos k) (-> (the-as process-drawable f) root trans))
+                (vector-reset! (-> t fpos k))
+                )
+            )
+          )
+        )
+      #t
+      )
+    *null-kernel-context*
+    )
+  (none)
+  )
+
+(defbehavior smoke-s60 process ()
+  "Scenario 60 (`smoke-scenario-late`), round 32 diagnosis: the battle of scenario 59 watched 7
+   minutes with a trap on every frame (`smoke-r32-trap`): the first frame each unit's place or
+   velocity turns NaN, with the frame before; each side's units every 30 s (`smoke-r32-sides`)."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (move-to-point! (-> *target* control) (-> *bf* points 8 pos))
+  (set! (-> *smoke-r32-sky* 0) (-> *bf-sky-log* count))
+  (dotimes (n 14)
+    (format 0 "SMOKE look ~D~%" n)
+    (smoke-r32-sides)
+    (dotimes (fr 1800)
+      (smoke-r32-trap)
+      (suspend)
+      )
+    )
+  (smoke-r32-units)
+  (format 0 "SMOKE units put to sleep at NaN: ~D, bones put back: ~D~%" (-> *bf-nan-sleeps* 0) (-> *bf-bone-fixes* 0))
+  (smoke-check "the diagnosis ran" #t)
+  0
+  )
+
 (defbehavior smoke-s57 process ()
   "Scenario 57 (`smoke-scenario-late`), round 31 diagnosis: a battle watched 150 s from the South
    Industrial Zone's point (E), every unit's place, goal, foe and the nearest foe every 5 s
@@ -5741,6 +6029,9 @@
   "Scenarios 36 to 40 (rounds 26 and 27), each in a function of its own, out of `smoke-scenario`:
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
+    ((60) (smoke-s60))
+    ((59) (smoke-s59))
+    ((58) (smoke-s58))
     ((57) (smoke-s57))
     ((56) (smoke-s56))
     ((55) (smoke-s55))

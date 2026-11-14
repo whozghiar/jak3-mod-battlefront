@@ -186,6 +186,29 @@
     )
   )
 
+(defun bf-transport-asleep-count ((team int) (out (pointer int32)))
+  "For the tests: units of side TEAM asleep in the traffic's pools, by kind (*bf-kinds* order), into
+   OUT[0] to OUT[3]. Returns their sum."
+  (let ((sum 0))
+    (dotimes (k BF_KIND_COUNT)
+      (set! (-> out k) 0)
+      (when (and *traffic-engine* (nonzero? *traffic-engine*))
+        (let ((info (-> *traffic-engine* object-type-info-array (-> *bf-kinds* k))))
+          (dotimes (i (-> info inactive-count))
+            (let ((proc (handle->process (-> info array i))))
+              (when (and proc (= (bf-unit-team proc) team))
+                (+! (-> out k) 1)
+                (+! sum 1)
+                )
+              )
+            )
+          )
+        )
+      )
+    sum
+    )
+  )
+
 (defun bf-transport-pick ((type int) (team int))
   "Find, in the traffic's pool of sleeping units of traffic type TYPE, one of side TEAM
    (`bf-unit-team`) and move it to the head of the pool, the one the traffic's activate-from-params
