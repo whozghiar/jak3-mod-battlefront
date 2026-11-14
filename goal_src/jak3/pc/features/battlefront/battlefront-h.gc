@@ -431,50 +431,46 @@
 (define *bf-team-names* (new 'static 'boxed-array :type string "Freedom League" "Krimzon Guard"))
 (define *bf-team-names-fr* (new 'static 'boxed-array :type string "Ligue de la liberté" "Grenagarde"))
 
+;; What a class does, with its buttons (round 29, the author's wish: nothing else), shown on the
+;; class page for the class picked (battlefront.gc `bf-draw-class-page`).
 ;; The guards' help, the same for both colors, a weapon a line. The font has no icon for the left
 ;; D-pad button, and its <PAD_DPAD_DOWN> lights the up part too: the tazer's and the rifle's lines
 ;; build theirs from the icon's parts the way font_db_jak3.cpp builds <PAD_DPAD_UP>, the left part
 ;; lit (~3L) for the tazer, the down part alone for the rifle.
 (define *bf-guard-help*
   (new 'static 'boxed-array :type string
-    "24 HP. Rifle 20/100, 5 grenades"
-    "<PAD_R1> Fire  <PAD_TRIANGLE> Reload  <PAD_SQUARE> Rifle butt"
-    "<PAD_L1> Crouch: steadier aim"
+    "<PAD_R1> Fire    <PAD_TRIANGLE> Reload"
+    "<PAD_SQUARE> Rifle butt    <PAD_L1> Crouch: steadier aim"
     "<PAD_L2> + <PAD_ANALOG_ANY> Dodge    <PAD_R2> + <PAD_ANALOG_ANY> Roll"
     "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Tazer (every 20 s)"
     "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~3L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Rifle"
-    "<PAD_DPAD_UP> Grenades"
+    "<PAD_DPAD_UP> Grenade launcher"
     )
   )
 
 (define *bf-guard-help-fr*
   (new 'static 'boxed-array :type string
-    "24 PV. Fusil 20/100, 5 grenades"
-    "<PAD_R1> Tir  <PAD_TRIANGLE> Recharger  <PAD_SQUARE> Crosse"
-    "<PAD_L1> S'accroupir : tir plus précis"
+    "<PAD_R1> Tir    <PAD_TRIANGLE> Recharger"
+    "<PAD_SQUARE> Crosse    <PAD_L1> S'accroupir : tir plus précis"
     "<PAD_L2> + <PAD_ANALOG_ANY> Esquive    <PAD_R2> + <PAD_ANALOG_ANY> Roulade"
     "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Tazer (toutes les 20 s)"
     "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~3L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H Fusil"
-    "<PAD_DPAD_UP> Grenades"
+    "<PAD_DPAD_UP> Lance-grenades"
     )
   )
 
 (define *bf-jetpack-help*
   (new 'static 'boxed-array :type string
-    "18 HP. Flies without limit."
-    "<PAD_X> Up    <PAD_CIRCLE> Down"
-    "<PAD_R2> + <PAD_ANALOG_ANY> Boost, 10 s gauge"
-    "Dark eco refills the boost."
-    "<PAD_R1> 2 shots    <PAD_SQUARE> Dive kick"
+    "<PAD_X> Climb    <PAD_CIRCLE> Come down"
+    "<PAD_R2> + <PAD_ANALOG_ANY> Boost (dark eco refills it)"
+    "<PAD_R1> Two shots    <PAD_SQUARE> Dive kick"
     )
   )
 
 (define *bf-jetpack-help-fr*
   (new 'static 'boxed-array :type string
-    "18 PV. Vol sans limite."
     "<PAD_X> Monter    <PAD_CIRCLE> Descendre"
-    "<PAD_R2> + <PAD_ANALOG_ANY> Accélérer, jauge de 10 s"
-    "L'éco noire recharge la jauge."
+    "<PAD_R2> + <PAD_ANALOG_ANY> Accélérer (l'éco noire recharge)"
     "<PAD_R1> Deux tirs    <PAD_SQUARE> Piqué"
     )
   )
@@ -493,34 +489,28 @@
     (new 'static 'bf-class-info :name "Red Krimzon Guard (Jetpack)" :team BF_TEAM_KG :name-fr "Garde rouge (jetpack)")
     (new 'static 'bf-class-info :name "Robotguard" :team BF_TEAM_KG
          :desc (new 'static 'boxed-array :type string
-                 "24 HP. Slow and heavy."
                  "<PAD_R1> Two shots    <PAD_SQUARE> Punch"
                  "<PAD_CIRCLE> Shield for 5 s, firing behind it"
-                 "Shield recharge: 25 s"
-                 "<PAD_R2> Ball / stand up"
+                 "<PAD_R2> Roll as a ball / stand up"
                  )
          :name-fr "Robotgarde"
          :desc-fr (new 'static 'boxed-array :type string
-                    "24 PV. Lent et lourd."
                     "<PAD_R1> Deux tirs    <PAD_SQUARE> Poing"
                     "<PAD_CIRCLE> Bouclier 5 s, tir possible derrière"
-                    "Recharge du bouclier : 25 s"
-                    "<PAD_R2> Boule / redéploiement"
+                    "<PAD_R2> Boule / se relever"
                     )
          )
     (new 'static 'bf-class-info :name "Spider Robot" :team BF_TEAM_KG
          :desc (new 'static 'boxed-array :type string
-                 "12 HP. Fast."
                  "<PAD_X> 11 m leap"
                  "<PAD_SQUARE> Headbutt: shocks as the tazer"
-                 "<PAD_R2> Sprint, 10 s gauge"
+                 "<PAD_R2> Blue eco sprint"
                  )
          :name-fr "Araignée robot"
          :desc-fr (new 'static 'boxed-array :type string
-                    "12 PV. Rapide."
                     "<PAD_X> Bond de 11 m"
                     "<PAD_SQUARE> Coup de tête : choc du tazer"
-                    "<PAD_R2> Sprint, jauge de 10 s"
+                    "<PAD_R2> Sprint à l'éco bleue"
                     )
          )
     )

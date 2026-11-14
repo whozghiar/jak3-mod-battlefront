@@ -55,7 +55,6 @@
 (defconstant BF_PAGE_CLASS 3)
 (defconstant BF_PAGE_RESULT 4)
 (defconstant BF_PAGE_PAUSE 5)  ;; START during the mode: the battle's own pause page, the live map
-(defconstant BF_PAGE_TITLE 6)  ;; in place of the game's title menu (round 29): start a battle, options, quit
 (defconstant BF_PAGE_CONFIG 7) ;; the battle's configuration (round 29): its settings, its map, its sides
 
 ;; Requests of the START menu's battle page to the director (it runs them in its own process, so
@@ -89,7 +88,6 @@
    (cursor        int32)
    (pick-zone     int32)
    (pick-team     int32)
-   (menu-mode?    symbol)     ;; the director holds the 'menu master mode
    (want-avatar?  symbol)     ;; the class model must be (re)drawn as soon as it is loaded
    (refill?       symbol)     ;; the open class page deploys the player: fresh ammo
    (prepared?     symbol)     ;; the city side of the battle is set up (BF_CITY_PREPARE)
@@ -99,9 +97,8 @@
    (hud-time      time-frame) ;; last time the health HUD was asked to show
    (field-time    time-frame) ;; last force-field spark
    (field-sound   time-frame) ;; last force-field sound
-   (page-time     time-frame) ;; when the pause page last opened or closed, on the real clock (the game's stops under it)
+   (page-time     time-frame) ;; when a page was last handed to the START menu, or the pause page closed, on the real clock
    (from-title?   symbol)     ;; the menu began at the title: the zone page leads to the configuration, the class page starts the battle
-   (title?        symbol)     ;; the title page's time, until a battle is started from it: it opens again once nothing else is up
    (respawn?      symbol)     ;; the class page picks the dead player's respawn point too
    (pick-class    int32)      ;; the class page's class, the last class row the cursor stood on
    (pick-point    int32)      ;; the class page's respawn point (`respawn?`)
@@ -202,6 +199,235 @@
   (none)
   )
 
+;; ---------------------------------------------------------------------------------------------
+;; The battle's pages in the START menu (round 29, the author's wish: drawn as the game's own
+;; menus, inside the START menu's ring, after the multiplayer mod's lobby)
+;; ---------------------------------------------------------------------------------------------
+
+;; The class page's middle column, where its class turns: fractions of the START menu's screen
+;; across and down (`*bf-frame*`). The screen's background box leaves it open
+;; (`draw-bg-box-alpha-1`): drawn at the nearest depth, the box hides any model under it.
+(defconstant BF_CLASS_HOLE_X0 0.4)
+(defconstant BF_CLASS_HOLE_X1 0.66)
+(defconstant BF_CLASS_HOLE_Y0 0.12)
+(defconstant BF_CLASS_HOLE_Y1 0.74)
+
+;; The game's window, width and height in pixels (`bf-x-squeeze`).
+(define *bf-window* (new 'static 'array int64 2 0 0))
+
+(defun bf-x-squeeze ()
+  "Screen units across for one down that keep a shape round on the display: the 512 x 416 screen
+   is stretched over the game's window (pc-get-window-size, as the START menu's resolution page
+   reads it; Jak 3 leaves `*pc-settings*` framebuffer sizes at 0), so a unit across is 512/416 times
+   its height over its width: 0.923 in 4:3, 0.692 in 16:9. relative-x-scale stayed 1.0 there: a
+   radius in plain units drew the class page's radar 1.46 times wider than tall, seen in game."
+  (pc-get-window-size (&-> *bf-window* 0) (&-> *bf-window* 1))
+  (let ((w (-> *bf-window* 0))
+        (h (-> *bf-window* 1))
+        )
+    (if (and (< 0 w) (< 0 h))
+        (/ (* 1.2308 (the float h)) (the float w))
+        0.923
+        )
+    )
+  )
+
+(deftype bf-frame (structure)
+  "The START menu's screen this frame (`bf-frame-update!`): the box inside its ring under its
+   header, in the 512 x 416 units the pages draw in, and the page's fade."
+  ((x     float)
+   (y     float)
+   (w     float)
+   (h     float)
+   (alpha float)
+   )
+  )
+
+(define *bf-frame* (new 'static 'bf-frame))
+
+(defun bf-frame-update! ()
+  "`*bf-frame*` from the START menu's small screen (progress.gc `*progress-work*`: 79 to 434
+   across in 16:9, 70 to 444 in 4:3), squeezed to the display's width as the stock pages are
+   (adjust-game-x), under the page's header, where the multiplayer lobby puts its own; its fade the
+   menu's (menu-transition)."
+  (let* ((wide? (= (get-aspect-ratio) 'aspect16x9))
+         (x0 (if wide? 79.0 70.0))
+         (x1 (if wide? 434.0 444.0))
+         (left (if (-> *pc-settings* use-vis?) x0 (the float (adjust-game-x x0))))
+         (right (if (-> *pc-settings* use-vis?) x1 (the float (adjust-game-x x1))))
+         )
+    (set! (-> *bf-frame* x) left)
+    (set! (-> *bf-frame* w) (- right left))
+    (set! (-> *bf-frame* y) (if wide? 84.0 110.0))
+    (set! (-> *bf-frame* h) (- (if wide? 358.0 326.0) (-> *bf-frame* y)))
+    (set! (-> *bf-frame* alpha)
+          (if *progress-process*
+              (fmax 0.0 (* 2.0 (- 0.5 (-> *progress-process* 0 menu-transition))))
+              0.0
+              )
+          )
+    )
+  (none)
+  )
+
+(defun bf-fx ((k float))
+  "The screen x at fraction K of the START menu's screen across (`*bf-frame*`)."
+  (+ (-> *bf-frame* x) (* k (-> *bf-frame* w)))
+  )
+
+(defun bf-fy ((k float))
+  "The screen y at fraction K of the START menu's screen down (`*bf-frame*`)."
+  (+ (-> *bf-frame* y) (* k (-> *bf-frame* h)))
+  )
+
+(defun bf-fade ((color rgba))
+  "COLOR with its alpha scaled by the page's fade (`*bf-frame*`), as the menu fades its pages."
+  (let ((c (the-as int color)))
+    (the-as rgba (logior (logand c #xffffff)
+                         (shl (the int (* (-> *bf-frame* alpha) (the float (logand (shr c 24) 255)))) 24)
+                         )
+            )
+    )
+  )
+
+(defun bf-fit-scale ((str string) (scale float) (width float))
+  "The font scale at which STR, drawn as `bf-ptext` draws it, is WIDTH wide at most: SCALE, or less
+   (60 % of it at least)."
+  (let ((font (new 'stack 'font-context *font-default-matrix* 0 0 0.0 (font-color default) (font-flags kerning large))))
+    (pc-encode-utf8-string str *pc-encoded-temp-string*)
+    (set-scale! font scale)
+    (let ((w (-> (get-string-length *pc-encoded-temp-string* font) length)))
+      (if (< width w)
+          (fmax (* 0.6 scale) (/ (* scale width) w))
+          scale
+          )
+      )
+    )
+  )
+
+(defun bf-ptext ((buf dma-buffer) (str string) (x float) (y float) (scale float) (color font-color) (center? symbol) (width float))
+  "STR into BUF as the START menu writes: its font, COLOR (font-color-32 its yellow, font-color-33
+   its white for the choice under the cursor), faded with the page; from X, or centered on X when
+   CENTER?; at SCALE, smaller when wider than WIDTH (60 % at most, then it runs over), as the
+   multiplayer lobby fits its lines. Button tags become the font's button icons
+   (pc-encode-utf8-string)."
+  (let ((font (new 'stack 'font-context *font-default-matrix* 0 0 0.0 color (font-flags kerning large))))
+    (pc-encode-utf8-string str *pc-encoded-temp-string*)
+    (set-scale! font scale)
+    (let ((w (-> (get-string-length *pc-encoded-temp-string* font) length)))
+      (if (< width w)
+          (set-scale! font (fmax (* 0.6 scale) (/ (* scale width) w)))
+          )
+      )
+    (set! (-> font origin x) x)
+    (set! (-> font origin y) y)
+    (set! (-> font alpha) (-> *bf-frame* alpha))
+    (if center?
+        (logior! (-> font flags) (font-flags middle))
+        )
+    (draw-string-adv *pc-encoded-temp-string* buf font)
+    )
+  (none)
+  )
+
+(defun bf-pwrap ((buf dma-buffer) (str string) (x float) (y float) (scale float) (width float) (max-chars int))
+  "STR from Y down in the START menu's yellow (`bf-ptext`, WIDTH wide), broken at spaces into lines
+   of at most MAX-CHARS bytes: the font does not wrap."
+  (let ((len (length str))
+        (start 0)
+        (line-y y)
+        )
+    (while (< start len)
+      (let ((end (min len (+ start max-chars))))
+        ;; cut inside a word: back up to the last space of the line
+        (when (< end len)
+          (let ((cut end))
+            (while (and (> cut start) (!= (-> str data cut) 32))
+              (+! cut -1)
+              )
+            (if (> cut start)
+                (set! end cut)
+                )
+            )
+          )
+        (dotimes (i (- end start))
+          (set! (-> *bf-line* data i) (-> str data (+ start i)))
+          )
+        (set! (-> *bf-line* data (- end start)) (the-as uint 0))
+        (bf-ptext buf *bf-line* x line-y scale (font-color font-color-32) #f width)
+        (set! start end)
+        (while (and (< start len) (= (-> str data start) 32))
+          (+! start 1)
+          )
+        (+! line-y (* 34.0 scale))
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-pbox ((buf dma-buffer) (x float) (y float) (w float) (h float) (color rgba))
+  "A box of COLOR, faded with the page (`bf-fade`)."
+  (draw-sprite2d-xy buf (the int x) (the int y) (the int w) (the int h) (bf-fade color) #x3fffff)
+  (none)
+  )
+
+(defun bf-pheader ((buf dma-buffer) (str string))
+  "The page's title where the START menu's pages have theirs (draw-page-header): over the screen,
+   centered, at FONT_SIZE_HEADER in the menu's yellow."
+  (bf-ptext buf str (bf-fx 0.5) (if (= (get-aspect-ratio) 'aspect16x9) 55.0 82.0) 0.6 (font-color font-color-32) #t (-> *bf-frame* w))
+  (none)
+  )
+
+(defun bf-pkeys ((buf dma-buffer) (str string))
+  "The page's keys at the bottom of the START menu's screen, centered."
+  (bf-ptext buf str (bf-fx 0.5) (bf-fy 0.94) 0.38 (font-color font-color-32) #t (-> *bf-frame* w))
+  (none)
+  )
+
+(defun bf-prow ((buf dma-buffer) (str string) (x float) (y float) (w float) (on? symbol) (ok? symbol))
+  "A choice of a page's list at (X, Y), W wide: under the START menu's highlight bar and in its
+   white when ON? (the cursor's), in its yellow otherwise, grey when not OK?."
+  (if on?
+      (bf-pbox buf (+ x -4.0) (+ y -2.0) (+ w 8.0) 17.0 (static-rgba 128 128 64 64))
+      )
+  (bf-ptext buf str x y 0.45
+            (cond
+              ((not ok?) (font-color menu-invalid))
+              (on? (font-color font-color-33))
+              (else (font-color font-color-32))
+              )
+            #f
+            w
+            )
+  (none)
+  )
+
+(defun bf-progress-on? ()
+  "#t while the START menu shows the battle's page ('battlefront) or turns to it."
+  (and *progress-process*
+       (or (= (-> *progress-process* 0 current) 'battlefront) (= (-> *progress-process* 0 next) 'battlefront))
+       )
+  )
+
+(defun bf-progress-spawn! ()
+  "Open the START menu on the battle's page, as activate-progress does (progress.gc), without its
+   progress-allowed? check: a dead player's settings may shut the START menu, and his respawn page
+   must open. The director asks for it only in the 'game master mode, out of a blackout
+   (`bf-can-open-menu?`)."
+  (when *target*
+    (when *progress-process*
+      (deactivate (-> *progress-process* 0))
+      (set-menu-mode *blit-displays-work* #t)
+      )
+    (set! *progress-process*
+          (process-spawn progress 'battlefront :name "progress" :to *dproc* :stack (&-> *progress-stack* DPROCESS_STACK_SIZE))
+          )
+    (set-master-mode 'progress)
+    )
+  (none)
+  )
+
 (defun bf-draw-box ((buf dma-buffer) (x int) (y int) (w int) (h int))
   "A dark panel with a light border into BUF, like the popup menus."
   (draw-sprite2d-xy buf x y w h (static-rgba 255 255 255 75) #x3fffff)
@@ -271,10 +497,9 @@
   "Number of choices of PAGE."
   (cond
     ((= page BF_PAGE_PAUSE) BF_PAUSE_COUNT)
-    ((= page BF_PAGE_TITLE) 3)
     ((= page BF_PAGE_CONFIG) BF_CONFIG_COUNT)
-    ;; the war zones, then Spargus, to come (grey, refused), then Back
-    ((= page BF_PAGE_ZONE) (+ BF_ZONE_COUNT 2))
+    ;; the war zones, then Spargus, to come (grey, refused); Triangle goes back
+    ((= page BF_PAGE_ZONE) (+ BF_ZONE_COUNT 1))
     ((= page BF_PAGE_TEAM) BF_TEAM_COUNT)
     ;; the Freedom League's third and fourth classes, the Spargus Citizen and Jak, are no longer
     ;; playable
@@ -287,18 +512,10 @@
 (defun bf-page-label ((page int) (team int) (i int))
   "Label of choice I of PAGE (TEAM picks the classes)."
   (cond
-    ((= page BF_PAGE_TITLE)
-     (case i
-       ((0) (bf-tr "Start a battle" "Démarrer une bataille"))
-       ((1) (bf-tr "Options" "Options"))
-       (else (bf-tr "Quit" "Quitter"))
-       )
-     )
     ((= page BF_PAGE_ZONE)
      (cond
        ((< i BF_ZONE_COUNT) (bf-zone-name i))
-       ((= i BF_ZONE_COUNT) (bf-tr "Spargus (coming soon)" "Spargus (à venir)"))
-       (else (bf-tr "Back" "Retour"))
+       (else (bf-tr "Spargus (coming soon)" "Spargus (à venir)"))
        )
      )
     ((= page BF_PAGE_TEAM) (bf-team-name i))
@@ -311,7 +528,6 @@
 (defun bf-page-desc ((page int) (team int) (i int))
   "Description of choice I of PAGE."
   (cond
-    ((and (= page BF_PAGE_ZONE) (> i BF_ZONE_COUNT)) "")
     ((= page BF_PAGE_ZONE) (if (< i BF_ZONE_COUNT)
                                (bf-tr (-> *bf-zones* i desc) (-> *bf-zones* i desc-fr))
                                (bf-tr "The Wastelanders' desert city: coming in a later version."
@@ -328,42 +544,38 @@
                                       )
                                )
      )
-    ;; the class page draws its help lines itself (`bf-draw-class-help`)
+    ;; the class page draws its help lines itself (`bf-draw-class-page`)
     (else "")
     )
   )
 
-(defun bf-draw-class-help ((buf dma-buffer) (class int) (y float))
-  "The class page's description of CLASS into BUF: its help lines (battlefront-h.gc `*bf-classes*`,
-   French when the game runs in French), one under the other from Y, each drawn as it is: its
-   button tags become the font's button icons (`bf-draw-text`, pc-encode-utf8-string), the first
-   line, the class's features, in the page's title color. A line under a D-pad icon (the guards'
-   weapons, one a line) gets more room: the icon stands taller than a line, and three of them 17
-   apart ran into one another."
-  (let ((lines (if (bf-fr?) (-> *bf-classes* class desc-fr) (-> *bf-classes* class desc))))
-    (dotimes (i (-> lines length))
-      (let ((line (-> lines i)))
-        (if (or (string-prefix= "~Y" line) (string-prefix= "<PAD_DPAD" line))
-            (+! y 6.0)
-            )
-        (bf-draw-text buf line 52.0 y 0.36
-                      (if (zero? i) (font-color menu-parent) (font-color default))
-                      #f
-                      )
-        (+! y 16.0)
-        )
-      )
-    )
-  (none)
-  )
-
 ;; The zone pages' map: the war zone's own minimap, the texture the game's minimap shows on its
 ;; battlefield (battlefront-minimaps.gc), framed on the battlefield in the right frame.
-(defconstant BF_ZMAP_X 373.0)       ;; center of the map, on the 512 x 416 screen (`*bf-zmap-x*`)
-(define *bf-zmap-x* (new 'static 'array float 1 373.0)) ;; the map's center now: 268 on the configuration page
-(defconstant BF_ZMAP_Y 206.0)
-(defconstant BF_ZMAP_HALF 120.0)    ;; at most half its height
-(defconstant BF_ZMAP_HALF_W 96.0)   ;; at most half its width, to stay in the frame
+(deftype bf-zmap (structure)
+  "Where the war zone's map goes (`bf-zone-view!`), in the 512 x 416 units: its center, at most half
+   its height and half its width; ROUND? fits its whole height in a disc of radius HALF (the class
+   page's radar, `bf-map-fan`), its marks kept in that disc (`bf-zone-xy`)."
+  ((x      float)
+   (y      float)
+   (half   float)
+   (half-w float)
+   (round? symbol)
+   )
+  )
+
+(define *bf-zmap* (new 'static 'bf-zmap :x 373.0 :y 206.0 :half 120.0 :half-w 96.0))
+(set! (-> *bf-zmap* round?) #f)
+
+(defun bf-zmap-set! ((x float) (y float) (half float) (half-w float) (round? symbol))
+  "Place the war zone's map (`*bf-zmap*`): the HUD's (L3) at (373, 206), 120 by 96; each page its
+   own (`bf-page-map`)."
+  (set! (-> *bf-zmap* x) x)
+  (set! (-> *bf-zmap* y) y)
+  (set! (-> *bf-zmap* half) half)
+  (set! (-> *bf-zmap* half-w) half-w)
+  (set! (-> *bf-zmap* round?) round?)
+  (none)
+  )
 
 (deftype bf-zone-view (structure)
   "Where `bf-zone-view!` puts a zone's map this frame: its box on the screen, and screen units per
@@ -382,20 +594,24 @@
 (defun bf-zone-view! ((zone int))
   "Fit ZONE's whole map (battlefront-minimaps.gc: the minimap of its district) in the right frame,
    centered, its shape kept, into `*bf-zone-view*`. A texel is square in the world: on the 512 x 416
-   screen stretched to the display, it is `0.923 relative-x-scale` times wider than tall in units."
+   screen stretched to the display, it is `bf-x-squeeze` times wider than tall in units."
   (let* ((view *bf-zone-view*)
          (w (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 2))))
          (h (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 1))))
-         (aspect (* 0.923 (-> *video-params* relative-x-scale)))
-         (ky (fmin (/ (* 2.0 BF_ZMAP_HALF) h) (/ (* 2.0 BF_ZMAP_HALF_W) (* w aspect))))
+         (aspect (bf-x-squeeze))
+         (ky (if (-> *bf-zmap* round?)
+                 (/ (* 2.0 (-> *bf-zmap* half)) h)
+                 (fmin (/ (* 2.0 (-> *bf-zmap* half)) h) (/ (* 2.0 (-> *bf-zmap* half-w)) (* w aspect)))
+                 )
+             )
          (kx (* ky aspect))
          )
     (set! (-> view kx) kx)
     (set! (-> view ky) ky)
-    (set! (-> view x0) (- (-> *bf-zmap-x* 0) (* 0.5 kx w)))
-    (set! (-> view x1) (+ (-> *bf-zmap-x* 0) (* 0.5 kx w)))
-    (set! (-> view y0) (- BF_ZMAP_Y (* 0.5 ky h)))
-    (set! (-> view y1) (+ BF_ZMAP_Y (* 0.5 ky h)))
+    (set! (-> view x0) (- (-> *bf-zmap* x) (* 0.5 kx w)))
+    (set! (-> view x1) (+ (-> *bf-zmap* x) (* 0.5 kx w)))
+    (set! (-> view y0) (- (-> *bf-zmap* y) (* 0.5 ky h)))
+    (set! (-> view y1) (+ (-> *bf-zmap* y) (* 0.5 ky h)))
     )
   #t
   )
@@ -421,6 +637,65 @@
     (set-vector! (-> p 6) (* (+ (the int (-> view x1)) 1792) 16) (* (+ (the int (-> view y1)) 1840) 16) #xfffff0 0)
     )
   (&+! (-> buf base) 112)
+  (none)
+  )
+
+(defun bf-map-fan ((buf dma-buffer))
+  "The uploaded map into BUF in the disc of `*bf-zmap*` (its center, radius HALF, round with the
+   screen's width): one textured triangle fan of 32 sides, its points kept inside the map's box
+   (`*bf-zone-view*`), so the disc shows the map and nothing past its edges. The GIF packet as
+   `bf-draw-tri`'s, packed: for each point its color, its texel (uv) and its place (xyz2), at the
+   depth `bf-map-sprite` gives the map."
+  (let* ((view *bf-zone-view*)
+         (cx (-> *bf-zmap* x))
+         (cy (-> *bf-zmap* y))
+         (r (-> *bf-zmap* half))
+         (sx (bf-x-squeeze))
+         (start (-> buf base))
+         (pkt (the-as dma-packet start))
+         (v (the-as (inline-array vector4w) (&+ start 32)))
+         )
+    ;; 103 quadwords after the DMA tag: the GIF tag and three for each of the 34 points
+    (set! (-> pkt dma) (new 'static 'dma-tag :id (dma-tag-id cnt) :qwc #x67))
+    (set! (-> pkt vif0) (new 'static 'vif-tag))
+    (set! (-> pkt vif1) (new 'static 'vif-tag :imm #x67 :cmd (vif-cmd direct) :msk #x1))
+    (let ((tag (the-as gs-gif-tag (&+ start 16))))
+      (set! (-> tag tag) (new 'static 'gif-tag64
+                           :nloop #x22
+                           :eop #x1
+                           :pre #x1
+                           :prim (new 'static 'gs-prim :prim (gs-prim-type tri-fan) :tme #x1 :abe #x1 :fst #x1)
+                           :nreg #x3
+                           )
+            )
+      (set! (-> tag regs) (new 'static 'gif-tag-regs
+                            :regs0 (gif-reg-id rgbaq)
+                            :regs1 (gif-reg-id uv)
+                            :regs2 (gif-reg-id xyz2)
+                            )
+            )
+      )
+    ;; the center, then 33 points round the disc, the last closing it
+    (dotimes (k 34)
+      (let* ((a (* 2048.0 (the float (+ k -1))))
+             (px (if (zero? k) cx (+ cx (* r sx (sin a)))))
+             (py (if (zero? k) cy (+ cy (* r (cos a)))))
+             (qx (fmax (-> view x0) (fmin (-> view x1) px)))
+             (qy (fmax (-> view y0) (fmin (-> view y1) py)))
+             (i (* 3 k))
+             )
+        (set-vector! (-> v i) 128 128 128 128)
+        (set-vector! (-> v (+ i 1))
+                     (the int (* 16.0 (/ (- qx (-> view x0)) (-> view kx))))
+                     (the int (* 16.0 (/ (- qy (-> view y0)) (-> view ky))))
+                     0
+                     0
+                     )
+        (set-vector! (-> v (+ i 2)) (the int (* 16.0 (+ 1792.0 qx))) (the int (* 16.0 (+ 1840.0 qy))) #xfffff0 0)
+        )
+      )
+    (set! (-> buf base) (&+ start 1664))
+    )
   (none)
   )
 
@@ -451,7 +726,10 @@
                            (tex1-1 (new 'static 'gs-tex1 :mmag #x1 :mmin #x1))
                            (texflush 0)
                            )
-    (bf-map-sprite buf zone)
+    (if (-> *bf-zmap* round?)
+        (bf-map-fan buf)
+        (bf-map-sprite buf zone)
+        )
     )
   (set-dirty-mask! (-> *level* level-default) 4 #x1a400 0)
   (none)
@@ -522,8 +800,8 @@
 
 (defun bf-draw-disc ((buf dma-buffer) (x float) (y float) (r float) (color rgba))
   "A filled disc of COLOR, radius R, centered on (X, Y): eight triangles (`bf-draw-tri`). The screen
-   units are 512 wide, so a disc keeps its roundness with the screen's width (relative-x-scale)."
-  (let ((rx (* r (-> *video-params* relative-x-scale))))
+   units are 512 wide, so a disc keeps its roundness with the screen's width (`bf-x-squeeze`)."
+  (let ((rx (* r (bf-x-squeeze))))
     (dotimes (k 8)
       (let ((a0 (* 8192.0 (the float k)))
             (a1 (* 8192.0 (the float (+ k 1))))
@@ -569,8 +847,8 @@
 
 (defun bf-draw-ring ((buf dma-buffer) (x float) (y float) (r0 float) (r1 float) (color rgba))
   "A ring of COLOR around (X, Y), from radius R0 to R1: sixteen quads (`bf-draw-quad`), round with
-   the screen's width (relative-x-scale) as `bf-draw-disc`."
-  (let ((sx (-> *video-params* relative-x-scale)))
+   the screen's width (`bf-x-squeeze`) as `bf-draw-disc`."
+  (let ((sx (bf-x-squeeze)))
     (dotimes (k 16)
       (let ((a0 (* 4096.0 (the float k)))
             (a1 (* 4096.0 (the float (+ k 1))))
@@ -590,7 +868,7 @@
 
 (defun bf-zone-xy ((zone int) (p vector) (out vector))
   "OUT x and y get world point P on ZONE's map in the right frame (`*bf-zone-view*`); returns #f when
-   it falls outside the frame."
+   it falls outside the frame, or outside the radar's disc (`*bf-zmap*` round?)."
   (let* ((view *bf-zone-view*)
          (texel (-> *bf-zone-minimap-corner* (+ (* 3 zone) 2)))
          (tx (/ (- (-> p x) (-> *bf-zone-minimap-corner* (* 3 zone))) texel))
@@ -598,7 +876,16 @@
          )
     (set! (-> out x) (+ (-> view x0) (* (-> view kx) tx)))
     (set! (-> out y) (+ (-> view y0) (* (-> view ky) ty)))
-    (and (< (-> view x0) (-> out x)) (< (-> out x) (-> view x1)) (< (-> view y0) (-> out y)) (< (-> out y) (-> view y1)))
+    (and (< (-> view x0) (-> out x)) (< (-> out x) (-> view x1)) (< (-> view y0) (-> out y)) (< (-> out y) (-> view y1))
+         ;; the radar: inside its disc too
+         (or (not (-> *bf-zmap* round?))
+             (let ((dx (/ (- (-> out x) (-> *bf-zmap* x)) (bf-x-squeeze)))
+                   (dy (- (-> out y) (-> *bf-zmap* y)))
+                   )
+               (< (+ (* dx dx) (* dy dy)) (* (-> *bf-zmap* half) (-> *bf-zmap* half)))
+               )
+             )
+         )
     )
   )
 
@@ -607,7 +894,7 @@
    view, a cone of CONE 4 radii long and 60 degrees wide, toward heading YAW (rotation units, 0 along
    world +z: down the map, whose y grows with world z)."
   (let ((at (new 'stack-no-clear 'vector))
-        (sx (-> *video-params* relative-x-scale))
+        (sx (bf-x-squeeze))
         )
     (when (bf-zone-xy zone p at)
       (let ((len (* 4.0 r))
@@ -712,145 +999,8 @@
   (none)
   )
 
-(define-extern bf-draw-title-page (function dma-buffer none :behavior bf-director))
-(define-extern bf-draw-class-page (function dma-buffer none :behavior bf-director))
-(define-extern bf-draw-arrow (function dma-buffer float float float symbol none))
-(define-extern bf-draw-config-page (function dma-buffer none :behavior bf-director))
 (define-extern bf-menu-back (function none :behavior bf-director))
 (define-extern bf-director-ensure! (function none))
-
-(defbehavior bf-draw-page bf-director ()
-  "Draw the open page of the battle menu. The zone, side and class pages share one layout: the
-   choices on the left, the zone's map or the class's preview on the right. The preview
-   (`bf-preview-update`) is drawn with the world, under any panel: its frame has no fill."
-  (let ((page (-> self page))
-        (team (-> self pick-team))
-        )
-    (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
-      (cond
-        ((= page BF_PAGE_TITLE)
-         (bf-draw-title-page buf)
-         )
-        ((= page BF_PAGE_CLASS)
-         (bf-draw-class-page buf)
-         )
-        ((= page BF_PAGE_CONFIG)
-         (bf-draw-config-page buf)
-         (bf-draw-zone-marks buf (-> self pick-zone))
-         )
-        ((= page BF_PAGE_RESULT)
-         (bf-draw-box buf 56 70 400 250)
-         (bf-draw-text buf "BATTLEFRONT" 0.0 84.0 0.7 (font-color menu-parent) #t)
-         (bf-draw-text buf (if (= (-> *bf* winner) (-> *bf* team)) (bf-tr "VICTORY" "VICTOIRE") (bf-tr "DEFEAT" "DÉFAITE"))
-                   0.0 130.0 1.2 (if (= (-> *bf* winner) (-> *bf* team)) (font-color green) (font-color red)) #t)
-         (clear *bf-text*)
-         (format *bf-text* (bf-tr "~S win" "Victoire : ~S") (bf-team-name (max 0 (-> *bf* winner))))
-         (bf-draw-text buf *bf-text* 0.0 190.0 0.6 (font-color default) #t)
-         (clear *bf-text*)
-         (format *bf-text* (bf-tr "Losses: ~S ~D, ~S ~D" "Pertes : ~S ~D, ~S ~D")
-                 (bf-team-name 0) (-> *bf* losses 0) (bf-team-name 1) (-> *bf* losses 1))
-         (bf-draw-text-wrapped buf *bf-text* 0.0 216.0 0.45 (font-color default) 40)
-         (bf-draw-text buf (bf-tr "<PAD_X> Leave the battle" "<PAD_X> Quitter la bataille") 0.0 290.0 0.5 (font-color default) #t)
-         )
-        (else
-          ;; left panel: the title, the choices, the description of the one under the cursor; right:
-          ;; a frame around the turning class (`bf-preview-update`) or the zone's map
-          (bf-draw-box buf 40 60 226 292)
-          (bf-draw-frame buf 274 60 198 292)
-          (bf-draw-text buf (if (= page BF_PAGE_CLASS) (bf-team-name team) "BATTLEFRONT") 54.0 68.0 0.6 (font-color menu-parent) #f)
-          (bf-draw-text buf
-                    (cond
-                      ((= page BF_PAGE_PAUSE) (bf-tr "Pause" "Pause"))
-                      ((= page BF_PAGE_ZONE) (bf-tr "Choose the war zone" "Choisissez la zone de guerre"))
-                      ((= page BF_PAGE_TEAM) (bf-tr "Choose your side" "Choisissez votre camp"))
-                      (else (bf-tr "Choose your class" "Choisissez votre classe"))
-                      )
-                    54.0 92.0 0.45 (font-color default) #f)
-          (dotimes (i (bf-page-count page))
-            (bf-draw-text buf
-                      (bf-page-label page team i)
-                      54.0
-                      ;; the class page's names closer, for its help lines (`bf-draw-class-help`)
-                      (+ 122.0 (* (if (= page BF_PAGE_CLASS) 20.0 22.0) (the float i)))
-                      ;; the class names are longer ("Red Krimzon Guard (Jetpack)" ran past the panel)
-                      (if (or (= page BF_PAGE_CLASS) (= page BF_PAGE_PAUSE)) 0.43 0.5)
-                      (cond
-                        ((and (= page BF_PAGE_ZONE) (>= i BF_ZONE_COUNT)) (font-color menu-invalid))
-                        ((and (= page BF_PAGE_PAUSE) (not (bf-pause-ok? i))) (font-color menu-invalid))
-                        ((= i (-> self cursor)) (font-color cyan))
-                        (else (font-color default))
-                        )
-                      #f)
-            )
-          (cond
-            ((= page BF_PAGE_CLASS)
-             ;; under the class list, which holds two or four names
-             (bf-draw-class-help buf (+ (* team 4) (-> self cursor)) (+ 128.0 (* 20.0 (the float (bf-page-count page)))))
-             )
-            ((= page BF_PAGE_PAUSE)
-             0
-             )
-            (else
-              (bf-draw-text-wrapped buf (bf-page-desc page team (-> self cursor)) 54.0 216.0 0.38 (font-color menu-parent) 27)
-              )
-            )
-          (bf-draw-text buf
-                    (cond
-                      ((= page BF_PAGE_ZONE) (bf-tr "<PAD_X> Select  <PAD_CIRCLE> Cancel" "<PAD_X> Choisir  <PAD_CIRCLE> Annuler"))
-                      ((= page BF_PAGE_TEAM) (bf-tr "<PAD_X> Select  <PAD_CIRCLE> Back" "<PAD_X> Choisir  <PAD_CIRCLE> Retour"))
-                      ((= page BF_PAGE_PAUSE) (bf-tr "<PAD_X> Select  <PAD_CIRCLE> Resume" "<PAD_X> Choisir  <PAD_CIRCLE> Reprendre"))
-                      ;; the deployment still loads the zone under the page (`bf-deploy-update`)
-                      ((= (-> *bf* phase) BF_PHASE_DEPLOY) (bf-tr "Loading the war zone..." "Chargement de la zone de guerre..."))
-                      ((-> self from-title?) (bf-tr "<PAD_X> Start the battle" "<PAD_X> Démarrer la bataille"))
-                      (else (bf-tr "<PAD_X> Deploy" "<PAD_X> Déployer"))
-                      )
-                    ;; on the class page, under the guards' seven help lines
-                    54.0 (if (= page BF_PAGE_CLASS) 340.0 330.0) 0.4 (font-color default) #f)
-          (cond
-            ((= page BF_PAGE_CLASS)
-             0
-             )
-            ((and (= page BF_PAGE_ZONE) (= (-> self cursor) BF_ZONE_COUNT))
-             (bf-draw-text buf (bf-tr "Coming soon" "À venir") 373.0 200.0 0.6 (font-color menu-invalid) #t)
-             )
-            ((and (= page BF_PAGE_ZONE) (> (-> self cursor) BF_ZONE_COUNT))
-             0
-             )
-            ((= page BF_PAGE_PAUSE)
-             ;; the city's map as it stands, the points and the units (`bf-draw-city-map`)
-             (bf-draw-city-map buf (-> *bf* zone) -1)
-             )
-            (else
-              (bf-draw-zone-marks buf (if (= page BF_PAGE_ZONE) (-> self cursor) (-> self pick-zone)))
-              )
-            )
-          )
-        )
-      )
-    )
-  (none)
-  )
-
-(defbehavior bf-preview-update bf-director ()
-  "Class page: the class under the cursor stands in the right frame and turns a full circle every 4
-   seconds (a `bf-icon` 3 m in front of the camera of the paused game). Any other page: none."
-  (let ((want (if (= (-> self page) BF_PAGE_CLASS) (+ (* (-> self pick-team) 4) (-> self pick-class)) -1))
-        (icon (handle->process (-> self preview)))
-        )
-    (when (and icon (!= want (-> (the-as bf-icon icon) class)))
-      (deactivate icon)
-      (set! icon #f)
-      )
-    (when (and (>= want 0) (not icon))
-      (set! icon (bf-icon-spawn want 90.0 0.0 self))
-      (set! (-> self preview) (process->handle icon))
-      )
-    (if icon
-        (bf-icon-place icon 268.0 204.0 150.0 (meters 3))
-        )
-    )
-  (none)
-  )
 
 ;; Indexed by BF_WEAPON_*: the gun (pickup-type) whose icon the stock gun HUD shows for a guard's
 ;; weapon: the rifle yellow 1, the tazer blue 2, the grenade launcher red 3.
@@ -1686,9 +1836,10 @@
    warnings of the fight, the countdown of a dead player, and the crosshair. The class's gun and ammo are in the stock gun HUD
    (hud-gun `update-values!` and `draw` above)."
   ;; the dead player picking his respawn point: the zone's map under the page (`bf-draw-respawn-pick`)
-  (if (or (>= (-> *bf* respawn-pick) 0) (-> *bf* overlay?))
-      (bf-draw-zone-minimap (-> *bf* zone))
-      )
+  (when (or (>= (-> *bf* respawn-pick) 0) (-> *bf* overlay?))
+    (bf-zmap-set! 373.0 206.0 120.0 96.0 #f)
+    (bf-draw-zone-minimap (-> *bf* zone))
+    )
   (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
     (bf-draw-reserves buf)
     (bf-draw-points-hud buf)
@@ -2654,12 +2805,19 @@
 
 (defun bf-black-set! ((on? symbol))
   "Black pages on (ON?) or off (`*bf-black*`). On: only the foreground renderers, which draw the
-   preview, and the models hidden. Off: the renderers and the models back."
+   preview, and the models hidden. Off: the renderers and the models back. The renderers kept are
+   the game's own: while the START menu's still screen is up, or its last frames (a page closing
+   into a deployment), the display holds the menu's (merc alone) and the still screen keeps the
+   game's (blit-displays.gc); kept from the display then, they left the battle with no scenery."
   (when (!= on? (-> *bf-black* on?))
     (set! (-> *bf-black* on?) on?)
     (cond
       (on?
-        (set! (-> *bf-black* vu1) (-> *display* vu1-enable-user-menu))
+        (set! (-> *bf-black* vu1) (if (get-screen-copied *blit-displays-work*)
+                                      (-> *blit-displays-work* vu1-enable-user-menu)
+                                      (-> *display* vu1-enable-user-menu)
+                                      )
+              )
         (set! (-> *display* vu1-enable-user-menu) (vu1-renderer-mask generic merc emerc))
         (set! (-> *bf-black* count) 0)
         (iterate-process-tree *active-pool* (the-as (function object object) bf-black-hide) *kernel-context*)
@@ -2680,65 +2838,128 @@
   (none)
   )
 
-(defbehavior bf-show-page bf-director ((page int))
-  "Show PAGE, black under it (`bf-black-set!`), the game left running. Like popup-menu, the flag
-   keeps the Mods menu from opening over the page; while the game runs, the director's settings
-   keep the pause and START menus closed."
-  (set! (-> self page) page)
-  (set! (-> self cursor) 0)
-  (bf-black-set! #t)
-  (true! *popup-menu-open*)
-  (when (not (-> self menu-mode?))
-    (set-setting! 'allow-pause #f 0.0 0)
-    (set-setting! 'allow-progress #f 0.0 0)
+(defbehavior bf-preview-update bf-director ()
+  "The class page in the START menu: the class picked turns a full circle every 4 seconds in the
+   page's middle column (a `bf-icon` 3 m in front of the paused game's camera, in the screen's hole:
+   `draw-bg-box-alpha-1`), with the hud draw status the menu's still screen draws alone
+   (drawable.gc). Any other page, or a deployment's loading on black: none."
+  (let ((want (if (and (= (-> self page) BF_PAGE_CLASS) (not (-> *bf-black* on?)))
+                  (+ (* (-> self pick-team) 4) (-> self pick-class))
+                  -1
+                  )
+              )
+        (icon (handle->process (-> self preview)))
+        )
+    (when (and icon (!= want (-> (the-as bf-icon icon) class)))
+      (deactivate icon)
+      (set! icon #f)
+      )
+    (when (and (>= want 0) (not icon))
+      (set! icon (bf-icon-spawn want 90.0 0.0 self))
+      (set! (-> self preview) (process->handle icon))
+      )
+    (when icon
+      (bf-icon-place icon
+                     (bf-fx (* 0.5 (+ BF_CLASS_HOLE_X0 BF_CLASS_HOLE_X1)))
+                     (bf-fy (* 0.5 (+ BF_CLASS_HOLE_Y0 BF_CLASS_HOLE_Y1)))
+                     (* 0.6 (-> *bf-frame* h))
+                     (meters 3)
+                     )
+      (if (get-menu-mode *blit-displays-work*)
+          (logior! (-> (the-as bf-icon icon) draw status) (draw-control-status hud))
+          (logclear! (-> (the-as bf-icon icon) draw status) (draw-control-status hud))
+          )
+      )
     )
   (none)
   )
 
-(defbehavior bf-pause-page bf-director ()
-  "Pause the game under the open page: the 'menu master mode, held by the director. With
-   `*popup-menu-open*` the pause buttons (toggle-pause) leave 'menu alone."
-  (when (not (-> self menu-mode?))
-    (set-master-mode 'menu)
-    (set! (-> self menu-mode?) #t)
+(defbehavior bf-progress-host! bf-director ()
+  "The open page in the START menu: the menu opened on it ('battlefront, `bf-progress-spawn!`), or
+   turned to it from the menu's page up (the title menu, `push-state`); kept when it shows it. The
+   menu pauses the game ('progress)."
+  (set! (-> self page-time) (-> *display* real-clock frame-counter))
+  (if *progress-process*
+      (format 0 "battlefront: page ~D to the START menu (~A, next ~A, depth ~D)~%" (-> self page)
+              (-> *progress-process* 0 current) (-> *progress-process* 0 next) (-> *progress-process* 0 state-pos))
+      (format 0 "battlefront: page ~D to a new START menu~%" (-> self page))
+      )
+  (cond
+    ((bf-progress-on?)
+     0
+     )
+    ((and *progress-process*
+          (!= (-> *progress-process* 0 current) 'go-away)
+          (!= (-> *progress-process* 0 next) 'go-away)
+          )
+     (push-state (-> *progress-process* 0))
+     (set-next-state (-> *progress-process* 0) 'battlefront 0)
+     )
+    (else
+      (bf-progress-spawn!)
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-back-to-title bf-director ()
+  "Triangle on the war zone page opened from the title: the page gone, the START menu back to the
+   title menu (`pop-state`)."
+  (set! (-> self page) BF_PAGE_NONE)
+  (set! (-> self from-title?) #f)
+  (false! *popup-menu-open*)
+  (if *progress-process*
+      (pop-state (-> *progress-process* 0))
+      )
+  (none)
+  )
+
+(defbehavior bf-show-page bf-director ((page int))
+  "Show PAGE in the START menu (`bf-progress-host!`), which pauses the game; a deployment's class
+   page waits on black for its war zone (`bf-deploy-update` hands it to the menu once the zone is
+   ready), the game running. Like popup-menu, the flag keeps the Mods menu from opening over it."
+  (set! (-> self page) page)
+  (set! (-> self cursor) 0)
+  (true! *popup-menu-open*)
+  (cond
+    ((and (= page BF_PAGE_CLASS) (= (-> *bf* phase) BF_PHASE_DEPLOY))
+     (if (bf-progress-on?)
+         (set-next-state (-> *progress-process* 0) 'go-away 0)
+         )
+     (bf-black-set! #t)
+     )
+    (else
+      (bf-progress-host!)
+      )
     )
   (none)
   )
 
 (defbehavior bf-open-page bf-director ((page int))
-  "Show PAGE, black under it, and pause the game."
+  "Show PAGE (`bf-show-page`)."
   (bf-show-page page)
-  (bf-pause-page)
   (none)
   )
 
 (defbehavior bf-close-page bf-director ()
-  "Hide the menu, show the world again and resume the game."
+  "Hide the page: the START menu closes when it shows it ('go-away), the game resumes."
   (set! (-> self page) BF_PAGE_NONE)
   (bf-preview-update)
   (bf-black-set! #f)
   (false! *popup-menu-open*)
-  (remove-setting! 'allow-pause)
-  (remove-setting! 'allow-progress)
-  (when (-> self menu-mode?)
-    (set-master-mode 'game)
-    (set! (-> self menu-mode?) #f)
-    )
+  (if (bf-progress-on?)
+      (set-next-state (-> *progress-process* 0) 'go-away 0)
+      )
   (none)
   )
 
-(defbehavior bf-open-class-page bf-director ((refill? symbol) (pause? symbol))
-  "The class page of the player's side, the cursor on his class; REFILL? when it deploys him.
-   PAUSE? pauses the game under it; a deployment's page leaves it running while the zone loads,
-   and `bf-deploy-update` pauses it once Jak stands there."
+(defbehavior bf-open-class-page bf-director ((refill? symbol))
+  "The class page of the player's side, the cursor on his class; REFILL? when it deploys him."
   (set! (-> self refill?) refill?)
   (set! (-> self pick-team) (-> *bf* team))
   ;; the preview shows the guards with their rifle, the weapon a class starts with
   (set! (-> *bf* weapon) BF_WEAPON_RIFLE)
   (bf-show-page BF_PAGE_CLASS)
-  (if pause?
-      (bf-pause-page)
-      )
   (set! (-> self cursor) (max 0 (min (+ (bf-class-count) -1) (- (-> *bf* class) (* 4 (-> *bf* team))))))
   (set! (-> self pick-class) (-> self cursor))
   (set! (-> self pick-point) (-> *bf* team))
@@ -2751,28 +2972,6 @@
         (i (-> self cursor))
         )
     (cond
-      ((= page BF_PAGE_TITLE)
-       (case i
-         ((0)
-          (set! (-> self from-title?) #t)
-          (bf-open-page BF_PAGE_ZONE)
-          )
-         ((1)
-          ;; the game's own options, from the title (its Circle closes it: the title page again)
-          (bf-close-page)
-          (set! *bf-stock-start?* #t)
-          (activate-progress *dproc* 'title-options)
-          )
-         (else
-           (kernel-shutdown (the int (runtime-exit-status exit)))
-           )
-         )
-       )
-      ((and (= page BF_PAGE_ZONE) (= i (+ BF_ZONE_COUNT 1)))
-       ;; Back
-       (bf-menu-back)
-       (return #f)
-       )
       ((and (= page BF_PAGE_ZONE) (>= i BF_ZONE_COUNT))
        ;; Spargus, to come: refused
        (sound-play "menu-back")
@@ -2796,7 +2995,6 @@
        ;; Jak stands there (`*bf-request*` BF_REQ_START, `bf-director-update`)
        (set! (-> self pick-team) (-> *bf-config* team-a))
        (bf-close-page)
-       (set! (-> self title?) #f)
        (set! *bf-request* BF_REQ_START)
        (set! (-> *game-info* mode) 'play)
        (initialize! *game-info* 'game (the-as game-save #f)
@@ -2816,7 +3014,7 @@
        ;; (`bf-deploy-update`)
        (bf-start-battle! (-> self pick-zone) i (* i 4))
        (if (bf-active?)
-           (bf-open-class-page #t #f)
+           (bf-open-class-page #t)
            )
        )
       ((and (= page BF_PAGE_CLASS) (= (-> *bf* phase) BF_PHASE_DEPLOY))
@@ -2869,15 +3067,11 @@
   )
 
 (defbehavior bf-menu-back bf-director ()
-  "Circle on the open page. The class page needs a class: the battle has started."
+  "Triangle or Circle on the open page. The class page needs a class: the battle has started."
   (let ((page (-> self page)))
     (cond
-      ((= page BF_PAGE_TITLE)
-       ;; the title page stays: it is the game's title menu
-       (return #f)
-       )
       ((and (= page BF_PAGE_ZONE) (-> self from-title?))
-       (bf-open-page BF_PAGE_TITLE)
+       (bf-back-to-title)
        )
       ((= page BF_PAGE_ZONE)
        (bf-close-page)
@@ -2961,67 +3155,6 @@
     )
   )
 
-(defbehavior bf-draw-config-page bf-director ((buf dma-buffer))
-  "The configuration page (round 29, in the style of the battle's other pages): on the left its
-   settings, each with its value between arrows; in the middle the war zone's map with its points;
-   on the right the two sides, the player's on top, and Next. The cursor's row in cyan."
-  (let ((cur (-> self cursor)))
-    (bf-draw-box buf 14 60 158 292)
-    (bf-draw-frame buf 178 60 168 292)
-    (bf-draw-box buf 352 60 152 292)
-    (bf-draw-text buf (bf-tr "Battle setup" "Configuration de la bataille") 0.0 36.0 0.6 (font-color menu-parent) #t)
-    (dotimes (i 4)
-      (let ((y (+ 80.0 (* 56.0 (the float i)))))
-        (bf-draw-text buf
-                      (case i
-                        ((0) (bf-tr "Time limit" "Limite de temps"))
-                        ((1) (bf-tr "Units per side" "Unités par équipe"))
-                        ((2) (bf-tr "Victory" "Condition de victoire"))
-                        (else (bf-tr "Special characters" "Personnages spéciaux"))
-                        )
-                      24.0 y 0.33 (font-color menu-parent) #f)
-        (bf-config-value i)
-        (bf-draw-arrow buf 24.0 (+ y 27.0) -1.0 (= i cur))
-        (bf-draw-text buf *bf-text* 93.0 (+ y 21.0) 0.3 (cond
-                                                           ((= i 3) (font-color menu-invalid))
-                                                           ((= i cur) (font-color cyan))
-                                                           (else (font-color default))
-                                                           ) #t)
-        (bf-draw-arrow buf 162.0 (+ y 27.0) 1.0 (= i cur))
-        )
-      )
-    (bf-draw-text buf (bf-tr "Yes: coming soon" "Oui : à venir") 93.0 (+ 80.0 (* 56.0 3.0) 36.0) 0.3 (font-color menu-invalid) #t)
-    ;; the sides
-    (dotimes (k 2)
-      (let ((y (+ 92.0 (* 76.0 (the float k))))
-            (row (+ 4 k))
-            )
-        (bf-draw-frame buf 358 (the int y) 140 56)
-        (bf-draw-text buf (if (zero? k) (bf-tr "Your side" "Votre camp") (bf-tr "The enemy" "L'adversaire")) 428.0 (+ y 6.0) 0.36 (font-color menu-parent) #t)
-        (bf-config-value row)
-        (bf-draw-arrow buf 362.0 (+ y 36.0) -1.0 (= row cur))
-        (bf-draw-text buf *bf-text* 428.0 (+ y 30.0) 0.3 (if (= row cur) (font-color cyan) (bf-team-color (if (zero? k) (-> *bf-config* team-a) (-> *bf-config* team-b)))) #t)
-        (bf-draw-arrow buf 494.0 (+ y 36.0) 1.0 (= row cur))
-        )
-      )
-    (if (= cur (+ BF_CONFIG_COUNT -1))
-        (bf-draw-frame buf 376 300 104 30)
-        )
-    (bf-draw-text buf (bf-tr "Next" "Suivant") 428.0 306.0 0.5 (if (= cur (+ BF_CONFIG_COUNT -1)) (font-color cyan) (font-color default)) #t)
-    (bf-draw-text buf (bf-tr "<PAD_X> Next  <PAD_CIRCLE> Back" "<PAD_X> Suivant  <PAD_CIRCLE> Retour") 0.0 366.0 0.38 (font-color default) #t)
-    )
-  (none)
-  )
-
-(defun bf-draw-arrow ((buf dma-buffer) (x float) (y float) (dir float) (on? symbol))
-  "A small arrow pointing left (DIR -1) or right (1), its tip at (X, Y), cyan when ON? (the cursor's
-   row), else white: the font draws < and > as its button icons."
-  (bf-draw-tri buf x y (- x (* dir 6.0)) (- y 5.0) (- x (* dir 6.0)) (+ y 5.0)
-               (if on? (static-rgba 80 220 255 128) (static-rgba 220 220 220 110))
-               )
-  (none)
-  )
-
 (defun bf-draw-panel-border ((buf dma-buffer) (x float) (y float) (w float) (h float) (color rgba))
   "The border of a panel, 1.5 screen units thick, in COLOR (`bf-draw-line`)."
   (bf-draw-line buf x y (+ x w) y 1.5 color)
@@ -3031,199 +3164,432 @@
   (none)
   )
 
-(defun bf-draw-radar ((buf dma-buffer) (cx float) (cy float) (r float) (pick int))
-  "A round radar of the whole battlefield, centered on (CX, CY), radius R (round 29, the class
-   page's right column): its points (a ring and a lettered dot in their holder's color, the bases a
-   larger dot), the units awake as small dots of their side's color (`*bf-unit-dots*`), live, and
-   Jak in white; point PICK (the respawn point picked, -1 for none) ringed large in yellow. North is
-   up, as on the maps (world +z down). The scale fits every point with a margin."
-  (let ((x0 (meters 100000))
-        (x1 (meters -100000))
-        (z0 (meters 100000))
-        (z1 (meters -100000))
-        (sx (-> *video-params* relative-x-scale))
-        (pos (new 'stack-no-clear 'vector))
+
+(defun bf-draw-arrow ((buf dma-buffer) (x float) (y float) (dir float) (on? symbol))
+  "A small arrow pointing left (DIR -1) or right (1), its tip at (X, Y), in the START menu's white
+   when ON? (the cursor's row), else its yellow, faded with the page: the font draws < and > as its
+   button icons."
+  (bf-draw-tri buf x y (- x (* dir 6.0)) (- y 5.0) (- x (* dir 6.0)) (+ y 5.0)
+               (bf-fade (if on? (static-rgba 128 128 128 128) (static-rgba 128 120 50 128)))
+               )
+  (none)
+  )
+
+(defun bf-draw-radar-marks ((buf dma-buffer) (zone int) (pick int))
+  "Over the radar's map (`bf-draw-zone-minimap` round, `*bf-zmap*`): its rim; the units awake as
+   small dots of their side's color, live (`*bf-unit-dots*`); each control point a ring round a dot
+   with its letter in its holder's color (white while neutral), each base a dot of its side's color,
+   the point PICK ringed in blinking yellow (-1 none); Jak in white."
+  (bf-zone-view! zone)
+  (let ((at (new 'stack-no-clear 'vector))
+        (blink? (logtest? (/ (-> *display* real-clock frame-counter) (seconds 0.25)) 1))
         )
-    (dotimes (i (-> *bf* point-count))
-      (let ((p (-> *bf* points i pos)))
-        (set! x0 (fmin x0 (-> p x)))
-        (set! x1 (fmax x1 (-> p x)))
-        (set! z0 (fmin z0 (-> p z)))
-        (set! z1 (fmax z1 (-> p z)))
-        )
-      )
-    (let* ((wx (* 0.5 (+ x0 x1)))
-           (wz (* 0.5 (+ z0 z1)))
-           (k (/ (+ (fmax (- x1 x0) (- z1 z0)) (meters 160)) (* 2.0 r)))
-           )
-      (bf-draw-disc buf cx cy r (static-rgba 12 20 34 110))
-      (bf-draw-ring buf cx cy (+ r -1.5) r (static-rgba 170 192 214 120))
-      (bf-draw-ring buf cx cy (+ (* 0.5 r) -0.5) (* 0.5 r) (static-rgba 120 140 160 60))
-      ;; the units
-      (dotimes (d (-> *bf-unit-dots* count))
-        (let ((p (-> *bf-unit-dots* pos d)))
-          (bf-draw-disc buf (+ cx (* sx (/ (- (-> p x) wx) k))) (+ cy (/ (- (-> p z) wz) k)) 1.4
-                        (if (= (-> *bf-unit-dots* team d) BF_TEAM_FF) (static-rgba 60 150 255 128) (static-rgba 255 60 60 128))
+    (bf-draw-ring buf (-> *bf-zmap* x) (-> *bf-zmap* y) (+ (-> *bf-zmap* half) -1.5) (-> *bf-zmap* half)
+                  (bf-fade (static-rgba 128 128 64 110))
+                  )
+    (dotimes (d (-> *bf-unit-dots* count))
+      (if (bf-zone-xy zone (-> *bf-unit-dots* pos d) at)
+          (bf-draw-disc buf (-> at x) (-> at y) 1.4
+                        (bf-fade (if (= (-> *bf-unit-dots* team d) BF_TEAM_FF) (static-rgba 60 150 255 128) (static-rgba 255 60 60 128)))
                         )
           )
-        )
-      ;; the points
-      (dotimes (i (-> *bf* point-count))
-        (let* ((pt (-> *bf* points i))
-               (x (+ cx (* sx (/ (- (-> pt pos x) wx) k))))
-               (y (+ cy (/ (- (-> pt pos z) wz) k)))
-               (c (case (-> pt owner)
-                    ((BF_TEAM_FF) (static-rgba 40 120 255 128))
-                    ((BF_TEAM_KG) (static-rgba 235 30 30 128))
-                    (else (static-rgba 175 175 175 128))
-                    )
-                  )
-               )
+      )
+    (dotimes (i (-> *bf* point-count))
+      (let* ((pt (-> *bf* points i))
+             (c (bf-fade (case (-> pt owner)
+                           ((BF_TEAM_FF) (static-rgba 40 120 255 128))
+                           ((BF_TEAM_KG) (static-rgba 235 30 30 128))
+                           (else (static-rgba 200 200 200 128))
+                           )
+                         )
+                )
+             )
+        (when (bf-zone-xy zone (-> pt pos) at)
           (cond
             ((-> pt base?)
-             (bf-draw-disc buf x y 5.0 c)
+             (bf-draw-disc buf (-> at x) (-> at y) 4.0 c)
              )
             (else
-              (bf-draw-ring buf x y 6.0 7.0 c)
-              (bf-draw-disc buf x y 4.5 c)
-              (bf-draw-text buf (bf-point-letter i) (+ x 1.0) (- y 3.5) 0.3 (font-color white) #t)
+              (bf-draw-ring buf (-> at x) (-> at y) 5.0 6.0 c)
+              (bf-draw-disc buf (-> at x) (-> at y) 3.8 c)
+              (bf-draw-text buf (bf-point-letter i) (+ (-> at x) 0.5) (- (-> at y) 3.0) 0.26 (font-color white) #t)
               )
             )
           (if (= i pick)
-              (bf-draw-ring buf x y 9.0 11.0 (if (logtest? (/ (-> *display* real-clock frame-counter) (seconds 0.25)) 1)
-                                                 (static-rgba 255 230 60 128)
-                                                 (static-rgba 255 230 60 60)
-                                                 )
+              (bf-draw-ring buf (-> at x) (-> at y) 8.0 10.0
+                            (bf-fade (if blink? (static-rgba 255 230 60 128) (static-rgba 255 230 60 60)))
                             )
               )
           )
         )
-      ;; Jak
-      (when (and *target* (not (focus-test? *target* dead)))
-        (vector-copy! pos (-> *target* control trans))
-        (bf-draw-disc buf (+ cx (* sx (/ (- (-> pos x) wx) k))) (+ cy (/ (- (-> pos z) wz) k)) 2.2 (static-rgba 255 255 255 128))
+      )
+    (if (and *target* (not (focus-test? *target* dead)) (bf-zone-xy zone (-> *target* control trans) at))
+        (bf-draw-disc buf (-> at x) (-> at y) 2.2 (bf-fade (static-rgba 255 255 255 128)))
+        )
+    )
+  (none)
+  )
+
+(defbehavior bf-draw-list-page bf-director ((buf dma-buffer))
+  "The war zone and side pages: the choices on the left and, under them, what the one under the
+   cursor is; on the right the war zone's map with its bases and points (`bf-draw-zone-minimap`
+   under the page), or Coming soon for Spargus."
+  (let* ((page (-> self page))
+         (cur (-> self cursor))
+         (x (bf-fx 0.03))
+         (w (* 0.45 (-> *bf-frame* w)))
+         )
+    (bf-pheader buf (if (= page BF_PAGE_ZONE) (bf-tr "War zone" "Zone de guerre") (bf-tr "Your side" "Votre camp")))
+    (dotimes (i (bf-page-count page))
+      (bf-prow buf (bf-page-label page (-> self pick-team) i) x (+ (bf-fy 0.03) (* 21.0 (the float i))) w (= i cur)
+               (not (and (= page BF_PAGE_ZONE) (>= i BF_ZONE_COUNT)))
+               )
+      )
+    (bf-pwrap buf (bf-page-desc page (-> self pick-team) cur) x (bf-fy 0.4) 0.36 w (the int (/ w 6.0)))
+    (if (and (= page BF_PAGE_ZONE) (>= cur BF_ZONE_COUNT))
+        (bf-ptext buf (bf-tr "Coming soon" "À venir") (bf-fx 0.76) (bf-fy 0.42) 0.6 (font-color menu-invalid) #t (* 0.45 (-> *bf-frame* w)))
+        (bf-draw-zone-marks buf (if (= page BF_PAGE_ZONE) cur (-> self pick-zone)))
+        )
+    (bf-pkeys buf (bf-tr "<PAD_X> Select    <PAD_TRIANGLE> Back" "<PAD_X> Choisir    <PAD_TRIANGLE> Retour"))
+    )
+  (none)
+  )
+
+(defbehavior bf-draw-config-page bf-director ((buf dma-buffer))
+  "The battle setup (round 29), in three columns: its settings on the left, each its value between
+   arrows; the war zone's map with its points in the middle; the two sides on the right, the
+   player's on top, and Next. The cursor's row in the START menu's white under its highlight bar."
+  (let* ((cur (-> self cursor))
+         (lx (bf-fx 0.0))
+         (lw (* 0.37 (-> *bf-frame* w)))
+         (rx (bf-fx 0.66))
+         (rw (* 0.34 (-> *bf-frame* w)))
+         (rh (fmin 50.0 (* 0.2 (-> *bf-frame* h))))
+         )
+    (bf-pheader buf (bf-tr "Battle setup" "Configuration de la bataille"))
+    (dotimes (i 4)
+      (let ((y (+ (bf-fy 0.02) (* rh (the float i)))))
+        (if (= i cur)
+            (bf-pbox buf lx (+ y -2.0) lw (+ rh -6.0) (static-rgba 128 128 64 64))
+            )
+        (bf-ptext buf
+                  (case i
+                    ((0) (bf-tr "Time limit" "Limite de temps"))
+                    ((1) (bf-tr "Units per side" "Unités par équipe"))
+                    ((2) (bf-tr "Victory" "Condition de victoire"))
+                    (else (bf-tr "Special characters" "Personnages spéciaux"))
+                    )
+                  (+ lx 4.0) y 0.36 (font-color font-color-32) #f (+ lw -8.0)
+                  )
+        (bf-config-value i)
+        (bf-draw-arrow buf (+ lx 4.0) (+ y 23.0) -1.0 (= i cur))
+        (bf-ptext buf *bf-text* (+ lx (* 0.5 lw)) (+ y 17.0) 0.4
+                  (cond
+                    ((= i 3) (font-color menu-invalid))
+                    ((= i cur) (font-color font-color-33))
+                    (else (font-color font-color-32))
+                    )
+                  #t (+ lw -26.0)
+                  )
+        (bf-draw-arrow buf (+ lx lw -4.0) (+ y 23.0) 1.0 (= i cur))
         )
       )
+    (bf-ptext buf (bf-tr "Yes: coming soon" "Oui : à venir") (+ lx (* 0.5 lw)) (+ (bf-fy 0.02) (* 3.0 rh) 31.0) 0.3
+              (font-color menu-invalid) #t lw
+              )
+    ;; the sides
+    (dotimes (k 2)
+      (let ((y (+ (bf-fy 0.04) (* 54.0 (the float k))))
+            (row (+ 4 k))
+            )
+        (if (= row cur)
+            (bf-pbox buf rx (+ y -2.0) rw 42.0 (static-rgba 128 128 64 64))
+            )
+        (bf-ptext buf (if (zero? k) (bf-tr "Your side" "Votre camp") (bf-tr "The enemy" "L'adversaire"))
+                  (+ rx (* 0.5 rw)) y 0.36 (font-color font-color-32) #t rw
+                  )
+        (bf-config-value row)
+        (bf-draw-arrow buf (+ rx 4.0) (+ y 23.0) -1.0 (= row cur))
+        (bf-ptext buf *bf-text* (+ rx (* 0.5 rw)) (+ y 17.0) 0.4
+                  (if (= row cur)
+                      (font-color font-color-33)
+                      (bf-team-color (if (zero? k) (-> *bf-config* team-a) (-> *bf-config* team-b)))
+                      )
+                  #t (+ rw -26.0)
+                  )
+        (bf-draw-arrow buf (+ rx rw -4.0) (+ y 23.0) 1.0 (= row cur))
+        )
+      )
+    (let ((y (bf-fy 0.78)))
+      (if (= cur (+ BF_CONFIG_COUNT -1))
+          (bf-pbox buf (+ rx 4.0) (+ y -3.0) (+ rw -10.0) 22.0 (static-rgba 128 128 64 64))
+          )
+      (bf-draw-panel-border buf (+ rx 4.0) (+ y -3.0) (+ rw -10.0) 22.0 (bf-fade (static-rgba 128 128 64 110)))
+      (bf-ptext buf (bf-tr "Next" "Suivant") (+ rx (* 0.5 rw)) y 0.5
+                (if (= cur (+ BF_CONFIG_COUNT -1)) (font-color font-color-33) (font-color font-color-32))
+                #t rw
+                )
+      )
+    (bf-draw-zone-marks buf (-> self pick-zone))
+    (bf-pkeys buf (bf-tr "<PAD_X> Next    <PAD_DPAD_ANY> Change    <PAD_TRIANGLE> Back"
+                         "<PAD_X> Suivant    <PAD_DPAD_ANY> Modifier    <PAD_TRIANGLE> Retour"
+                         )
+              )
     )
   (none)
   )
 
 (defbehavior bf-draw-class-page bf-director ((buf dma-buffer))
-  "The class page as the author drew it (round 29), the battle's deployment, a death's respawn, a
-   redeploy and Change class: on the left a panel for each class of the side, its name and its
-   features, the one picked ringed, then, after a death, the respawn point (Left and Right: the
-   side's base or a control point it holds); in the middle the reserves, the class's model turning
-   (`bf-preview-update`) and the button (Spawn, Start the battle from the title, Deploy); on the
-   right the objective and the battlefield's radar, live, the respawn point ringed
-   (`bf-draw-radar`)."
+  "The class page (round 29: a deployment, a death's respawn, a redeploy, Change class), in three
+   columns: on the left the side's classes, the cursor's under the highlight bar, then after a death
+   or for a redeploy the respawn point (Left and Right: the side's base or a control point it holds),
+   then what the class picked does with its buttons (battlefront-h.gc `*bf-classes*`); in the middle
+   the reserves, the class turning (`bf-preview-update`, in the screen's hole) and the button (Spawn,
+   Start the battle from the title, Deploy); on the right the objective and the battlefield's radar
+   on the war zone's own map, live (`bf-draw-radar-marks`)."
   (let* ((team (-> self pick-team))
          (n (bf-class-count))
          (cur (-> self cursor))
          (respawn? (-> self respawn?))
          (button (if respawn? (+ n 1) n))
-         (cyan (static-rgba 80 220 255 128))
+         (class (+ (* team 4) (-> self pick-class)))
+         (lx (bf-fx 0.0))
+         (lw (* 0.38 (-> *bf-frame* w)))
+         (mx (bf-fx BF_CLASS_HOLE_X0))
+         (mw (* (- BF_CLASS_HOLE_X1 BF_CLASS_HOLE_X0) (-> *bf-frame* w)))
+         (cxm (+ mx (* 0.5 mw)))
+         (rx (bf-fx 0.68))
+         (rw (* 0.32 (-> *bf-frame* w)))
+         (y (bf-fy 0.01))
+         (rim (bf-fade (static-rgba 128 128 64 110)))
          )
-    ;; left: the classes, then the respawn point
-    (bf-draw-box buf 8 34 184 346)
-    (bf-draw-text buf (bf-team-name team) 16.0 40.0 0.5 (font-color menu-parent) #f)
-    (bf-draw-text buf (bf-tr "Choose your class" "Choisissez votre classe") 16.0 60.0 0.36 (font-color default) #f)
-    (dotimes (i n)
-      (let ((y (+ 80.0 (* 56.0 (the float i))))
-            (class (+ (* team 4) i))
+    (bf-pheader buf (if respawn? (bf-tr "Respawn" "Réapparition") (bf-team-name team)))
+    ;; left: the classes, the respawn point, the help of the class picked
+    (let ((scale 0.36))
+      (dotimes (i n)
+        (set! scale (fmin scale (bf-fit-scale (bf-class-name (+ (* team 4) i)) 0.36 (+ lw -12.0))))
+        )
+      (dotimes (i n)
+        (if (= i cur)
+            (bf-pbox buf (+ lx 2.0) (+ y -1.0) (+ lw -4.0) 14.0 (static-rgba 128 128 64 64))
             )
-        (bf-draw-frame buf 12 (the int y) 176 52)
-        (if (= i (-> self pick-class))
-            (bf-draw-panel-border buf 12.0 y 176.0 52.0 cyan)
-            )
-        ;; a long English name ("Red Krimzon Guard (Jetpack)") smaller, to stay in its panel
-        (bf-draw-text buf (bf-class-name class) 18.0 (+ y 4.0) (if (< 22 (length (bf-class-name class))) 0.28 0.34)
-                      (if (= i cur) (font-color cyan) (font-color default)) #f)
-        (bf-draw-text-wrapped buf (-> (if (bf-fr?) (-> *bf-classes* class desc-fr) (-> *bf-classes* class desc)) 0) 18.0 (+ y 20.0) 0.28
-                              (font-color menu-parent) 30)
+        (bf-ptext buf (bf-class-name (+ (* team 4) i)) (+ lx 6.0) y scale
+                  (if (= i cur) (font-color font-color-33) (font-color font-color-32))
+                  #f (+ lw -12.0)
+                  )
+        (+! y 15.0)
         )
       )
     (when respawn?
-      (let ((y (+ 86.0 (* 56.0 (the float n)))))
-        (bf-draw-frame buf 12 (the int y) 176 46)
-        (if (= cur n)
-            (bf-draw-panel-border buf 12.0 y 176.0 46.0 cyan)
-            )
-        (bf-draw-text buf (bf-tr "Respawn point" "Point de réapparition") 18.0 (+ y 5.0) 0.32 (font-color menu-parent) #f)
-        (clear *bf-text*)
-        (format *bf-text* "~S" (if (< (-> self pick-point) 2) (bf-tr "Base" "Base") (bf-point-name (-> self pick-point))))
-        (bf-draw-arrow buf 16.0 (+ y 31.0) -1.0 (= cur n))
-        (bf-draw-text buf *bf-text* 100.0 (+ y 25.0) 0.3 (bf-team-color team) #t)
-        (bf-draw-arrow buf 184.0 (+ y 31.0) 1.0 (= cur n))
+      (+! y 3.0)
+      (if (= cur n)
+          (bf-pbox buf (+ lx 2.0) (+ y -1.0) (+ lw -4.0) 28.0 (static-rgba 128 128 64 64))
+          )
+      (bf-ptext buf (bf-tr "Respawn point" "Point de réapparition") (+ lx 6.0) y 0.3 (font-color font-color-32) #f (+ lw -12.0))
+      (clear *bf-text*)
+      (format *bf-text* "~S" (if (< (-> self pick-point) 2) (bf-tr "Base" "Base") (bf-point-name (-> self pick-point))))
+      (bf-draw-arrow buf (+ lx 8.0) (+ y 18.0) -1.0 (= cur n))
+      (bf-ptext buf *bf-text* (+ lx (* 0.5 lw)) (+ y 12.0) 0.36
+                (if (= cur n) (font-color font-color-33) (bf-team-color team))
+                #t (+ lw -26.0)
+                )
+      (bf-draw-arrow buf (+ lx lw -8.0) (+ y 18.0) 1.0 (= cur n))
+      (+! y 30.0)
+      )
+    (+! y 4.0)
+    (let ((lines (if (bf-fr?) (-> *bf-classes* class desc-fr) (-> *bf-classes* class desc))))
+      (dotimes (i (-> lines length))
+        (let* ((line (-> lines i))
+               ;; a D-pad icon stands taller than a line
+               (tall? (or (string-prefix= "~Y" line) (string-prefix= "<PAD_DPAD" line)))
+               )
+          (if tall?
+              (+! y 2.0)
+              )
+          (bf-ptext buf line (+ lx 6.0) y 0.27 (font-color font-color-32) #f (+ lw -10.0))
+          (+! y (if tall? 13.0 11.0))
+          )
         )
       )
-    ;; middle: the reserves, the model (drawn with the world), the button
+    ;; middle: the reserves, the screen's hole where the class turns, the button
     (let* ((full (the float (max 1 (-> *bf* reserve-max))))
-           (ff (* 66.0 (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_FF)) full))))
-           (kg (* 66.0 (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_KG)) full))))
+           (half (* 0.5 mw))
+           (by (bf-fy 0.01))
+           (ff (* (+ half -4.0) (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_FF)) full))))
+           (kg (* (+ half -4.0) (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_KG)) full))))
            )
-      (bf-draw-quad buf 198.0 36.0 338.0 36.0 338.0 62.0 198.0 62.0 (static-rgba 46 64 96 80))
-      (bf-draw-panel-border buf 198.0 36.0 140.0 26.0 (static-rgba 170 192 214 110))
+      (bf-pbox buf mx by mw 26.0 (static-rgba 46 64 96 80))
+      (bf-draw-panel-border buf mx by mw 26.0 rim)
       (if (< 0.5 ff)
-          (bf-draw-quad buf (- 266.0 ff) 40.0 266.0 40.0 266.0 46.0 (- 266.0 ff) 46.0 (static-rgba 40 140 255 128))
+          (bf-pbox buf (- cxm 1.0 ff) (+ by 4.0) ff 6.0 (static-rgba 40 140 255 128))
           )
       (if (< 0.5 kg)
-          (bf-draw-quad buf 270.0 40.0 (+ 270.0 kg) 40.0 (+ 270.0 kg) 46.0 270.0 46.0 (static-rgba 245 45 45 128))
+          (bf-pbox buf (+ cxm 1.0) (+ by 4.0) kg 6.0 (static-rgba 245 45 45 128))
           )
       (clear *bf-text*)
       (format *bf-text* "~D" (-> *bf* reserve BF_TEAM_FF))
-      (bf-draw-text buf *bf-text* 244.0 47.0 0.32 (font-color cyan) #t)
+      (bf-ptext buf *bf-text* (- cxm (* 0.5 half)) (+ by 11.0) 0.32 (font-color cyan) #t half)
       (clear *bf-text*)
       (format *bf-text* "~D" (-> *bf* reserve BF_TEAM_KG))
-      (bf-draw-text buf *bf-text* 292.0 47.0 0.32 (font-color red) #t)
+      (bf-ptext buf *bf-text* (+ cxm (* 0.5 half)) (+ by 11.0) 0.32 (font-color red) #t half)
       )
-    (bf-draw-frame buf 198 70 140 268)
-    (if (= cur button)
-        (bf-draw-panel-border buf 202.0 346.0 132.0 28.0 cyan)
-        (bf-draw-frame buf 202 346 132 28)
-        )
-    (bf-draw-text buf
-                  (cond
-                    ((= (-> *bf* phase) BF_PHASE_DEPLOY) (bf-tr "Loading..." "Chargement..."))
-                    (respawn? (bf-tr "Spawn" "Apparaître"))
-                    ((-> self from-title?) (bf-tr "Start the battle" "Démarrer la bataille"))
-                    (else (bf-tr "Deploy" "Déployer"))
-                    )
-                  268.0 352.0 (if (-> self from-title?) 0.42 0.5) (if (= cur button) (font-color cyan) (font-color default)) #t)
-    (bf-draw-text buf (bf-tr "<PAD_X> Confirm" "<PAD_X> Valider") 268.0 384.0 0.34 (font-color default) #t)
+    (bf-draw-panel-border buf mx (bf-fy BF_CLASS_HOLE_Y0) mw (* (- BF_CLASS_HOLE_Y1 BF_CLASS_HOLE_Y0) (-> *bf-frame* h)) rim)
+    (let ((by (bf-fy 0.79)))
+      (if (= cur button)
+          (bf-pbox buf mx (+ by -3.0) mw 22.0 (static-rgba 128 128 64 64))
+          )
+      (bf-draw-panel-border buf mx (+ by -3.0) mw 22.0 rim)
+      (bf-ptext buf
+                (cond
+                  ((= (-> *bf* phase) BF_PHASE_DEPLOY) (bf-tr "Loading..." "Chargement..."))
+                  (respawn? (bf-tr "Spawn" "Apparaître"))
+                  ((-> self from-title?) (bf-tr "Start the battle" "Démarrer la bataille"))
+                  (else (bf-tr "Deploy" "Déployer"))
+                  )
+                cxm by 0.45 (if (= cur button) (font-color font-color-33) (font-color font-color-32)) #t (+ mw -6.0)
+                )
+      )
     ;; right: the objective, the radar
-    (bf-draw-box buf 344 34 160 66)
-    (bf-draw-text buf (bf-tr "Objective" "Objectif") 352.0 40.0 0.4 (font-color menu-parent) #f)
-    (bf-draw-text-wrapped buf (bf-tr "For now: capture the control points" "Pour le moment : capturer les points de contrôle")
-                          352.0 60.0 0.28 (font-color default) 25)
-    (bf-draw-radar buf 424.0 236.0 74.0 (if respawn? (-> self pick-point) -1))
+    (bf-ptext buf (bf-tr "Objective" "Objectif") (+ rx 4.0) (bf-fy 0.01) 0.4 (font-color font-color-33) #f (+ rw -6.0))
+    (bf-pwrap buf (bf-tr "For now: capture the control points" "Pour le moment : capturer les points de contrôle")
+              (+ rx 4.0) (+ (bf-fy 0.01) 17.0) 0.32 (+ rw -6.0) (the int (/ rw 5.0))
+              )
+    (bf-draw-radar-marks buf (-> *bf* zone) (if respawn? (-> self pick-point) -1))
+    (bf-pkeys buf (if respawn?
+                      (bf-tr "<PAD_X> Confirm    <PAD_DPAD_ANY> Class and respawn point" "<PAD_X> Valider    <PAD_DPAD_ANY> Classe et point de réapparition")
+                      (bf-tr "<PAD_X> Confirm    <PAD_DPAD_ANY> Class" "<PAD_X> Valider    <PAD_DPAD_ANY> Classe")
+                      )
+              )
     )
   (none)
   )
 
-(defbehavior bf-draw-title-page bf-director ((buf dma-buffer))
-  "The title page (round 29, in place of the game's title menu): BATTLEFRONT, then Start a battle,
-   Options, Quit in a panel in the middle, the cursor's in cyan."
-  (bf-draw-box buf 136 120 240 180)
-  (bf-draw-text buf "BATTLEFRONT" 0.0 136.0 1.0 (font-color menu-parent) #t)
-  (dotimes (i 3)
-    (bf-draw-text buf (bf-page-label BF_PAGE_TITLE 0 i) 0.0 (+ 190.0 (* 30.0 (the float i))) 0.6
-                  (if (= i (-> self cursor)) (font-color cyan) (font-color default)) #t)
+(defbehavior bf-draw-pause-page bf-director ((buf dma-buffer))
+  "START while the mode is on: the battle's entries on the left (the ones that do not apply grey),
+   the city's map as it stands on the right, its points and units live (`bf-draw-city-map`)."
+  (let ((x (bf-fx 0.03))
+        (w (* 0.42 (-> *bf-frame* w)))
+        )
+    (bf-pheader buf "Battlefront")
+    (dotimes (i BF_PAUSE_COUNT)
+      (bf-prow buf (bf-pause-label i) x (+ (bf-fy 0.03) (* 21.0 (the float i))) w (= i (-> self cursor)) (bf-pause-ok? i))
+      )
+    (bf-draw-city-map buf (-> *bf* zone) -1)
+    (bf-pkeys buf (bf-tr "<PAD_X> Select    <PAD_TRIANGLE> Resume" "<PAD_X> Choisir    <PAD_TRIANGLE> Reprendre"))
     )
-  (bf-draw-text buf (bf-tr "<PAD_X> Select" "<PAD_X> Choisir") 0.0 280.0 0.4 (font-color default) #t)
   (none)
   )
 
-(defbehavior bf-menu-update bf-director ()
-  "Input and drawing of the open page."
+(defun bf-draw-result-page ((buf dma-buffer))
+  "A side has won: VICTORY or DEFEAT, the winner and both sides' losses; X leaves the battle."
+  (let ((won? (= (-> *bf* winner) (-> *bf* team))))
+    (bf-pheader buf "Battlefront")
+    (bf-ptext buf (if won? (bf-tr "VICTORY" "VICTOIRE") (bf-tr "DEFEAT" "DÉFAITE")) (bf-fx 0.5) (bf-fy 0.14) 1.1
+              (if won? (font-color green) (font-color red)) #t (-> *bf-frame* w)
+              )
+    (clear *bf-text*)
+    (format *bf-text* (bf-tr "~S win" "Victoire : ~S") (bf-team-name (max 0 (-> *bf* winner))))
+    (bf-ptext buf *bf-text* (bf-fx 0.5) (bf-fy 0.44) 0.5 (font-color font-color-33) #t (-> *bf-frame* w))
+    (clear *bf-text*)
+    (format *bf-text* (bf-tr "Losses: ~S ~D, ~S ~D" "Pertes : ~S ~D, ~S ~D")
+            (bf-team-name 0) (-> *bf* losses 0) (bf-team-name 1) (-> *bf* losses 1)
+            )
+    (bf-ptext buf *bf-text* (bf-fx 0.5) (bf-fy 0.58) 0.4 (font-color font-color-32) #t (-> *bf-frame* w))
+    (bf-pkeys buf (bf-tr "<PAD_X> Leave the battle" "<PAD_X> Quitter la bataille"))
+    )
+  (none)
+  )
+
+(defbehavior bf-page-map bf-director ()
+  "Where the open page shows the war zone's map (`bf-zmap-set!`), and which zone, -1 for none: the
+   war zone and side pages on the right, the setup in the middle, the pause page on the right, the
+   class page as the disc of its radar."
+  (let ((page (-> self page))
+        (w (-> *bf-frame* w))
+        (h (-> *bf-frame* h))
+        )
+    (cond
+      ((or (= page BF_PAGE_ZONE) (= page BF_PAGE_TEAM))
+       (bf-zmap-set! (bf-fx 0.76) (bf-fy 0.45) (* 0.42 h) (* 0.21 w) #f)
+       (cond
+         ((= page BF_PAGE_TEAM) (-> self pick-zone))
+         ((< (-> self cursor) BF_ZONE_COUNT) (-> self cursor))
+         (else -1)
+         )
+       )
+      ((= page BF_PAGE_CONFIG)
+       (bf-zmap-set! (bf-fx 0.515) (bf-fy 0.45) (* 0.44 h) (* 0.12 w) #f)
+       (-> self pick-zone)
+       )
+      ((= page BF_PAGE_PAUSE)
+       (bf-zmap-set! (bf-fx 0.74) (bf-fy 0.45) (* 0.44 h) (* 0.23 w) #f)
+       (-> *bf* zone)
+       )
+      ((= page BF_PAGE_CLASS)
+       (bf-zmap-set! (bf-fx 0.84) (bf-fy 0.6)
+                     (fmin (* 0.29 h) (+ (/ (* 0.15 w) (bf-x-squeeze)) -2.0))
+                     0.0
+                     #t
+                     )
+       (-> *bf* zone)
+       )
+      (else
+        -1
+        )
+      )
+    )
+  )
+
+(defbehavior bf-menu-draw bf-director ()
+  "The open page in the START menu this frame, once the menu shows it: the war zone's map under it
+   (`bf-page-map`, `bf-draw-zone-minimap`), then the page in the menu's text bucket, its shapes
+   first, its text over them."
+  (when (and *progress-process* (= (-> *progress-process* 0 current) 'battlefront) (< 0.0 (-> *bf-frame* alpha)))
+    (let ((zone (bf-page-map)))
+      (if (>= zone 0)
+          (bf-draw-zone-minimap zone)
+          )
+      )
+    (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id hud-draw-hud-alpha))
+      (dma-buffer-add-gs-set buf
+                             (test-1 (new 'static 'gs-test :ate #x1 :afail #x3 :zte #x1 :ztst (gs-ztest always)))
+                             (alpha-1 (new 'static 'gs-alpha :b #x1 :d #x1))
+                             )
+      (let ((page (-> self page)))
+        (cond
+          ((or (= page BF_PAGE_ZONE) (= page BF_PAGE_TEAM)) (bf-draw-list-page buf))
+          ((= page BF_PAGE_CONFIG) (bf-draw-config-page buf))
+          ((= page BF_PAGE_CLASS) (bf-draw-class-page buf))
+          ((= page BF_PAGE_PAUSE) (bf-draw-pause-page buf))
+          ((= page BF_PAGE_RESULT) (bf-draw-result-page buf))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-draw-loading ()
+  "A deployment loading its war zone, the game running on black (`bf-black-set!`): the screen says so."
+  (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
+    (bf-draw-text buf (bf-tr "Loading the war zone..." "Chargement de la zone de guerre...") 0.0 200.0 0.6 (font-color default) #t)
+    )
+  (none)
+  )
+
+(defbehavior bf-menu-input bf-director ()
+  "The open page's keys, handed by the START menu (`menu-bf-page-option`): up and down move the
+   cursor, Left and Right change a setting or the respawn point, X chooses, Triangle or Circle goes
+   back."
   (let ((count (bf-page-count (-> self page))))
     (cond
-      ((cpad-pressed? 0 up)
+      ((cpad-pressed? 0 up l-analog-up)
        (set! (-> self cursor) (if (> (-> self cursor) 0) (+ (-> self cursor) -1) (+ count -1)))
-       (sound-play "menu-pick")
+       (sound-play "roll-over")
        )
-      ((cpad-pressed? 0 down)
+      ((cpad-pressed? 0 down l-analog-down)
        (set! (-> self cursor) (if (< (-> self cursor) (+ count -1)) (+ (-> self cursor) 1) 0))
-       (sound-play "menu-pick")
+       (sound-play "roll-over")
        )
       ((and (= (-> self page) BF_PAGE_CONFIG) (cpad-pressed? 0 left right))
        (bf-config-change (-> self cursor) (if (cpad-pressed? 0 left) -1 1))
@@ -3231,7 +3597,7 @@
       ((and (= (-> self page) BF_PAGE_CLASS) (-> self respawn?) (= (-> self cursor) (bf-class-count)) (cpad-pressed? 0 left right))
        ;; the respawn point: the side's base or a control point it holds (`bf-next-held-point`)
        (set! (-> self pick-point) (bf-next-held-point (-> self pick-point) (-> *bf* team) (if (cpad-pressed? 0 left) -1 1)))
-       (sound-play "menu-pick")
+       (sound-play "roll-over")
        )
       ((cpad-pressed? 0 x)
        (bf-menu-confirm)
@@ -3239,18 +3605,17 @@
       ((cpad-pressed? 0 circle triangle)
        (bf-menu-back)
        )
-      ;; START again on the pause page: back to the battle (not the press that opened it). The game
-      ;; may see the same press once the page is closed and ask for the page again: the request
-      ;; waits 0.4 s from here (`bf-director-update`)
-      ((and (= (-> self page) BF_PAGE_PAUSE)
-            (cpad-pressed? 0 start)
-            (< (seconds 0.25) (- (-> *display* real-clock frame-counter) (-> self page-time)))
-            )
-       (bf-close-page)
-       (set! (-> self page-time) (-> *display* real-clock frame-counter))
-       )
       )
     )
+  (none)
+  )
+
+(defbehavior bf-menu-update bf-director ()
+  "Every frame of an open page: the class page's picks and its preview, then the page in the START
+   menu (`bf-menu-draw`) or, while a deployment loads its war zone on black, the loading line. The
+   START menu gone under the page (START): the class and result pages, which need a choice, come
+   back; the others close."
+  (bf-frame-update!)
   ;; the class page: its class the last class row the cursor stood on; a respawn page shows its point
   ;; to the tests as the old respawn page did (`*bf*` respawn-pick)
   (when (= (-> self page) BF_PAGE_CLASS)
@@ -3261,27 +3626,39 @@
         (set! (-> *bf* respawn-pick) (-> self pick-point))
         )
     )
-  (when (!= (-> self page) BF_PAGE_NONE)
-    (set! (-> *bf-zmap-x* 0) (if (= (-> self page) BF_PAGE_CONFIG) 262.0 BF_ZMAP_X))
-    (bf-preview-update)
-    (bf-draw-page)
-    (if (or (and (= (-> self page) BF_PAGE_ZONE) (< (-> self cursor) BF_ZONE_COUNT))
-            (= (-> self page) BF_PAGE_TEAM)
-            (= (-> self page) BF_PAGE_PAUSE)
-            (= (-> self page) BF_PAGE_CONFIG)
+  (bf-preview-update)
+  (cond
+    ((-> *bf-black* on?)
+     ;; black again each frame: the START menu's still screen, closing, gives the game's renderers back
+     (set! (-> *display* vu1-enable-user-menu) (vu1-renderer-mask generic merc emerc))
+     (bf-draw-loading)
+     )
+    (else
+      (bf-menu-draw)
+      (when (and (not (bf-progress-on?))
+                 (< (seconds 0.5) (- (-> *display* real-clock frame-counter) (-> self page-time)))
+                 )
+        (cond
+          ((or (= (-> self page) BF_PAGE_CLASS) (= (-> self page) BF_PAGE_RESULT))
+           (if (and (= *master-mode* 'game) (< (-> *game-info* blackout-time) (current-time)))
+               (bf-progress-host!)
+               )
+           )
+          (else
+            (bf-close-page)
             )
-        (bf-draw-zone-minimap (if (= (-> self page) BF_PAGE_ZONE) (-> self cursor) (-> self pick-zone)))
+          )
         )
+      )
     )
   (none)
   )
 
 (defbehavior bf-deploy-update bf-director ()
   "One frame of a deployment: Jak held at his spawn (`bf-hold-at-spawn`), and once the zone is
-   ready (`bf-zone-ready?`) the fight starts. Its class page opened at once, the game running under
-   it: each frame the models the reset spawns meanwhile are hidden too, and once the fight starts
-   the game pauses under the page, every model hidden, Jak with them. Past BF_DEPLOY_TIMEOUT the
-   battle is cancelled."
+   ready (`bf-zone-ready?`) the fight starts. Its class page waits on black meanwhile, the game
+   running (each frame the models the reset spawns are hidden too), then goes to the START menu,
+   which pauses the game. Past BF_DEPLOY_TIMEOUT the battle is cancelled."
   (bf-hold-at-spawn)
   (if (-> *bf-black* on?)
       (iterate-process-tree *active-pool* (the-as (function object object) bf-black-hide) *kernel-context*)
@@ -3295,9 +3672,10 @@
        (set! (-> self prepared?) #t)
        )
      (bf-set-phase! BF_PHASE_FIGHT)
-     (when (= (-> self page) BF_PAGE_CLASS)
-       (iterate-process-tree *active-pool* (the-as (function object object) bf-black-hide) *kernel-context*)
-       (bf-pause-page)
+     ;; the class page in the START menu, the game paused under it
+     (when (and (= (-> self page) BF_PAGE_CLASS) (-> *bf-black* on?))
+       (bf-black-set! #f)
+       (bf-progress-host!)
        )
      )
     ((time-elapsed? (-> *bf* phase-time) BF_DEPLOY_TIMEOUT)
@@ -3453,7 +3831,7 @@
       ((and (= req BF_REQ_RESPAWN) (bf-can-open-menu?))
        (set! *bf-request* BF_REQ_NONE)
        (when (bf-fighting?)
-         (bf-open-class-page #f #t)
+         (bf-open-class-page #f)
          (set! (-> self respawn?) #t)
          (set! (-> *bf* respawn-pick) (-> self pick-point))
          )
@@ -3461,7 +3839,7 @@
       ((and (= req BF_REQ_CLASS) (bf-can-open-menu?))
        (set! *bf-request* BF_REQ_NONE)
        (if (bf-fighting?)
-           (bf-open-class-page #f #t)
+           (bf-open-class-page #f)
            )
        )
       ((and (= req BF_REQ_PAUSE) (bf-can-open-menu?))
@@ -3479,12 +3857,11 @@
        (set-master-mode 'progress)
        )
       ((and (= req BF_REQ_TITLE) (bf-can-open-menu?))
+       ;; a debug boot: the game's title menu, its entries the battle's (`set-menu-options` below)
        (set! *bf-request* BF_REQ_NONE)
-       (when (not (bf-active?))
-         (set! (-> self from-title?) #t)
-         (set! (-> self title?) #t)
-         (bf-open-page BF_PAGE_TITLE)
-         )
+       (if (not (bf-active?))
+           (activate-progress *dproc* 'title)
+           )
        )
       ((and (= req BF_REQ_START)
             (bf-can-open-menu?)
@@ -3498,7 +3875,7 @@
        (when (not (bf-active?))
          (bf-start-battle! (-> self pick-zone) (-> self pick-team) (* 4 (-> self pick-team)))
          (if (bf-active?)
-             (bf-open-class-page #t #f)
+             (bf-open-class-page #t)
              )
          )
        )
@@ -3512,12 +3889,6 @@
          )
        )
       )
-    )
-  ;; the title's time: back from the game's options (its Circle closes them), the title page again
-  (when (and (-> self title?) (= (-> self page) BF_PAGE_NONE) (= *bf-request* BF_REQ_NONE) (not *progress-process*)
-             (bf-can-open-menu?) (not (bf-active?))
-             )
-    (bf-open-page BF_PAGE_TITLE)
     )
   ;; the mode switched off in the Mods menu during a battle: back to the last save, once that menu
   ;; is closed
@@ -3622,6 +3993,19 @@
 
 (defstate idle (bf-director)
   :virtual #t
+  :event (behavior ((proc process) (argc int) (message symbol) (block event-message-block))
+    (case message
+      (('bf-pad)
+       ;; the open page's keys, from the START menu (`menu-bf-page-option`)
+       (bf-menu-input)
+       )
+      (('bf-title)
+       ;; Start a battle on the title menu (`menu-bf-title-option`)
+       (set! (-> self from-title?) #t)
+       (bf-open-page BF_PAGE_ZONE)
+       )
+      )
+    )
   :trans (behavior ()
     (bf-director-update)
     )
@@ -3629,19 +4013,23 @@
   )
 
 (defbehavior bf-director-init-by-other bf-director ()
-  "The director runs while the game is paused under its menu (menu and pause masks cleared)."
-  (process-mask-clear! (-> self mask) menu pause)
+  "The director runs while the game is paused under its pages, in the START menu (menu, pause and
+   progress masks cleared)."
+  (process-mask-clear! (-> self mask) menu pause progress)
   (set! (-> self page) BF_PAGE_NONE)
   (set! (-> self cursor) 0)
   (set! (-> self pick-zone) 0)
   (set! (-> self pick-team) BF_TEAM_FF)
-  (set! (-> self menu-mode?) #f)
   (set! (-> self want-avatar?) #f)
   (set! (-> self refill?) #f)
   (set! (-> self prepared?) #f)
   (set! (-> self end-pending?) #f)
   (set! (-> self leaving?) #f)
   (set! (-> self preview) (the-as handle #f))
+  (set! (-> self from-title?) #f)
+  (set! (-> self respawn?) #f)
+  (set! (-> self pick-class) 0)
+  (set! (-> self pick-point) 0)
   (set! (-> self hud-time) 0)
   (set! (-> self field-time) 0)
   (set! (-> self field-sound) 0)
@@ -4261,18 +4649,13 @@
 
 (defun activate-progress ((arg0 process) (arg1 symbol))
   "The game opens its START menu here (main.gc, master mode 'progress) with ARG1 'main. While the
-   Battlefront mode is on, START opens the battle's own pause page instead, its entries and the
-   city's live map (`bf-draw-page`, BF_PAGE_PAUSE), handed to the director: no menu process, so the
-   game goes back to 'game, and the director pauses it under its page. The page's Options entry
-   lets the next one through (`*bf-stock-start?*`): the game's menu, where a battle shuts Save,
-   Load Game, Secrets and Restart Mission. Every other menu (save icons, card errors) is the stock
-   one."
+   Battlefront mode is on, START opens the battle's pause page instead, its entries and the city's
+   live map (`bf-draw-pause-page`, BF_PAGE_PAUSE), handed to the director: no menu yet, so the game
+   goes back to 'game, and the director opens the START menu on its page ('battlefront). The page's
+   Options entry lets the next one through (`*bf-stock-start?*`): the game's menu, where a battle
+   shuts Save, Load Game, Secrets and Restart Mission. Every other menu (the title menu, save icons,
+   card errors) is the stock one."
   (cond
-    ((and (= arg1 'title) *mod-battlefront-enable* (not *bf-stock-start?*))
-     ;; the game's title menu: the battle's title page instead (round 29, the author's wish)
-     (bf-director-ensure!)
-     (set! *bf-request* BF_REQ_TITLE)
-     )
     ((and (= arg1 'main) *mod-battlefront-enable* (not *bf-stock-start?*) *target*)
      (bf-director-ensure!)
      (set! *bf-request* BF_REQ_PAUSE)
@@ -4285,6 +4668,213 @@
   (none)
   )
 
+
+;; ---------------------------------------------------------------------------------------------
+;; The START menu's pages: the battle's ('battlefront), and the title menu's entries
+;; ---------------------------------------------------------------------------------------------
+
+(deftype menu-bf-page-option (menu-option)
+  "The battle's page in the START menu: the director draws it (`bf-menu-draw`); this hands it the
+   keys."
+  ()
+  )
+
+(defmethod draw-option ((this menu-bf-page-option) (progress progress) (font font-context) (index int) (selected? symbol))
+  "Nothing: the director draws the page (`bf-menu-draw`)."
+  (none)
+  )
+
+(defmethod respond-progress ((this menu-bf-page-option) (progress progress) (selected? symbol))
+  "The page's keys to the director (`bf-menu-input`) once the menu shows it, then cleared: the START
+   menu's own handling (respond-to-cpad: up and down, X, Triangle back a page) sees none of them."
+  (let ((dir (handle->process (-> *bf* director))))
+    (if (and dir (= (-> progress menu-transition) 0.0))
+        (send-event dir 'bf-pad)
+        )
+    )
+  (cpad-clear! 0 up down left right x circle triangle l-analog-up l-analog-down)
+  0
+  )
+
+(define *bf-progress-options*
+  (new 'static 'menu-option-list
+    :y-center #xc6
+    :y-space 15
+    :scale 0.82
+    :options (new 'static 'boxed-array :type menu-option
+      (new 'static 'menu-bf-page-option)
+      )
+    )
+  )
+
+(defun bf-title-start ()
+  "Start a battle on the title menu: the director's war zone page, from the title (the setup's Next
+   starts a new game into the battle)."
+  (bf-director-ensure!)
+  (send-event (handle->process (-> *bf* director)) 'bf-title)
+  (none)
+  )
+
+(deftype menu-bf-title-option (menu-option)
+  "Start a battle, the title menu's first entry while the mode is on (`*bf-title*`)."
+  ()
+  )
+
+(defmethod draw-option ((this menu-bf-title-option) (progress progress) (font font-context) (index int) (selected? symbol))
+  "Drawn as the title menu's own entries are (progress-draw-pc.gc menu-sub-menu-option)."
+  (let ((alpha (fmax 0.0 (* 2.0 (- 0.5 (-> progress menu-transition))))))
+    (set! (-> font alpha) alpha)
+    (set-scale! font 0.85)
+    (adjust-font-origin-y progress font (-> this offset-y))
+    (cond
+      ((= (-> progress option-index) index)
+       (draw-highlight-bar progress font (the int (+ -6.0 (-> font origin y))) 35 alpha)
+       (set-color! font (font-color font-color-33))
+       )
+      (else
+        (set-color! font (font-color font-color-32))
+        )
+      )
+    (pc-encode-utf8-string (bf-tr "Start a battle" "Démarrer une bataille") *pc-encoded-temp-string*)
+    (print-game-text *pc-encoded-temp-string* font #f 44 (bucket-id hud-draw-hud-alpha))
+    )
+  (none)
+  )
+
+(defmethod respond-progress ((this menu-bf-title-option) (progress progress) (selected? symbol))
+  "X: the battle's war zone page (`bf-title-start`)."
+  (when (cpad-pressed? 0 confirm)
+    (cpad-clear! 0 confirm)
+    (sound-play "generic-beep")
+    (bf-title-start)
+    )
+  0
+  )
+
+;; The title menu while the mode is on (round 29, the author's wish): Start a battle, the game's
+;; Options and Quit, in place of New Game, Load Game, Options, Secrets and Quit. Quit sits 0.07
+;; higher while Secrets is locked (menu-exit-game-option).
+(define *bf-title*
+  (new 'static 'menu-option-list
+    :y-center #xc6
+    :y-space 15
+    :scale 0.82
+    :options (new 'static 'boxed-array :type menu-option
+      (new 'static 'menu-bf-title-option :offset-y 0.3)
+      (new 'static 'menu-sub-menu-option :name (text-id progress-options) :offset-y 0.45 :next-state 'title-options)
+      (new 'static 'menu-exit-game-option :name (text-id progress-quit) :offset-y 0.67)
+      )
+    )
+  )
+
+(define-perm *bf-stock-set-menu-options* (function progress symbol int)
+  (the-as (function progress symbol int) (method-of-type progress set-menu-options))
+  )
+
+(defmethod set-menu-options ((this progress) (arg0 symbol))
+  "Stock, plus the battle's page ('battlefront, `*bf-progress-options*`) and, while the mode is on,
+   the title menu's entries (`*bf-title*`)."
+  (cond
+    ((= arg0 'battlefront)
+     (set! (-> this current-options) *bf-progress-options*)
+     0
+     )
+    (else
+      (let ((ret (*bf-stock-set-menu-options* this arg0)))
+        (when (and (= arg0 'title) *mod-battlefront-enable*)
+          ;; the director up before Start a battle sends it its event: one spawned that frame is not
+          ;; in its state yet, and drops it
+          (bf-director-ensure!)
+          (set! (-> this current-options) *bf-title*)
+          (set! (-> this option-index) (min (-> this option-index) 2))
+          )
+        ret
+        )
+      )
+    )
+  )
+
+(defun bf-page-needs-choice? ()
+  "#t while the director's class or result page is up: it needs a choice."
+  (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
+    (and dir (or (= (-> dir page) BF_PAGE_CLASS) (= (-> dir page) BF_PAGE_RESULT)))
+    )
+  )
+
+(define-perm *bf-stock-can-go-back?* (function progress symbol)
+  (the-as (function progress symbol) (method-of-type progress can-go-back?))
+  )
+
+(defmethod can-go-back? ((this progress))
+  "Stock, except on the battle's class and result pages, which need a choice: START does not close
+   them (drawable.gc, the pause buttons)."
+  (and (*bf-stock-can-go-back?* this)
+       (not (and (= (-> this current) 'battlefront) (bf-page-needs-choice?)))
+       )
+  )
+
+(define-perm *bf-stock-draw-bg-box-alpha-1* (function progress progress-box float object)
+  (method-of-type progress draw-bg-box-alpha-1)
+  )
+
+(defun bf-bg-piece ((this progress) (src progress-box) (alpha float) (kx0 float) (kx1 float) (y0 float) (y1 float))
+  "The part of the screen's background box SRC from fraction KX0 to KX1 of its width, and from Y0 to
+   Y1 inside it (stock draw-bg-box-alpha-1)."
+  (let ((box (new 'stack-no-clear 'progress-box)))
+    (mem-copy! (the-as pointer box) (the-as pointer src) (size-of progress-box))
+    (set! (-> box aspect4x3 min x) (+ (-> src aspect4x3 min x) (* kx0 (- (-> src aspect4x3 max x) (-> src aspect4x3 min x)))))
+    (set! (-> box aspect4x3 max x) (+ (-> src aspect4x3 min x) (* kx1 (- (-> src aspect4x3 max x) (-> src aspect4x3 min x)))))
+    (set! (-> box aspect4x3 min y) (fmax (-> src aspect4x3 min y) y0))
+    (set! (-> box aspect4x3 max y) (fmin (-> src aspect4x3 max y) y1))
+    (set! (-> box aspect16x9 min x) (+ (-> src aspect16x9 min x) (* kx0 (- (-> src aspect16x9 max x) (-> src aspect16x9 min x)))))
+    (set! (-> box aspect16x9 max x) (+ (-> src aspect16x9 min x) (* kx1 (- (-> src aspect16x9 max x) (-> src aspect16x9 min x)))))
+    (set! (-> box aspect16x9 min y) (fmax (-> src aspect16x9 min y) y0))
+    (set! (-> box aspect16x9 max y) (fmin (-> src aspect16x9 max y) y1))
+    (*bf-stock-draw-bg-box-alpha-1* this box alpha)
+    )
+  (none)
+  )
+
+(defmethod draw-bg-box-alpha-1 ((this progress) (arg0 progress-box) (arg1 float))
+  "Stock, except under the class page: drawn at the nearest depth, the box hides any model under
+   it, so it goes round the page's middle column (BF_CLASS_HOLE_*), where the class turns
+   (`bf-preview-update`); the column darkened at the farthest depth, under the model."
+  (cond
+    ((and (= (-> this current) 'battlefront)
+          (= arg0 (-> *progress-work* small-screen))
+          (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
+            (and dir (= (-> dir page) BF_PAGE_CLASS))
+            )
+          )
+     (let ((y0 (bf-fy BF_CLASS_HOLE_Y0))
+           (y1 (bf-fy BF_CLASS_HOLE_Y1))
+           )
+       (bf-bg-piece this arg0 arg1 0.0 BF_CLASS_HOLE_X0 -1000.0 1000.0)
+       (bf-bg-piece this arg0 arg1 BF_CLASS_HOLE_X1 1.0 -1000.0 1000.0)
+       (bf-bg-piece this arg0 arg1 BF_CLASS_HOLE_X0 BF_CLASS_HOLE_X1 -1000.0 y0)
+       (bf-bg-piece this arg0 arg1 BF_CLASS_HOLE_X0 BF_CLASS_HOLE_X1 y1 1000.0)
+       (with-dma-buffer-add-bucket ((buf (-> *display* frames (-> *display* on-screen) global-buf)) (bucket-id bucket7))
+         (dma-buffer-add-gs-set buf
+                                (test-1 (new 'static 'gs-test :ate #x1 :afail #x3 :zte #x1 :ztst (gs-ztest always)))
+                                (alpha-1 (new 'static 'gs-alpha :b #x1 :d #x1))
+                                )
+         (draw-sprite2d-xy buf
+                           (the int (bf-fx BF_CLASS_HOLE_X0))
+                           (the int y0)
+                           (the int (* (- BF_CLASS_HOLE_X1 BF_CLASS_HOLE_X0) (-> *bf-frame* w)))
+                           (the int (- y1 y0))
+                           (the-as rgba (shl (the int (* 0.85 arg1)) 24))
+                           0
+                           )
+         )
+       )
+     0
+     )
+    (else
+      (*bf-stock-draw-bg-box-alpha-1* this arg0 arg1)
+      )
+    )
+  )
 (defun bf-out-of-combat? ()
   "#t when the player has been out of combat (no shot, blow or hit taken, `*bf*` combat-time) for
    BF_REDEPLOY_CALM: his redeploy is free."
