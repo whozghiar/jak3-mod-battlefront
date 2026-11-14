@@ -225,22 +225,6 @@
   0
   )
 
-(defbehavior smoke-boot process ()
-  "Retail boot: the opening scenes skipped (triangle twice), START on the title, X on Load Game, X on
-   slot 1; then Jak standing."
-  (smoke-step "boot")
-  (smoke-wait 4.0)
-  (smoke-press (pad-buttons triangle) 6.0)
-  (smoke-press (pad-buttons triangle) 8.0)
-  (smoke-press (pad-buttons start) 4.0)
-  (smoke-press (pad-buttons x) 3.0)
-  (smoke-press (pad-buttons x) 3.0)
-  (smoke-wait-stand 90.0)
-  (smoke-wait 3.0)
-  (smoke-check "save slot 1 loaded, Jak standing" (and *target* (not (focus-test? *target* dead))))
-  0
-  )
-
 (defun smoke-dir ()
   "The battle's director, #f for none."
   (the-as bf-director (handle->process (-> *bf* director)))
@@ -297,6 +281,11 @@
   "L3 + SELECT, X on the battlefront entry (the first; Misc options is last), X on Battlefront mode.
    Switched on, the Mods menu closes and the battle's page opens at once (round 28), closed again
    with Circle; switched off, L3 + SELECT closes the Mods menu. Screenshot TAG after the switch."
+  ;; on by default since round 29
+  (when *mod-battlefront-enable*
+    (smoke-check "Battlefront mode on by default" #t)
+    (return 0)
+    )
   (smoke-tap (pad-buttons l3 select) 6)
   (smoke-wait 1.5)
   (smoke-check "L3 + SELECT opens the Mods menu" *popup-menu-open*)
@@ -322,6 +311,20 @@
   0
   )
 
+(defbehavior smoke-boot process ()
+  "Retail boot: the opening scenes skipped (triangle twice), START on the title: the battle's title
+   page in place of the game's title menu (round 29: the mode on by default; until then X on Load
+   Game, X on slot 1)."
+  (smoke-step "boot")
+  (smoke-wait 4.0)
+  (smoke-press (pad-buttons triangle) 6.0)
+  (smoke-press (pad-buttons triangle) 8.0)
+  (smoke-press (pad-buttons start) 4.0)
+  (smoke-wait-for 20.0 (lambda () (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_TITLE))))
+  (smoke-check "the battle's title page in place of the game's title menu" (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_TITLE)))
+  0
+  )
+
 (defbehavior smoke-bf-pause process ((entry int))
   "START: the battle's pause page (the mode on), ENTRY under the cursor, X: 1 New battle, 2 Change
    class, 3 Redeploy, 4 Restart the battle, 5 Quit the battle, 6 Options (battlefront.gc
@@ -342,10 +345,57 @@
   0
   )
 
+(defbehavior smoke-title-battle process ((team int))
+  "Round 29, from the title page: Start a battle, the war zone (Haven City), the configuration page
+   (side TEAM on top), Next: a new game in the city, then the class page, the zone loading under
+   it, its button Start the battle; then the game paused under it once Jak stands at his spawn."
+  (smoke-step "title: start a battle")
+  (set! (-> (smoke-dir) cursor) 0)
+  (smoke-wait 0.5)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-check "Start a battle opens the war zone page" (= (-> (smoke-dir) page) BF_PAGE_ZONE))
+  (set! (-> (smoke-dir) cursor) 0)
+  (smoke-wait 0.5)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-check "the war zone opens the configuration page" (= (-> (smoke-dir) page) BF_PAGE_CONFIG))
+  (when (!= (-> *bf-config* team-a) team)
+    (set! (-> (smoke-dir) cursor) 4)
+    (smoke-wait 0.4)
+    (smoke-press (pad-buttons right) 0.6)
+    )
+  (set! (-> (smoke-dir) cursor) 6)
+  (smoke-wait 0.6)
+  (smoke-shot "config-page")
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 120.0 (lambda () (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_CLASS))))
+  (format 0 "SMOKE after Next: page ~D phase ~D team ~D~%" (-> (smoke-dir) page) (-> *bf* phase) (-> *bf* team))
+  (smoke-check "Next: the city loads, then the class page, its button Start the battle"
+               (and (= (-> (smoke-dir) page) BF_PAGE_CLASS) (-> (smoke-dir) from-title?) (= (-> *bf* team) team))
+               )
+  (smoke-wait 1.0)
+  (smoke-shot "class-page-loading")
+  (smoke-wait-for 150.0 (lambda () (= (-> *bf* phase) BF_PHASE_FIGHT)))
+  (smoke-wait 2.0)
+  (format 0 "SMOKE zone ready: page ~D phase ~D mode ~A preview ~A~%" (-> (smoke-dir) page) (-> *bf* phase)
+          *master-mode* (if (handle->process (-> (smoke-dir) preview)) #t #f))
+  (smoke-check "the zone loaded under the class page, the game paused, the preview shown"
+               (and (= (-> (smoke-dir) page) BF_PAGE_CLASS)
+                    (= *master-mode* 'menu)
+                    (if (handle->process (-> (smoke-dir) preview)) #t #f)
+                    )
+               )
+  (smoke-shot "class-page-ready")
+  0
+  )
+
 (defbehavior smoke-battle-start process ((zone int) (team int))
-  "START > New battle, war zone ZONE, side TEAM. Checks the page order: the class page right after
-   the side page, the zone loading under it; then the game paused under it once Jak stands at his
-   spawn."
+  "From the title page (round 29): `smoke-title-battle`. In the city: START > New battle, war zone
+   ZONE, side TEAM. Checks the page order: the class page right after the side page, the zone
+   loading under it; then the game paused under it once Jak stands at his spawn."
+  (when (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_TITLE))
+    (smoke-title-battle team)
+    (return 0)
+    )
   (smoke-step "new battle")
   (smoke-bf-pause 1)
   (smoke-wait 1.0)
@@ -2128,7 +2178,12 @@
   )
 
 (defbehavior smoke-pick-point process ((want int))
-  "On the open respawn page: D-pad right until point WANT is picked (8 presses at most), then X."
+  "On the open respawn page, since round 29 the class page's respawn point row: the cursor on that
+   row, Right until point WANT is picked (8 presses at most), then X."
+  (if (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_CLASS))
+      (set! (-> (smoke-dir) cursor) (bf-class-count))
+      )
+  (smoke-wait 0.3)
   (dotimes (k 8)
     (if (!= (-> *bf* respawn-pick) want)
         (smoke-press (pad-buttons right) 0.5)
@@ -4875,6 +4930,109 @@
   0
   )
 
+(defbehavior smoke-s52 process ()
+  "Scenario 52 (`smoke-scenario-late`), round 29: the class page in three columns from the title;
+   a death: X opens the class page with the respawn point and the radar, the base picked, Spawn;
+   a redeploy: the same page, the red jetpack picked, Spawn."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-shot "r29-class-page")
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (smoke-wait 3.0)
+  (smoke-step "death: the class page with the point")
+  (smoke-invulnerable #f)
+  (smoke-kill-player)
+  (smoke-respawn-page 15.0)
+  (smoke-wait 1.0)
+  (format 0 "SMOKE after the death: page ~D respawn ~A pick ~D rows ~D~%" (-> (smoke-dir) page) (-> (smoke-dir) respawn?)
+          (-> (smoke-dir) pick-point) (bf-page-count BF_PAGE_CLASS))
+  (smoke-check "a death: X opens the class page with the respawn point"
+               (and (= (-> (smoke-dir) page) BF_PAGE_CLASS) (-> (smoke-dir) respawn?) (= (bf-page-count BF_PAGE_CLASS) (+ (bf-class-count) 2)))
+               )
+  (set! (-> (smoke-dir) cursor) (bf-class-count))
+  (smoke-wait 0.6)
+  (smoke-shot "r29-respawn-page")
+  (smoke-pick-point (-> *bf* team))
+  (smoke-wait-for 60.0 (lambda () (and (bf-avatar-alive?) *target* (not (focus-test? *target* dead)) (< (-> *bf* respawn-at) 0) (not (-> *bf* dropping?)))))
+  (smoke-invulnerable #t)
+  (smoke-wait 2.0)
+  (smoke-check "Spawn: back at the point picked, the class kept" (and (bf-avatar-alive?) (= (-> *bf* class) BF_CLASS_RED_GUARD)))
+  (smoke-step "redeploy: the class page, the red jetpack")
+  (smoke-bf-pause 3)
+  (smoke-wait-for 6.0 (lambda () (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_CLASS))))
+  (smoke-check "Redeploy opens the class page with the respawn point" (and (= (-> (smoke-dir) page) BF_PAGE_CLASS) (-> (smoke-dir) respawn?)))
+  (set! (-> (smoke-dir) cursor) 1)
+  (smoke-wait 0.6)
+  (smoke-pick-point (-> *bf* team))
+  (smoke-wait-for 60.0 (lambda () (and (bf-avatar-alive?) *target* (not (focus-test? *target* dead)) (< (-> *bf* respawn-at) 0) (not (-> *bf* dropping?)))))
+  (smoke-wait 2.0)
+  (smoke-check "the class picked on the page: back as a red jetpack" (and (bf-avatar-alive?) (= (-> *bf* class) BF_CLASS_RED_JETPACK)))
+  0
+  )
+
+(defbehavior smoke-s51 process ()
+  "Scenario 51 (`smoke-scenario-late`), round 29: the title page, the configuration (units 600, a side
+   swapped and back), the battle from the title, its reserves; every control point held 20 s wins;
+   then a new battle from the pause page, ended by its time limit."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-shot "title-page")
+  ;; the configuration's settings
+  (set! (-> *bf-config* units) 500)
+  (smoke-step "configuration")
+  (set! (-> (smoke-dir) cursor) 0)
+  (smoke-press (pad-buttons x) 1.0)
+  (set! (-> (smoke-dir) cursor) 0)
+  (smoke-press (pad-buttons x) 1.0)
+  (set! (-> (smoke-dir) cursor) 1)
+  (smoke-press (pad-buttons right) 0.5)
+  (smoke-press (pad-buttons right) 0.5)
+  (format 0 "SMOKE config: units ~D minutes ~D victory ~D sides ~D ~D~%" (-> *bf-config* units) (-> *bf-config* minutes)
+          (-> *bf-config* victory) (-> *bf-config* team-a) (-> *bf-config* team-b))
+  (smoke-check "Right raises the units per side by 50" (= (-> *bf-config* units) 600))
+  (set! (-> (smoke-dir) cursor) 4)
+  (smoke-press (pad-buttons right) 0.5)
+  (smoke-check "a side changed changes the other: never the same" (and (= (-> *bf-config* team-a) BF_TEAM_FF) (= (-> *bf-config* team-b) BF_TEAM_KG)))
+  (smoke-press (pad-buttons left) 0.5)
+  (smoke-press (pad-buttons circle) 1.0)
+  (smoke-press (pad-buttons circle) 1.0)
+  (smoke-check "Circle back to the title page" (= (-> (smoke-dir) page) BF_PAGE_TITLE))
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (format 0 "SMOKE battle: reserves ~D ~D of ~D~%" (-> *bf* reserve 0) (-> *bf* reserve 1) (-> *bf* reserve-max))
+  (smoke-check "the battle's reserves are the configuration's units" (and (= (-> *bf* reserve-max) 600) (<= 590 (-> *bf* reserve 0))))
+  (smoke-shot "r29-battle-hud")
+  ;; every control point to the Krimzon Guard: it wins 20 s later
+  (smoke-step "points victory")
+  (dotimes (i (-> *bf* point-count))
+    (if (not (-> *bf* points i base?))
+        (set! (-> *bf* points i owner) BF_TEAM_KG)
+        )
+    )
+  (smoke-wait-for 40.0 (lambda () (= (-> *bf* phase) BF_PHASE_OVER)))
+  (smoke-wait 2.0)
+  (format 0 "SMOKE points victory: phase ~D winner ~D page ~D~%" (-> *bf* phase) (-> *bf* winner) (-> (smoke-dir) page))
+  (smoke-check "every control point held 20 s wins the battle" (and (= (-> *bf* winner) BF_TEAM_KG) (= (-> (smoke-dir) page) BF_PAGE_RESULT)))
+  (smoke-shot "r29-result")
+  (smoke-press (pad-buttons x) 3.0)
+  (smoke-wait-stand 60.0)
+  (smoke-wait 3.0)
+  ;; a new battle from the pause page, its time limit 1 minute, nearly over
+  (smoke-step "time limit")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (set! (-> *bf* time-limit) 1)
+  (set! (-> *bf* phase-time) (- (-> (smoke-dir) clock frame-counter) (seconds 55)))
+  (smoke-wait 2.0)
+  (smoke-shot "r29-timer")
+  (smoke-wait-for 20.0 (lambda () (= (-> *bf* phase) BF_PHASE_OVER)))
+  (format 0 "SMOKE time limit: phase ~D winner ~D~%" (-> *bf* phase) (-> *bf* winner))
+  (smoke-check "the time limit ends the battle" (= (-> *bf* phase) BF_PHASE_OVER))
+  0
+  )
+
 (defbehavior smoke-s50 process ()
   "Scenario 50 (`smoke-scenario-late`), round 29: the reserve meter; 3 minutes of battle, every unit
    looked at every 5 s (`bf-city-target-report`: its goal kept, none stuck); a respawn at the Port
@@ -5261,6 +5419,8 @@
   "Scenarios 36 to 40 (rounds 26 and 27), each in a function of its own, out of `smoke-scenario`:
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
+    ((52) (smoke-s52))
+    ((51) (smoke-s51))
     ((50) (smoke-s50))
     ((49) (smoke-s49))
     ((48) (smoke-s48))

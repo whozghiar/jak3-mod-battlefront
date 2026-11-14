@@ -197,6 +197,12 @@
    (phase-time    time-frame)     ;; when `phase` last changed
    (respawn-time  time-frame)     ;; the dead player may choose from then (battlefront.gc `bf-target-death`), 0 alive
    (redeploying?  symbol)         ;; the player's death is a redeploy: the class page at once
+   (respawn-choice int32)         ;; the point the class page picked for the dead player's respawn, -1 for none (battlefront.gc `bf-target-death`)
+   (reserve-max   int32)          ;; units per side at the battle's start (the configuration page, battlefront.gc `*bf-config*`)
+   (time-limit    int32)          ;; minutes the fight lasts at most, 0 for no limit
+   (victory       int32)          ;; BF_WIN_POINTS or BF_WIN_UNITS
+   (hold-team     int32)          ;; the side holding every control point now, BF_TEAM_NONE for none
+   (hold-time     time-frame)     ;; since when it holds them
    (safe          vector :inline) ;; the player's last place standing inside the zone's levels
    (safe-level    symbol)         ;; the level he was in there
    (safe-time     time-frame)     ;; when that place was taken
@@ -310,7 +316,8 @@
 
 ;; Set by the Mods menu. While it is on, START opens the battle's pause page (battlefront.gc);
 ;; turning it off during a battle loads the last save (battlefront.gc `bf-leave-to-save!`).
-(define *mod-battlefront-enable* #f)
+;; On by default (the author's wish, round 29): the Mods menu still switches it off.
+(define *mod-battlefront-enable* #t)
 
 ;; Commands of `*bf-city-hook*`, the Haven City side of a battle (levels/city/battlefront/battlefront-city.gc).
 (defconstant BF_CITY_PREPARE 0)   ;; the zone is loaded, the fight starts

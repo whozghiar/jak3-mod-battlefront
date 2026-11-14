@@ -55,6 +55,8 @@
 (defconstant BF_PAGE_CLASS 3)
 (defconstant BF_PAGE_RESULT 4)
 (defconstant BF_PAGE_PAUSE 5)  ;; START during the mode: the battle's own pause page, the live map
+(defconstant BF_PAGE_TITLE 6)  ;; in place of the game's title menu (round 29): start a battle, options, quit
+(defconstant BF_PAGE_CONFIG 7) ;; the battle's configuration (round 29): its settings, its map, its sides
 
 ;; Requests of the START menu's battle page to the director (it runs them in its own process, so
 ;; the settings it creates and removes are its own).
@@ -66,6 +68,14 @@
 (defconstant BF_REQ_REDEPLOY 5)
 (defconstant BF_REQ_PAUSE 6)      ;; START pressed while the mode is on (`activate-progress` below)
 (defconstant BF_REQ_GAME_MENU 7)  ;; the pause page's last entry: the game's own START menu
+(defconstant BF_REQ_TITLE 8)      ;; the title page (the game's title menu asked for, or the debug boot)
+(defconstant BF_REQ_START 9)      ;; a battle started from the title: once Jak stands in the city, its deployment
+(defconstant BF_REQ_RESPAWN 10)   ;; the dead player's class page, with his respawn point (`bf-target-death`)
+
+;; The battle's victory conditions (the configuration page, `*bf-config*`).
+(defconstant BF_WIN_POINTS 0)     ;; a side holding every control point for BF_HOLD_WIN wins; a side out of units loses
+(defconstant BF_WIN_UNITS 1)      ;; only a side out of units loses
+(defconstant BF_HOLD_WIN (seconds 20))
 (defconstant BF_REDEPLOY_CALM (seconds 30)) ;; out of combat this long, the player may redeploy
 
 (defconstant BF_DEPLOY_TIMEOUT (seconds 120)) ;; give up when the zone is not loaded by then (every street section, round 19)
@@ -90,6 +100,11 @@
    (field-time    time-frame) ;; last force-field spark
    (field-sound   time-frame) ;; last force-field sound
    (page-time     time-frame) ;; when the pause page last opened or closed, on the real clock (the game's stops under it)
+   (from-title?   symbol)     ;; the menu began at the title: the zone page leads to the configuration, the class page starts the battle
+   (title?        symbol)     ;; the title page's time, until a battle is started from it: it opens again once nothing else is up
+   (respawn?      symbol)     ;; the class page picks the dead player's respawn point too
+   (pick-class    int32)      ;; the class page's class, the last class row the cursor stood on
+   (pick-point    int32)      ;; the class page's respawn point (`respawn?`)
    )
   (:state-methods
     idle
@@ -97,6 +112,22 @@
   )
 
 (define *bf-request* BF_REQ_NONE)
+
+;; The configuration page's choices (round 29, the author's wish), kept from one battle to the next.
+(deftype bf-config (structure)
+  ((minutes  int32)   ;; time limit, 0 for none (`*bf-time-choices*`)
+   (units    int32)   ;; units per side, 50 to 1000 by 50
+   (victory  int32)   ;; BF_WIN_POINTS or BF_WIN_UNITS
+   (team-a   int32)   ;; the player's side, the top panel
+   (team-b   int32)   ;; the other side, the bottom panel: never the same
+   )
+  )
+
+(define *bf-config* (new 'static 'bf-config :minutes 0 :units 500 :victory 0 :team-a 1 :team-b 0))
+(define *bf-time-choices* (new 'static 'array int32 6 0 5 10 15 20 30))
+(defconstant BF_CONFIG_COUNT 7) ;; the configuration page's rows: 4 settings, 2 sides, Next
+;; Set once the debug boot opened the title page (`cpad-get-data`).
+(define *bf-boot-menu?* #f)
 ;; Set to let the next START through to the game's own menu (the pause page's last entry).
 (define *bf-stock-start?* #f)
 (define *bf-text* (new 'global 'string 256 (the-as string #f)))
@@ -223,16 +254,32 @@
     )
   )
 
+(defun bf-class-count ()
+  "Classes of the player's side on the class page: the Freedom League's third and fourth, the
+   Spargus Citizen and Jak, are no longer playable."
+  (if (= (-> *bf* team) BF_TEAM_FF) 2 4)
+  )
+
+(defun bf-respawn-page? ()
+  "#t when the open class page picks the dead player's respawn point too (the director's `respawn?`)."
+  (let ((dir (the-as bf-director (handle->process (-> *bf* director)))))
+    (and dir (-> dir respawn?))
+    )
+  )
+
 (defun bf-page-count ((page int))
   "Number of choices of PAGE."
   (cond
     ((= page BF_PAGE_PAUSE) BF_PAUSE_COUNT)
-    ;; the war zones, then Spargus, to come (grey, refused)
-    ((= page BF_PAGE_ZONE) (+ BF_ZONE_COUNT 1))
+    ((= page BF_PAGE_TITLE) 3)
+    ((= page BF_PAGE_CONFIG) BF_CONFIG_COUNT)
+    ;; the war zones, then Spargus, to come (grey, refused), then Back
+    ((= page BF_PAGE_ZONE) (+ BF_ZONE_COUNT 2))
     ((= page BF_PAGE_TEAM) BF_TEAM_COUNT)
     ;; the Freedom League's third and fourth classes, the Spargus Citizen and Jak, are no longer
     ;; playable
-    ((= page BF_PAGE_CLASS) (if (= (-> *bf* team) BF_TEAM_FF) 2 4))
+    ;; its classes, its respawn point after a death (`respawn?`), its button
+    ((= page BF_PAGE_CLASS) (+ (bf-class-count) (if (bf-respawn-page?) 2 1)))
     (else 1)
     )
   )
@@ -240,7 +287,20 @@
 (defun bf-page-label ((page int) (team int) (i int))
   "Label of choice I of PAGE (TEAM picks the classes)."
   (cond
-    ((= page BF_PAGE_ZONE) (if (< i BF_ZONE_COUNT) (bf-zone-name i) (bf-tr "Spargus (coming soon)" "Spargus (à venir)")))
+    ((= page BF_PAGE_TITLE)
+     (case i
+       ((0) (bf-tr "Start a battle" "Démarrer une bataille"))
+       ((1) (bf-tr "Options" "Options"))
+       (else (bf-tr "Quit" "Quitter"))
+       )
+     )
+    ((= page BF_PAGE_ZONE)
+     (cond
+       ((< i BF_ZONE_COUNT) (bf-zone-name i))
+       ((= i BF_ZONE_COUNT) (bf-tr "Spargus (coming soon)" "Spargus (à venir)"))
+       (else (bf-tr "Back" "Retour"))
+       )
+     )
     ((= page BF_PAGE_TEAM) (bf-team-name i))
     ((= page BF_PAGE_CLASS) (bf-class-name (+ (* team 4) i)))
     ((= page BF_PAGE_PAUSE) (bf-pause-label i))
@@ -251,6 +311,7 @@
 (defun bf-page-desc ((page int) (team int) (i int))
   "Description of choice I of PAGE."
   (cond
+    ((and (= page BF_PAGE_ZONE) (> i BF_ZONE_COUNT)) "")
     ((= page BF_PAGE_ZONE) (if (< i BF_ZONE_COUNT)
                                (bf-tr (-> *bf-zones* i desc) (-> *bf-zones* i desc-fr))
                                (bf-tr "The Wastelanders' desert city: coming in a later version."
@@ -298,7 +359,8 @@
 
 ;; The zone pages' map: the war zone's own minimap, the texture the game's minimap shows on its
 ;; battlefield (battlefront-minimaps.gc), framed on the battlefield in the right frame.
-(defconstant BF_ZMAP_X 373.0)       ;; center of the map, on the 512 x 416 screen
+(defconstant BF_ZMAP_X 373.0)       ;; center of the map, on the 512 x 416 screen (`*bf-zmap-x*`)
+(define *bf-zmap-x* (new 'static 'array float 1 373.0)) ;; the map's center now: 268 on the configuration page
 (defconstant BF_ZMAP_Y 206.0)
 (defconstant BF_ZMAP_HALF 120.0)    ;; at most half its height
 (defconstant BF_ZMAP_HALF_W 96.0)   ;; at most half its width, to stay in the frame
@@ -330,8 +392,8 @@
          )
     (set! (-> view kx) kx)
     (set! (-> view ky) ky)
-    (set! (-> view x0) (- BF_ZMAP_X (* 0.5 kx w)))
-    (set! (-> view x1) (+ BF_ZMAP_X (* 0.5 kx w)))
+    (set! (-> view x0) (- (-> *bf-zmap-x* 0) (* 0.5 kx w)))
+    (set! (-> view x1) (+ (-> *bf-zmap-x* 0) (* 0.5 kx w)))
     (set! (-> view y0) (- BF_ZMAP_Y (* 0.5 ky h)))
     (set! (-> view y1) (+ BF_ZMAP_Y (* 0.5 ky h)))
     )
@@ -650,6 +712,13 @@
   (none)
   )
 
+(define-extern bf-draw-title-page (function dma-buffer none :behavior bf-director))
+(define-extern bf-draw-class-page (function dma-buffer none :behavior bf-director))
+(define-extern bf-draw-arrow (function dma-buffer float float float symbol none))
+(define-extern bf-draw-config-page (function dma-buffer none :behavior bf-director))
+(define-extern bf-menu-back (function none :behavior bf-director))
+(define-extern bf-director-ensure! (function none))
+
 (defbehavior bf-draw-page bf-director ()
   "Draw the open page of the battle menu. The zone, side and class pages share one layout: the
    choices on the left, the zone's map or the class's preview on the right. The preview
@@ -659,6 +728,16 @@
         )
     (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
       (cond
+        ((= page BF_PAGE_TITLE)
+         (bf-draw-title-page buf)
+         )
+        ((= page BF_PAGE_CLASS)
+         (bf-draw-class-page buf)
+         )
+        ((= page BF_PAGE_CONFIG)
+         (bf-draw-config-page buf)
+         (bf-draw-zone-marks buf (-> self pick-zone))
+         )
         ((= page BF_PAGE_RESULT)
          (bf-draw-box buf 56 70 400 250)
          (bf-draw-text buf "BATTLEFRONT" 0.0 84.0 0.7 (font-color menu-parent) #t)
@@ -722,6 +801,7 @@
                       ((= page BF_PAGE_PAUSE) (bf-tr "<PAD_X> Select  <PAD_CIRCLE> Resume" "<PAD_X> Choisir  <PAD_CIRCLE> Reprendre"))
                       ;; the deployment still loads the zone under the page (`bf-deploy-update`)
                       ((= (-> *bf* phase) BF_PHASE_DEPLOY) (bf-tr "Loading the war zone..." "Chargement de la zone de guerre..."))
+                      ((-> self from-title?) (bf-tr "<PAD_X> Start the battle" "<PAD_X> Démarrer la bataille"))
                       (else (bf-tr "<PAD_X> Deploy" "<PAD_X> Déployer"))
                       )
                     ;; on the class page, under the guards' seven help lines
@@ -730,8 +810,11 @@
             ((= page BF_PAGE_CLASS)
              0
              )
-            ((and (= page BF_PAGE_ZONE) (>= (-> self cursor) BF_ZONE_COUNT))
+            ((and (= page BF_PAGE_ZONE) (= (-> self cursor) BF_ZONE_COUNT))
              (bf-draw-text buf (bf-tr "Coming soon" "À venir") 373.0 200.0 0.6 (font-color menu-invalid) #t)
+             )
+            ((and (= page BF_PAGE_ZONE) (> (-> self cursor) BF_ZONE_COUNT))
+             0
              )
             ((= page BF_PAGE_PAUSE)
              ;; the city's map as it stands, the points and the units (`bf-draw-city-map`)
@@ -751,7 +834,7 @@
 (defbehavior bf-preview-update bf-director ()
   "Class page: the class under the cursor stands in the right frame and turns a full circle every 4
    seconds (a `bf-icon` 3 m in front of the camera of the paused game). Any other page: none."
-  (let ((want (if (= (-> self page) BF_PAGE_CLASS) (+ (* (-> self pick-team) 4) (-> self cursor)) -1))
+  (let ((want (if (= (-> self page) BF_PAGE_CLASS) (+ (* (-> self pick-team) 4) (-> self pick-class)) -1))
         (icon (handle->process (-> self preview)))
         )
     (when (and icon (!= want (-> (the-as bf-icon icon) class)))
@@ -763,7 +846,7 @@
       (set! (-> self preview) (process->handle icon))
       )
     (if icon
-        (bf-icon-place icon 373.0 206.0 230.0 (meters 3))
+        (bf-icon-place icon 268.0 204.0 150.0 (meters 3))
         )
     )
   (none)
@@ -1071,8 +1154,9 @@
          (edge (static-rgba 170 192 214 120))
          (track (static-rgba 20 24 34 90))
          (half (- 256.0 (+ l bev 3.0)))
-         (ff (* half (/ (the float (-> *bf* reserve BF_TEAM_FF)) (the float BF_RESERVE))))
-         (kg (* half (/ (the float (-> *bf* reserve BF_TEAM_KG)) (the float BF_RESERVE))))
+         (full (the float (max 1 (-> *bf* reserve-max))))
+         (ff (* half (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_FF)) full))))
+         (kg (* half (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_KG)) full))))
          )
     ;; the background: the top bar, an elongated hexagon, then the compartment under its middle
     (bf-draw-quad buf (+ l bev) top (- r bev) top (- r bev) bot (+ l bev) bot back)
@@ -1107,6 +1191,14 @@
     (clear *bf-text*)
     (format *bf-text* "~D" (-> *bf* reserve BF_TEAM_KG))
     (bf-draw-text buf *bf-text* 280.0 (+ bot 3.0) 0.42 (font-color red) #t)
+    ;; the time left, under the meter, when the battle has a limit
+    (when (and (< 0 (-> *bf* time-limit)) (bf-fighting?))
+      (let ((left (max 0 (- (* 60 (-> *bf* time-limit)) (/ (- (current-time) (-> *bf* phase-time)) (seconds 1))))))
+        (clear *bf-text*)
+        (format *bf-text* "~D:~2,'0D" (/ left 60) (mod left 60))
+        (bf-draw-text buf *bf-text* 0.0 (+ cb 2.0) 0.38 (font-color default) #t)
+        )
+      )
     )
   (none)
   )
@@ -1617,7 +1709,7 @@
     (when (and (nonzero? (-> *bf* respawn-time)) (< (-> *bf* respawn-pick) 0) (not (-> *bf* redeploying?)))
       (bf-draw-text buf (bf-tr "YOU WERE KILLED" "VOUS ÊTES MORT") 0.0 250.0 0.8 (font-color red) #t)
       (if (>= (current-time) (-> *bf* respawn-time))
-          (bf-draw-text buf (bf-tr "<PAD_X> Respawn    <PAD_TRIANGLE> Change class" "<PAD_X> Réapparaître    <PAD_TRIANGLE> Changer de classe")
+          (bf-draw-text buf (bf-tr "<PAD_X> Respawn: class and point" "<PAD_X> Réapparaître : classe et point")
                         0.0 282.0 0.6 (font-color default) #t
                         )
           )
@@ -1712,8 +1804,13 @@
         (set! (-> *bf* deaths) 0)
         (set! (-> *bf* redeploy-ok?) #f)
         (set! (-> *bf* tazer-time) 0)
+        ;; the configuration page's settings (`*bf-config*`; BF_RESERVE units a side until round 28)
+        (set! (-> *bf* reserve-max) (-> *bf-config* units))
+        (set! (-> *bf* time-limit) (-> *bf-config* minutes))
+        (set! (-> *bf* victory) (-> *bf-config* victory))
+        (set! (-> *bf* hold-team) BF_TEAM_NONE)
         (dotimes (i BF_TEAM_COUNT)
-          (set! (-> *bf* reserve i) BF_RESERVE)
+          (set! (-> *bf* reserve i) (-> *bf* reserve-max))
           (set! (-> *bf* losses i) 0)
           )
         ;; the class weapons spend Jak's ammo, the shield's hits his light eco: given back at the end
@@ -2405,7 +2502,17 @@
   )
 
 (defun cpad-get-data ((pad cpad-info))
-  "The stock pad read, then `bf-pad-lock!`."
+  "The stock pad read, then `bf-pad-lock!`. In a debug boot (`task boot-game`: the game starts in
+   a level, no title), the mode on, the battle's title page opens once Jak stands (round 29, the
+   author's wish)."
+  (when (and (not *bf-boot-menu?*) *debug-segment* *mod-battlefront-enable* *target* (not (bf-active?))
+             (logtest? (-> *target* control status) (collide-status on-surface))
+             (< (-> *game-info* blackout-time) (-> *display* game-clock frame-counter))
+             )
+    (set! *bf-boot-menu?* #t)
+    (bf-director-ensure!)
+    (set! *bf-request* BF_REQ_TITLE)
+    )
   (bf-pad-lock! (*bf-stock-cpad-get-data* pad))
   )
 
@@ -2632,7 +2739,9 @@
   (if pause?
       (bf-pause-page)
       )
-  (set! (-> self cursor) (- (-> *bf* class) (* 4 (-> *bf* team))))
+  (set! (-> self cursor) (max 0 (min (+ (bf-class-count) -1) (- (-> *bf* class) (* 4 (-> *bf* team))))))
+  (set! (-> self pick-class) (-> self cursor))
+  (set! (-> self pick-point) (-> *bf* team))
   (none)
   )
 
@@ -2642,14 +2751,62 @@
         (i (-> self cursor))
         )
     (cond
+      ((= page BF_PAGE_TITLE)
+       (case i
+         ((0)
+          (set! (-> self from-title?) #t)
+          (bf-open-page BF_PAGE_ZONE)
+          )
+         ((1)
+          ;; the game's own options, from the title (its Circle closes it: the title page again)
+          (bf-close-page)
+          (set! *bf-stock-start?* #t)
+          (activate-progress *dproc* 'title-options)
+          )
+         (else
+           (kernel-shutdown (the int (runtime-exit-status exit)))
+           )
+         )
+       )
+      ((and (= page BF_PAGE_ZONE) (= i (+ BF_ZONE_COUNT 1)))
+       ;; Back
+       (bf-menu-back)
+       (return #f)
+       )
       ((and (= page BF_PAGE_ZONE) (>= i BF_ZONE_COUNT))
        ;; Spargus, to come: refused
        (sound-play "menu-back")
        (return #f)
        )
+      ((and (= page BF_PAGE_ZONE) (-> self from-title?))
+       (set! (-> self pick-zone) i)
+       (bf-open-page BF_PAGE_CONFIG)
+       (set! (-> self cursor) (+ BF_CONFIG_COUNT -1))
+       )
       ((= page BF_PAGE_ZONE)
        (set! (-> self pick-zone) i)
        (bf-open-page BF_PAGE_TEAM)
+       )
+      ((and (= page BF_PAGE_CONFIG) (< i (+ BF_CONFIG_COUNT -1)))
+       ;; a setting: Left and Right change it
+       (return #f)
+       )
+      ((= page BF_PAGE_CONFIG)
+       ;; Next: a new game in the city, at the player's side's spawn; the battle's deployment once
+       ;; Jak stands there (`*bf-request*` BF_REQ_START, `bf-director-update`)
+       (set! (-> self pick-team) (-> *bf-config* team-a))
+       (bf-close-page)
+       (set! (-> self title?) #f)
+       (set! *bf-request* BF_REQ_START)
+       (set! (-> *game-info* mode) 'play)
+       (initialize! *game-info* 'game (the-as game-save #f)
+                    (if (= (-> self pick-team) BF_TEAM_FF)
+                        (-> *bf-zones* (-> self pick-zone) ff-continue)
+                        (-> *bf-zones* (-> self pick-zone) kg-continue)
+                        )
+                    (the-as resetter-spec #f)
+                    )
+       (set-master-mode 'game)
        )
       ((= page BF_PAGE_TEAM)
        (set! (-> self pick-team) i)
@@ -2668,7 +2825,13 @@
        )
       ((= page BF_PAGE_CLASS)
        (bf-close-page)
-       (set! (-> *bf* class) (+ (* (-> self pick-team) 4) i))
+       (set! (-> self from-title?) #f)
+       (when (-> self respawn?)
+         (set! (-> *bf* respawn-choice) (-> self pick-point))
+         (set! (-> self respawn?) #f)
+         (set! (-> *bf* respawn-pick) -1)
+         )
+       (set! (-> *bf* class) (+ (* (-> self pick-team) 4) (-> self pick-class)))
        (set! (-> *bf* weapon) BF_WEAPON_RIFLE)
        (if (-> self refill?)
            (bf-refill-ammo)
@@ -2709,8 +2872,19 @@
   "Circle on the open page. The class page needs a class: the battle has started."
   (let ((page (-> self page)))
     (cond
+      ((= page BF_PAGE_TITLE)
+       ;; the title page stays: it is the game's title menu
+       (return #f)
+       )
+      ((and (= page BF_PAGE_ZONE) (-> self from-title?))
+       (bf-open-page BF_PAGE_TITLE)
+       )
       ((= page BF_PAGE_ZONE)
        (bf-close-page)
+       )
+      ((= page BF_PAGE_CONFIG)
+       (bf-open-page BF_PAGE_ZONE)
+       (set! (-> self cursor) (-> self pick-zone))
        )
       ((= page BF_PAGE_TEAM)
        (bf-open-page BF_PAGE_ZONE)
@@ -2726,6 +2900,319 @@
   (none)
   )
 
+(defun bf-config-change ((row int) (step int))
+  "Left (STEP -1) or Right (1) on row ROW of the configuration page (`*bf-config*`): the time limit
+   through `*bf-time-choices*`, the units per side by 50 from 50 to 1000, the victory condition,
+   the special characters (refused: none yet), the player's side or the other, each changing both
+   (two sides never the same)."
+  (let ((c *bf-config*))
+    (case row
+      ((0)
+       (let ((k 0))
+         (dotimes (i 6)
+           (if (= (-> *bf-time-choices* i) (-> c minutes))
+               (set! k i)
+               )
+           )
+         (set! (-> c minutes) (-> *bf-time-choices* (mod (+ k step 6) 6)))
+         )
+       )
+      ((1)
+       (set! (-> c units) (max 50 (min 1000 (+ (-> c units) (* 50 step)))))
+       )
+      ((2)
+       (set! (-> c victory) (- 1 (-> c victory)))
+       )
+      ((3)
+       (sound-play "menu-back")
+       (return #f)
+       )
+      ((4 5)
+       (set! (-> c team-a) (- 1 (-> c team-a)))
+       (set! (-> c team-b) (- 1 (-> c team-a)))
+       )
+      (else
+        (return #f)
+        )
+      )
+    )
+  (sound-play "menu-pick")
+  (none)
+  )
+
+(defun bf-config-value ((row int))
+  "Value of row ROW of the configuration page, in the game's language."
+  (let ((c *bf-config*))
+    (clear *bf-text*)
+    (case row
+      ((0)
+       (if (zero? (-> c minutes))
+           (format *bf-text* (bf-tr "None" "Aucune"))
+           (format *bf-text* "~D min" (-> c minutes))
+           )
+       )
+      ((1) (format *bf-text* "~D" (-> c units)))
+      ((2) (format *bf-text* (if (= (-> c victory) BF_WIN_POINTS) (bf-tr "Control points" "Contrôle des points") (bf-tr "Units wiped out" "Unités anéanties"))))
+      ((3) (format *bf-text* (bf-tr "No" "Non")))
+      ((4) (format *bf-text* "~S" (bf-team-name (-> c team-a))))
+      (else (format *bf-text* "~S" (bf-team-name (-> c team-b))))
+      )
+    *bf-text*
+    )
+  )
+
+(defbehavior bf-draw-config-page bf-director ((buf dma-buffer))
+  "The configuration page (round 29, in the style of the battle's other pages): on the left its
+   settings, each with its value between arrows; in the middle the war zone's map with its points;
+   on the right the two sides, the player's on top, and Next. The cursor's row in cyan."
+  (let ((cur (-> self cursor)))
+    (bf-draw-box buf 14 60 158 292)
+    (bf-draw-frame buf 178 60 168 292)
+    (bf-draw-box buf 352 60 152 292)
+    (bf-draw-text buf (bf-tr "Battle setup" "Configuration de la bataille") 0.0 36.0 0.6 (font-color menu-parent) #t)
+    (dotimes (i 4)
+      (let ((y (+ 80.0 (* 56.0 (the float i)))))
+        (bf-draw-text buf
+                      (case i
+                        ((0) (bf-tr "Time limit" "Limite de temps"))
+                        ((1) (bf-tr "Units per side" "Unités par équipe"))
+                        ((2) (bf-tr "Victory" "Condition de victoire"))
+                        (else (bf-tr "Special characters" "Personnages spéciaux"))
+                        )
+                      24.0 y 0.33 (font-color menu-parent) #f)
+        (bf-config-value i)
+        (bf-draw-arrow buf 24.0 (+ y 27.0) -1.0 (= i cur))
+        (bf-draw-text buf *bf-text* 93.0 (+ y 21.0) 0.3 (cond
+                                                           ((= i 3) (font-color menu-invalid))
+                                                           ((= i cur) (font-color cyan))
+                                                           (else (font-color default))
+                                                           ) #t)
+        (bf-draw-arrow buf 162.0 (+ y 27.0) 1.0 (= i cur))
+        )
+      )
+    (bf-draw-text buf (bf-tr "Yes: coming soon" "Oui : à venir") 93.0 (+ 80.0 (* 56.0 3.0) 36.0) 0.3 (font-color menu-invalid) #t)
+    ;; the sides
+    (dotimes (k 2)
+      (let ((y (+ 92.0 (* 76.0 (the float k))))
+            (row (+ 4 k))
+            )
+        (bf-draw-frame buf 358 (the int y) 140 56)
+        (bf-draw-text buf (if (zero? k) (bf-tr "Your side" "Votre camp") (bf-tr "The enemy" "L'adversaire")) 428.0 (+ y 6.0) 0.36 (font-color menu-parent) #t)
+        (bf-config-value row)
+        (bf-draw-arrow buf 362.0 (+ y 36.0) -1.0 (= row cur))
+        (bf-draw-text buf *bf-text* 428.0 (+ y 30.0) 0.3 (if (= row cur) (font-color cyan) (bf-team-color (if (zero? k) (-> *bf-config* team-a) (-> *bf-config* team-b)))) #t)
+        (bf-draw-arrow buf 494.0 (+ y 36.0) 1.0 (= row cur))
+        )
+      )
+    (if (= cur (+ BF_CONFIG_COUNT -1))
+        (bf-draw-frame buf 376 300 104 30)
+        )
+    (bf-draw-text buf (bf-tr "Next" "Suivant") 428.0 306.0 0.5 (if (= cur (+ BF_CONFIG_COUNT -1)) (font-color cyan) (font-color default)) #t)
+    (bf-draw-text buf (bf-tr "<PAD_X> Next  <PAD_CIRCLE> Back" "<PAD_X> Suivant  <PAD_CIRCLE> Retour") 0.0 366.0 0.38 (font-color default) #t)
+    )
+  (none)
+  )
+
+(defun bf-draw-arrow ((buf dma-buffer) (x float) (y float) (dir float) (on? symbol))
+  "A small arrow pointing left (DIR -1) or right (1), its tip at (X, Y), cyan when ON? (the cursor's
+   row), else white: the font draws < and > as its button icons."
+  (bf-draw-tri buf x y (- x (* dir 6.0)) (- y 5.0) (- x (* dir 6.0)) (+ y 5.0)
+               (if on? (static-rgba 80 220 255 128) (static-rgba 220 220 220 110))
+               )
+  (none)
+  )
+
+(defun bf-draw-panel-border ((buf dma-buffer) (x float) (y float) (w float) (h float) (color rgba))
+  "The border of a panel, 1.5 screen units thick, in COLOR (`bf-draw-line`)."
+  (bf-draw-line buf x y (+ x w) y 1.5 color)
+  (bf-draw-line buf (+ x w) y (+ x w) (+ y h) 1.5 color)
+  (bf-draw-line buf (+ x w) (+ y h) x (+ y h) 1.5 color)
+  (bf-draw-line buf x (+ y h) x y 1.5 color)
+  (none)
+  )
+
+(defun bf-draw-radar ((buf dma-buffer) (cx float) (cy float) (r float) (pick int))
+  "A round radar of the whole battlefield, centered on (CX, CY), radius R (round 29, the class
+   page's right column): its points (a ring and a lettered dot in their holder's color, the bases a
+   larger dot), the units awake as small dots of their side's color (`*bf-unit-dots*`), live, and
+   Jak in white; point PICK (the respawn point picked, -1 for none) ringed large in yellow. North is
+   up, as on the maps (world +z down). The scale fits every point with a margin."
+  (let ((x0 (meters 100000))
+        (x1 (meters -100000))
+        (z0 (meters 100000))
+        (z1 (meters -100000))
+        (sx (-> *video-params* relative-x-scale))
+        (pos (new 'stack-no-clear 'vector))
+        )
+    (dotimes (i (-> *bf* point-count))
+      (let ((p (-> *bf* points i pos)))
+        (set! x0 (fmin x0 (-> p x)))
+        (set! x1 (fmax x1 (-> p x)))
+        (set! z0 (fmin z0 (-> p z)))
+        (set! z1 (fmax z1 (-> p z)))
+        )
+      )
+    (let* ((wx (* 0.5 (+ x0 x1)))
+           (wz (* 0.5 (+ z0 z1)))
+           (k (/ (+ (fmax (- x1 x0) (- z1 z0)) (meters 160)) (* 2.0 r)))
+           )
+      (bf-draw-disc buf cx cy r (static-rgba 12 20 34 110))
+      (bf-draw-ring buf cx cy (+ r -1.5) r (static-rgba 170 192 214 120))
+      (bf-draw-ring buf cx cy (+ (* 0.5 r) -0.5) (* 0.5 r) (static-rgba 120 140 160 60))
+      ;; the units
+      (dotimes (d (-> *bf-unit-dots* count))
+        (let ((p (-> *bf-unit-dots* pos d)))
+          (bf-draw-disc buf (+ cx (* sx (/ (- (-> p x) wx) k))) (+ cy (/ (- (-> p z) wz) k)) 1.4
+                        (if (= (-> *bf-unit-dots* team d) BF_TEAM_FF) (static-rgba 60 150 255 128) (static-rgba 255 60 60 128))
+                        )
+          )
+        )
+      ;; the points
+      (dotimes (i (-> *bf* point-count))
+        (let* ((pt (-> *bf* points i))
+               (x (+ cx (* sx (/ (- (-> pt pos x) wx) k))))
+               (y (+ cy (/ (- (-> pt pos z) wz) k)))
+               (c (case (-> pt owner)
+                    ((BF_TEAM_FF) (static-rgba 40 120 255 128))
+                    ((BF_TEAM_KG) (static-rgba 235 30 30 128))
+                    (else (static-rgba 175 175 175 128))
+                    )
+                  )
+               )
+          (cond
+            ((-> pt base?)
+             (bf-draw-disc buf x y 5.0 c)
+             )
+            (else
+              (bf-draw-ring buf x y 6.0 7.0 c)
+              (bf-draw-disc buf x y 4.5 c)
+              (bf-draw-text buf (bf-point-letter i) (+ x 1.0) (- y 3.5) 0.3 (font-color white) #t)
+              )
+            )
+          (if (= i pick)
+              (bf-draw-ring buf x y 9.0 11.0 (if (logtest? (/ (-> *display* real-clock frame-counter) (seconds 0.25)) 1)
+                                                 (static-rgba 255 230 60 128)
+                                                 (static-rgba 255 230 60 60)
+                                                 )
+                            )
+              )
+          )
+        )
+      ;; Jak
+      (when (and *target* (not (focus-test? *target* dead)))
+        (vector-copy! pos (-> *target* control trans))
+        (bf-draw-disc buf (+ cx (* sx (/ (- (-> pos x) wx) k))) (+ cy (/ (- (-> pos z) wz) k)) 2.2 (static-rgba 255 255 255 128))
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-draw-class-page bf-director ((buf dma-buffer))
+  "The class page as the author drew it (round 29), the battle's deployment, a death's respawn, a
+   redeploy and Change class: on the left a panel for each class of the side, its name and its
+   features, the one picked ringed, then, after a death, the respawn point (Left and Right: the
+   side's base or a control point it holds); in the middle the reserves, the class's model turning
+   (`bf-preview-update`) and the button (Spawn, Start the battle from the title, Deploy); on the
+   right the objective and the battlefield's radar, live, the respawn point ringed
+   (`bf-draw-radar`)."
+  (let* ((team (-> self pick-team))
+         (n (bf-class-count))
+         (cur (-> self cursor))
+         (respawn? (-> self respawn?))
+         (button (if respawn? (+ n 1) n))
+         (cyan (static-rgba 80 220 255 128))
+         )
+    ;; left: the classes, then the respawn point
+    (bf-draw-box buf 8 34 184 346)
+    (bf-draw-text buf (bf-team-name team) 16.0 40.0 0.5 (font-color menu-parent) #f)
+    (bf-draw-text buf (bf-tr "Choose your class" "Choisissez votre classe") 16.0 60.0 0.36 (font-color default) #f)
+    (dotimes (i n)
+      (let ((y (+ 80.0 (* 56.0 (the float i))))
+            (class (+ (* team 4) i))
+            )
+        (bf-draw-frame buf 12 (the int y) 176 52)
+        (if (= i (-> self pick-class))
+            (bf-draw-panel-border buf 12.0 y 176.0 52.0 cyan)
+            )
+        ;; a long English name ("Red Krimzon Guard (Jetpack)") smaller, to stay in its panel
+        (bf-draw-text buf (bf-class-name class) 18.0 (+ y 4.0) (if (< 22 (length (bf-class-name class))) 0.28 0.34)
+                      (if (= i cur) (font-color cyan) (font-color default)) #f)
+        (bf-draw-text-wrapped buf (-> (if (bf-fr?) (-> *bf-classes* class desc-fr) (-> *bf-classes* class desc)) 0) 18.0 (+ y 20.0) 0.28
+                              (font-color menu-parent) 30)
+        )
+      )
+    (when respawn?
+      (let ((y (+ 86.0 (* 56.0 (the float n)))))
+        (bf-draw-frame buf 12 (the int y) 176 46)
+        (if (= cur n)
+            (bf-draw-panel-border buf 12.0 y 176.0 46.0 cyan)
+            )
+        (bf-draw-text buf (bf-tr "Respawn point" "Point de réapparition") 18.0 (+ y 5.0) 0.32 (font-color menu-parent) #f)
+        (clear *bf-text*)
+        (format *bf-text* "~S" (if (< (-> self pick-point) 2) (bf-tr "Base" "Base") (bf-point-name (-> self pick-point))))
+        (bf-draw-arrow buf 16.0 (+ y 31.0) -1.0 (= cur n))
+        (bf-draw-text buf *bf-text* 100.0 (+ y 25.0) 0.3 (bf-team-color team) #t)
+        (bf-draw-arrow buf 184.0 (+ y 31.0) 1.0 (= cur n))
+        )
+      )
+    ;; middle: the reserves, the model (drawn with the world), the button
+    (let* ((full (the float (max 1 (-> *bf* reserve-max))))
+           (ff (* 66.0 (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_FF)) full))))
+           (kg (* 66.0 (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_KG)) full))))
+           )
+      (bf-draw-quad buf 198.0 36.0 338.0 36.0 338.0 62.0 198.0 62.0 (static-rgba 46 64 96 80))
+      (bf-draw-panel-border buf 198.0 36.0 140.0 26.0 (static-rgba 170 192 214 110))
+      (if (< 0.5 ff)
+          (bf-draw-quad buf (- 266.0 ff) 40.0 266.0 40.0 266.0 46.0 (- 266.0 ff) 46.0 (static-rgba 40 140 255 128))
+          )
+      (if (< 0.5 kg)
+          (bf-draw-quad buf 270.0 40.0 (+ 270.0 kg) 40.0 (+ 270.0 kg) 46.0 270.0 46.0 (static-rgba 245 45 45 128))
+          )
+      (clear *bf-text*)
+      (format *bf-text* "~D" (-> *bf* reserve BF_TEAM_FF))
+      (bf-draw-text buf *bf-text* 244.0 47.0 0.32 (font-color cyan) #t)
+      (clear *bf-text*)
+      (format *bf-text* "~D" (-> *bf* reserve BF_TEAM_KG))
+      (bf-draw-text buf *bf-text* 292.0 47.0 0.32 (font-color red) #t)
+      )
+    (bf-draw-frame buf 198 70 140 268)
+    (if (= cur button)
+        (bf-draw-panel-border buf 202.0 346.0 132.0 28.0 cyan)
+        (bf-draw-frame buf 202 346 132 28)
+        )
+    (bf-draw-text buf
+                  (cond
+                    ((= (-> *bf* phase) BF_PHASE_DEPLOY) (bf-tr "Loading..." "Chargement..."))
+                    (respawn? (bf-tr "Spawn" "Apparaître"))
+                    ((-> self from-title?) (bf-tr "Start the battle" "Démarrer la bataille"))
+                    (else (bf-tr "Deploy" "Déployer"))
+                    )
+                  268.0 352.0 (if (-> self from-title?) 0.42 0.5) (if (= cur button) (font-color cyan) (font-color default)) #t)
+    (bf-draw-text buf (bf-tr "<PAD_X> Confirm" "<PAD_X> Valider") 268.0 384.0 0.34 (font-color default) #t)
+    ;; right: the objective, the radar
+    (bf-draw-box buf 344 34 160 66)
+    (bf-draw-text buf (bf-tr "Objective" "Objectif") 352.0 40.0 0.4 (font-color menu-parent) #f)
+    (bf-draw-text-wrapped buf (bf-tr "For now: capture the control points" "Pour le moment : capturer les points de contrôle")
+                          352.0 60.0 0.28 (font-color default) 25)
+    (bf-draw-radar buf 424.0 236.0 74.0 (if respawn? (-> self pick-point) -1))
+    )
+  (none)
+  )
+
+(defbehavior bf-draw-title-page bf-director ((buf dma-buffer))
+  "The title page (round 29, in place of the game's title menu): BATTLEFRONT, then Start a battle,
+   Options, Quit in a panel in the middle, the cursor's in cyan."
+  (bf-draw-box buf 136 120 240 180)
+  (bf-draw-text buf "BATTLEFRONT" 0.0 136.0 1.0 (font-color menu-parent) #t)
+  (dotimes (i 3)
+    (bf-draw-text buf (bf-page-label BF_PAGE_TITLE 0 i) 0.0 (+ 190.0 (* 30.0 (the float i))) 0.6
+                  (if (= i (-> self cursor)) (font-color cyan) (font-color default)) #t)
+    )
+  (bf-draw-text buf (bf-tr "<PAD_X> Select" "<PAD_X> Choisir") 0.0 280.0 0.4 (font-color default) #t)
+  (none)
+  )
+
 (defbehavior bf-menu-update bf-director ()
   "Input and drawing of the open page."
   (let ((count (bf-page-count (-> self page))))
@@ -2736,6 +3223,14 @@
        )
       ((cpad-pressed? 0 down)
        (set! (-> self cursor) (if (< (-> self cursor) (+ count -1)) (+ (-> self cursor) 1) 0))
+       (sound-play "menu-pick")
+       )
+      ((and (= (-> self page) BF_PAGE_CONFIG) (cpad-pressed? 0 left right))
+       (bf-config-change (-> self cursor) (if (cpad-pressed? 0 left) -1 1))
+       )
+      ((and (= (-> self page) BF_PAGE_CLASS) (-> self respawn?) (= (-> self cursor) (bf-class-count)) (cpad-pressed? 0 left right))
+       ;; the respawn point: the side's base or a control point it holds (`bf-next-held-point`)
+       (set! (-> self pick-point) (bf-next-held-point (-> self pick-point) (-> *bf* team) (if (cpad-pressed? 0 left) -1 1)))
        (sound-play "menu-pick")
        )
       ((cpad-pressed? 0 x)
@@ -2756,12 +3251,24 @@
        )
       )
     )
+  ;; the class page: its class the last class row the cursor stood on; a respawn page shows its point
+  ;; to the tests as the old respawn page did (`*bf*` respawn-pick)
+  (when (= (-> self page) BF_PAGE_CLASS)
+    (if (< (-> self cursor) (bf-class-count))
+        (set! (-> self pick-class) (-> self cursor))
+        )
+    (if (-> self respawn?)
+        (set! (-> *bf* respawn-pick) (-> self pick-point))
+        )
+    )
   (when (!= (-> self page) BF_PAGE_NONE)
+    (set! (-> *bf-zmap-x* 0) (if (= (-> self page) BF_PAGE_CONFIG) 262.0 BF_ZMAP_X))
     (bf-preview-update)
     (bf-draw-page)
     (if (or (and (= (-> self page) BF_PAGE_ZONE) (< (-> self cursor) BF_ZONE_COUNT))
             (= (-> self page) BF_PAGE_TEAM)
             (= (-> self page) BF_PAGE_PAUSE)
+            (= (-> self page) BF_PAGE_CONFIG)
             )
         (bf-draw-zone-minimap (if (= (-> self page) BF_PAGE_ZONE) (-> self cursor) (-> self pick-zone)))
         )
@@ -2859,6 +3366,70 @@
 ;; Director
 ;; ---------------------------------------------------------------------------------------------
 
+(defun bf-check-victory ()
+  "Every frame of a fight, the configuration's end (round 29, `*bf-config*`): past its time limit,
+   the side holding more control points wins (on a tie, the one with more units left); with
+   BF_WIN_POINTS, a side holding every control point for BF_HOLD_WIN wins. A side out of units
+   loses in any case (battlefront-h.gc `bf-count-loss`)."
+  (when (bf-fighting?)
+    (let ((ff 0)
+          (kg 0)
+          (cps 0)
+          )
+      (dotimes (i (-> *bf* point-count))
+        (let ((pt (-> *bf* points i)))
+          (when (not (-> pt base?))
+            (+! cps 1)
+            (case (-> pt owner)
+              ((BF_TEAM_FF) (+! ff 1))
+              ((BF_TEAM_KG) (+! kg 1))
+              )
+            )
+          )
+        )
+      (cond
+        ((and (< 0 (-> *bf* time-limit)) (< (* (-> *bf* time-limit) (seconds 60)) (- (current-time) (-> *bf* phase-time))))
+         (set! (-> *bf* winner)
+               (cond
+                 ((< kg ff) BF_TEAM_FF)
+                 ((< ff kg) BF_TEAM_KG)
+                 ((< (-> *bf* reserve BF_TEAM_KG) (-> *bf* reserve BF_TEAM_FF)) BF_TEAM_FF)
+                 (else BF_TEAM_KG)
+                 )
+               )
+         (format 0 "battlefront: time up, ~D points to ~D~%" ff kg)
+         (bf-set-phase! BF_PHASE_OVER)
+         )
+        ((= (-> *bf* victory) BF_WIN_POINTS)
+         (let ((holder (cond
+                         ((and (< 0 cps) (= ff cps)) BF_TEAM_FF)
+                         ((and (< 0 cps) (= kg cps)) BF_TEAM_KG)
+                         (else BF_TEAM_NONE)
+                         )
+                       )
+               )
+           (cond
+             ((= holder BF_TEAM_NONE)
+              (set! (-> *bf* hold-team) BF_TEAM_NONE)
+              )
+             ((!= holder (-> *bf* hold-team))
+              (set! (-> *bf* hold-team) holder)
+              (set! (-> *bf* hold-time) (current-time))
+              )
+             ((time-elapsed? (-> *bf* hold-time) BF_HOLD_WIN)
+              (set! (-> *bf* winner) holder)
+              (format 0 "battlefront: every control point held by side ~D~%" holder)
+              (bf-set-phase! BF_PHASE_OVER)
+              )
+             )
+           )
+         )
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior bf-director-update bf-director ()
   "One frame of the battle."
   ;; requests of the battle's pause page (START), run once that page is closed
@@ -2878,6 +3449,14 @@
       ((and (= req BF_REQ_RESTART) (bf-can-open-menu?))
        (set! *bf-request* BF_REQ_NONE)
        (bf-restart-battle!)
+       )
+      ((and (= req BF_REQ_RESPAWN) (bf-can-open-menu?))
+       (set! *bf-request* BF_REQ_NONE)
+       (when (bf-fighting?)
+         (bf-open-class-page #f #t)
+         (set! (-> self respawn?) #t)
+         (set! (-> *bf* respawn-pick) (-> self pick-point))
+         )
        )
       ((and (= req BF_REQ_CLASS) (bf-can-open-menu?))
        (set! *bf-request* BF_REQ_NONE)
@@ -2899,6 +3478,30 @@
        (set! *bf-stock-start?* #t)
        (set-master-mode 'progress)
        )
+      ((and (= req BF_REQ_TITLE) (bf-can-open-menu?))
+       (set! *bf-request* BF_REQ_NONE)
+       (when (not (bf-active?))
+         (set! (-> self from-title?) #t)
+         (set! (-> self title?) #t)
+         (bf-open-page BF_PAGE_TITLE)
+         )
+       )
+      ((and (= req BF_REQ_START)
+            (bf-can-open-menu?)
+            *target*
+            (not (focus-test? *target* dead))
+            (= (level-status? *level* 'ctywide #f) 'active)
+            (logtest? (-> *target* control status) (collide-status on-surface))
+            )
+       ;; the new game stands in the city: the battle's deployment and its class page, which starts it
+       (set! *bf-request* BF_REQ_NONE)
+       (when (not (bf-active?))
+         (bf-start-battle! (-> self pick-zone) (-> self pick-team) (* 4 (-> self pick-team)))
+         (if (bf-active?)
+             (bf-open-class-page #t #f)
+             )
+         )
+       )
       ((and (= req BF_REQ_REDEPLOY) (bf-can-open-menu?))
        (set! *bf-request* BF_REQ_NONE)
        ;; the respawn page at once (`bf-target-death`'s redeploy modes): free out of combat
@@ -2909,6 +3512,12 @@
          )
        )
       )
+    )
+  ;; the title's time: back from the game's options (its Circle closes them), the title page again
+  (when (and (-> self title?) (= (-> self page) BF_PAGE_NONE) (= *bf-request* BF_REQ_NONE) (not *progress-process*)
+             (bf-can-open-menu?) (not (bf-active?))
+             )
+    (bf-open-page BF_PAGE_TITLE)
     )
   ;; the mode switched off in the Mods menu during a battle: back to the last save, once that menu
   ;; is closed
@@ -2952,6 +3561,7 @@
        (else
          (bf-city-call BF_CITY_UPDATE)
          (bf-update-points)
+         (bf-check-victory)
          (bf-draw-points)
          ;; a red guard changed between its two models (battlefront-player.gc bf-avatar-pick-weapon)
          (when (-> *bf* redraw?)
@@ -3331,11 +3941,12 @@
   )
 
 (defbehavior bf-death-class-page target ()
-  "In `bf-target-death`: the class page of the player's side (the director's, the game paused under
-   it, `*bf-request*` BF_REQ_CLASS), until he has picked his class; then the death goes on to the
-   respawn page. The class page's X sets his class and health (`bf-menu-confirm`); his class model
-   comes with his respawn."
-  (set! *bf-request* BF_REQ_CLASS)
+  "In `bf-target-death`: the class page of the player's side with his respawn point (the
+   director's, the game paused under it, `*bf-request*` BF_REQ_RESPAWN; round 29), until he has
+   picked them. The class page's X sets his class and health (`bf-menu-confirm`) and the point
+   (`*bf*` respawn-choice); his class model comes with his respawn."
+  (set! (-> *bf* respawn-choice) -1)
+  (set! *bf-request* BF_REQ_RESPAWN)
   (let ((t0 (current-time))
         (opened? #f)
         )
@@ -3411,9 +4022,7 @@
   (set-setting! 'string-max-height 'abs (meters 6) 0)
   ;; the wait for his choice; a death that ends the battle cuts it short, for the result page. A
   ;; redeploy goes to the class page at once
-  (let ((class? (-> *bf* redeploying?))
-        (chosen? (-> *bf* redeploying?))
-        )
+  (let ((chosen? (-> *bf* redeploying?)))
     (cpad-clear! 0 confirm)
     (cpad-clear! 0 triangle)
     (while (and (bf-fighting?) (not chosen?))
@@ -3424,12 +4033,8 @@
           )
       (when (>= (current-time) (-> *bf* respawn-time))
         (cond
-          ((cpad-pressed? 0 confirm)
+          ((cpad-pressed? 0 confirm triangle)
            (set! chosen? #t)
-           )
-          ((cpad-pressed? 0 triangle)
-           (set! chosen? #t)
-           (set! class? #t)
            )
           )
         )
@@ -3437,33 +4042,16 @@
       )
     (cpad-clear! 0 confirm)
     (cpad-clear! 0 triangle)
-    (if (and class? (bf-fighting?))
+    ;; X or Triangle: the class page, the respawn point on it too (round 29)
+    (if (bf-fighting?)
         (bf-death-class-page)
         )
     )
   (set! (-> *bf* redeploying?) #f)
-  ;; the respawn point: his side's base, or a control point it holds, picked on the city's map at
-  ;; every death (`bf-draw-respawn-pick`: D-pad, then X) while the battle goes on
-  (set! (-> *bf* respawn-pick) (-> *bf* team))
-  (when (bf-fighting?)
-    (cpad-clear! 0 confirm)
-    (until (or (not (bf-fighting?)) (cpad-pressed? 0 confirm))
-      (logior! (-> self draw status) (draw-control-status no-draw))
-      (bf-spectate-follow (-> self control trans))
-      (cond
-        ((or (cpad-pressed? 0 right) (cpad-pressed? 0 down))
-         (set! (-> *bf* respawn-pick) (bf-next-held-point (-> *bf* respawn-pick) (-> *bf* team) 1))
-         )
-        ((or (cpad-pressed? 0 left) (cpad-pressed? 0 up))
-         (set! (-> *bf* respawn-pick) (bf-next-held-point (-> *bf* respawn-pick) (-> *bf* team) -1))
-         )
-        )
-      (suspend)
-      )
-    (cpad-clear! 0 confirm)
-    )
-  (let ((pick (-> *bf* respawn-pick)))
+  ;; the respawn point the class page picked (`bf-death-class-page`), his base when none
+  (let ((pick (if (>= (-> *bf* respawn-choice) 0) (-> *bf* respawn-choice) (-> *bf* team))))
     (set! (-> *bf* respawn-pick) -1)
+    (set! (-> *bf* respawn-choice) -1)
     ;; a point lost meanwhile: the base
     (if (not (bf-point-held? pick (-> *bf* team)))
         (set! pick (-> *bf* team))
@@ -3680,6 +4268,11 @@
    Load Game, Secrets and Restart Mission. Every other menu (save icons, card errors) is the stock
    one."
   (cond
+    ((and (= arg1 'title) *mod-battlefront-enable* (not *bf-stock-start?*))
+     ;; the game's title menu: the battle's title page instead (round 29, the author's wish)
+     (bf-director-ensure!)
+     (set! *bf-request* BF_REQ_TITLE)
+     )
     ((and (= arg1 'main) *mod-battlefront-enable* (not *bf-stock-start?*) *target*)
      (bf-director-ensure!)
      (set! *bf-request* BF_REQ_PAUSE)

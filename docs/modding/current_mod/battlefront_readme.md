@@ -14,8 +14,8 @@ test it, its limits, and its change log. Players read the root [`README.md`](../
 ## 1. What the mod does
 
 The mod turns a section of Haven City into a battlefield between the Freedom League and the
-Krimzon Guard. Each side has 500 units in stock; every death of a unit or of the player takes one
-from its side, and the first side down to 0 loses. The player fights on one side, as any of its
+Krimzon Guard. Each side has the units of the battle setup in stock (500 by default, 50 to 1000);
+every death of a unit or of the player takes one from its side, and a side down to 0 loses. The player fights on one side, as any of its
 four classes.
 
 | Side | AI units | Playable classes |
@@ -29,9 +29,28 @@ playable any more.
 
 ### Switching it on
 
-Open the Mods menu (**L3 + SELECT**, as every mod, works in a retail boot), then `battlefront` >
-**Battlefront mode**: the mode's switch, off at every boot. Switched on, the Mods menu closes and the
-battle's own pause page opens at once (round 28, the author's wish); on, START opens that page
+The mode is on at every boot (round 29, the author's wish: `*mod-battlefront-enable*` is `#t` in
+`battlefront-h.gc`, and nothing saves it). Its title page replaces the game's title menu: the
+`activate-progress` wrapper turns the `'title` menu into `BF_REQ_TITLE` while the mode is on. The
+title page lists **Start a battle**, **Options** (the game's own options, through
+`'title-options`; their Circle opens the title page again, `title?`) and **Quit**
+(`kernel-shutdown`). In a debug boot (`task boot-game`: no title), `cpad-get-data` opens the title
+page once Jak stands (`*bf-boot-menu?*`).
+
+From the title, Start a battle opens the war zone page, then the **battle setup**
+(`BF_PAGE_CONFIG`, `*bf-config*`): the time limit (`*bf-time-choices*`: none, 5, 10, 15, 20, 30
+minutes), the units per side (50 to 1000 by 50), the victory condition (`BF_WIN_POINTS`: every
+control point held for `BF_HOLD_WIN`, 20 s, wins; `BF_WIN_UNITS`: only a side out of units loses),
+the special characters (No; Yes is greyed, none exist), the zone's map with its points, and the two
+sides, each change swapping both so they never match. Next starts a new game in the city
+(`BF_REQ_START`: `initialize!` into the zone's continue point, then the battle once Jak stands) and
+opens the class page, its button **Start the battle** (`from-title?`). `bf-check-victory` ends a
+fight at the time limit (the side holding more control points wins, on a tie the one with more
+units left) or at a points victory; a side out of units loses in any case. A save loaded or a new
+game started during a battle ends it and switches the mode off until the next boot (`bf-stop-now!`).
+
+The Mods menu (**L3 + SELECT**) keeps the switch, `battlefront` > **Battlefront mode**. Switched on
+in game, the Mods menu closes and the battle's own pause page opens at once (round 28); on, START opens that page
 (§2.5, START: the battle's pause page); its last entry, Options, opens the game's own START
 menu, where a battle shuts Save, Load Game, Secrets and Restart Mission (their X is refused with
 the game's refusal beep). Off during a battle, it loads the last save (the slot last loaded or
@@ -45,18 +64,25 @@ stands in the right frame:
 | Resume | Back to the game. |
 | New battle | Out of a battle: the battle menu. Grey during a battle. |
 | Change class | During a fight: the class page, then the player goes on as the new class; the battle goes on. |
-| Redeploy | During a fight, the player alive: the class page (his class kept or changed), then the respawn page (round 28). Out of combat for 30 s it is free; in combat it reads "Redeploy (lose a unit)" and costs his side a unit. |
-| Restart the battle | During a fight: the same zone, side and class from 500 units each, back at the spawn with fresh ammo. |
+| Redeploy | During a fight, the player alive: the class page with its respawn point row (round 29). Out of combat for 30 s it is free; in combat it reads "Redeploy (lose a unit)" and costs his side a unit. |
+| Restart the battle | During a fight: the same zone, side and class from the setup's units each, back at the spawn with fresh ammo. |
 | Quit the battle | Ends the battle and restores the stock game. |
 | Options | The game's own START menu. |
 
 Until round 26 the game's START menu also had a Gamemode entry in Options, with the same entries;
 the author had it removed: START is the battle's page.
 
-The entries that do not apply are grey. The battle menu has three pages, war zone, side, class.
-X on the side starts the deployment and opens the class page at once: the classes on the left, and
-in a frame on the right the class under the cursor, turning a full circle every 4 seconds, as soon
-as the unit levels holding the class models are loaded. The game runs under the page while the
+The entries that do not apply are grey. In a battle the menu has three pages, war zone, side,
+class; from the title, war zone, setup, class. X on the side (or Next on the setup) starts the
+deployment and opens the class page at once, in three columns (round 29, `bf-draw-class-page`): on
+the left a panel per class, its name and its features, the class picked ringed in cyan, and after
+a death or for a redeploy (`respawn?`) a **Respawn point** row, whose Left and Right cycle the
+side's base and the control points it holds (`bf-next-held-point`); in the middle the reserves,
+the class picked turning a full circle every 4 seconds as soon as the unit levels holding the
+class models are loaded, and the button (Spawn after a death or for a redeploy, Start the battle
+from the title, Deploy otherwise); on the right the objective and a round radar of the
+battlefield (`bf-draw-radar`), live, the respawn point picked ringed in yellow. After a death the
+spectate ends on X or Triangle, both opening this page (`bf-death-class-page`). The game runs under the page while the
 zone loads ("Loading the war zone..."); once Jak stands at his spawn it pauses, and X ("Deploy")
 puts him in the battle as that class with fresh ammo. The class page has no Back (the battle has
 started). X selects, Circle goes back. The texts are French when the game language is French,
