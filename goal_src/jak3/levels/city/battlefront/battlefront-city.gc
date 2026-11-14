@@ -756,8 +756,8 @@
 (defconstant BF_GOAL_SLOTS 256)            ;; units the goals keep, by process id
 (defconstant BF_STUCK_TIME (seconds 10))   ;; a unit that has not moved BF_STUCK_MOVE in this long, away from its point and out of a fight, takes another goal
 (defconstant BF_STUCK_MOVE (meters 3))
-(defconstant BF_STUCK_HOP (seconds 8))        ;; a marching unit stuck this long near its waypoint is put onto it (`bf-march-apply`)
-(defconstant BF_STUCK_HOP_REACH (meters 15))
+(defconstant BF_STUCK_HOP (seconds 4))        ;; a marching unit stuck this long near its waypoint is put onto it (`bf-march-apply`; 8 s until round 31: guards still piled up between the Industrial Zone and the Slums, the author's play)
+(defconstant BF_STUCK_HOP_REACH (meters 20))  ;; 15 m until round 31
 (define *bf-stuck-hops* (new 'static 'array int32 1 0)) ;; for the tests: units put onto their waypoint
 
 (deftype bf-goals (structure)
@@ -1229,9 +1229,10 @@
                       (+! (-> w bridge-count) 1)
                       )
                     )
-                  (if (and (>= gap BF_BRIDGE_GAP) (< best (meters 40)))
-                      (format 0 "battlefront: no bridge between meshes ~D and ~D, corners ~M apart~%" i j gap)
-                      )
+                  (when (and (>= gap BF_BRIDGE_GAP) (< best (meters 40)))
+                    (format 0 "battlefront: no bridge between meshes ~D and ~D, corners ~M apart" i j gap)
+                    (format 0 " at ~M ~M ~M and ~M ~M ~M~%" (-> va x) (-> va y) (-> va z) (-> vb x) (-> vb y) (-> vb z))
+                    )
                   )
                 )
               )

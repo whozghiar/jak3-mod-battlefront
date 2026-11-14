@@ -2116,6 +2116,13 @@
   (set-setting! 'interp-time 'abs 0.0 0)
   (set-setting! 'allow-look-around #f 0.0 0)
   (set-setting! 'matrix-blend-max-angle 'abs (degrees 360) 0)
+  ;; the camera on this rig now (round 31): a respawn's teleport (`teleport-to-vector-start-string`,
+  ;; cam-master.gc) rebuilds the camera's slave from the settings of that moment, the dying rig's
+  ;; when it came at once (a redeploy, X on the death screen); that slave stayed on the dead rig
+  ;; and the camera hung where it was teleported (seen in game: in the air, in the water). The same
+  ;; event here, from where the camera stands, rebuilds it on this rig.
+  (apply-settings *setting-control*)
+  (send-event *camera* 'teleport-to-vector-start-string (-> *math-camera* trans))
   (go-virtual idle)
   )
 

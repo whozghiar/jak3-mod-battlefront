@@ -557,27 +557,23 @@
 ;; battlefield (battlefront-minimaps.gc), framed on the battlefield in the right frame.
 (deftype bf-zmap (structure)
   "Where the war zone's map goes (`bf-zone-view!`), in the 512 x 416 units: its center, at most half
-   its height and half its width; ROUND? fits its whole height in a disc of radius HALF (the class
-   page's radar, `bf-map-fan`), its marks kept in that disc (`bf-zone-xy`)."
+   its height and half its width (round 31: the map alone, no disc around it)."
   ((x      float)
    (y      float)
    (half   float)
    (half-w float)
-   (round? symbol)
    )
   )
 
 (define *bf-zmap* (new 'static 'bf-zmap :x 373.0 :y 206.0 :half 120.0 :half-w 96.0))
-(set! (-> *bf-zmap* round?) #f)
 
-(defun bf-zmap-set! ((x float) (y float) (half float) (half-w float) (round? symbol))
+(defun bf-zmap-set! ((x float) (y float) (half float) (half-w float))
   "Place the war zone's map (`*bf-zmap*`): the HUD's (L3) at (373, 206), 120 by 96; each page its
    own (`bf-page-map`)."
   (set! (-> *bf-zmap* x) x)
   (set! (-> *bf-zmap* y) y)
   (set! (-> *bf-zmap* half) half)
   (set! (-> *bf-zmap* half-w) half-w)
-  (set! (-> *bf-zmap* round?) round?)
   (none)
   )
 
@@ -603,11 +599,7 @@
          (w (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 2))))
          (h (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 1))))
          (aspect (bf-x-squeeze))
-         (ky (if (-> *bf-zmap* round?)
-                 (/ (* 2.0 (-> *bf-zmap* half)) h)
-                 (fmin (/ (* 2.0 (-> *bf-zmap* half)) h) (/ (* 2.0 (-> *bf-zmap* half-w)) (* w aspect)))
-                 )
-             )
+         (ky (fmin (/ (* 2.0 (-> *bf-zmap* half)) h) (/ (* 2.0 (-> *bf-zmap* half-w)) (* w aspect))))
          (kx (* ky aspect))
          )
     (set! (-> view kx) kx)
@@ -644,65 +636,6 @@
   (none)
   )
 
-(defun bf-map-fan ((buf dma-buffer))
-  "The uploaded map into BUF in the disc of `*bf-zmap*` (its center, radius HALF, round with the
-   screen's width): one textured triangle fan of 32 sides, its points kept inside the map's box
-   (`*bf-zone-view*`), so the disc shows the map and nothing past its edges. The GIF packet as
-   `bf-draw-tri`'s, packed: for each point its color, its texel (uv) and its place (xyz2), at the
-   depth `bf-map-sprite` gives the map."
-  (let* ((view *bf-zone-view*)
-         (cx (-> *bf-zmap* x))
-         (cy (-> *bf-zmap* y))
-         (r (-> *bf-zmap* half))
-         (sx (bf-x-squeeze))
-         (start (-> buf base))
-         (pkt (the-as dma-packet start))
-         (v (the-as (inline-array vector4w) (&+ start 32)))
-         )
-    ;; 103 quadwords after the DMA tag: the GIF tag and three for each of the 34 points
-    (set! (-> pkt dma) (new 'static 'dma-tag :id (dma-tag-id cnt) :qwc #x67))
-    (set! (-> pkt vif0) (new 'static 'vif-tag))
-    (set! (-> pkt vif1) (new 'static 'vif-tag :imm #x67 :cmd (vif-cmd direct) :msk #x1))
-    (let ((tag (the-as gs-gif-tag (&+ start 16))))
-      (set! (-> tag tag) (new 'static 'gif-tag64
-                           :nloop #x22
-                           :eop #x1
-                           :pre #x1
-                           :prim (new 'static 'gs-prim :prim (gs-prim-type tri-fan) :tme #x1 :abe #x1 :fst #x1)
-                           :nreg #x3
-                           )
-            )
-      (set! (-> tag regs) (new 'static 'gif-tag-regs
-                            :regs0 (gif-reg-id rgbaq)
-                            :regs1 (gif-reg-id uv)
-                            :regs2 (gif-reg-id xyz2)
-                            )
-            )
-      )
-    ;; the center, then 33 points round the disc, the last closing it
-    (dotimes (k 34)
-      (let* ((a (* 2048.0 (the float (+ k -1))))
-             (px (if (zero? k) cx (+ cx (* r sx (sin a)))))
-             (py (if (zero? k) cy (+ cy (* r (cos a)))))
-             (qx (fmax (-> view x0) (fmin (-> view x1) px)))
-             (qy (fmax (-> view y0) (fmin (-> view y1) py)))
-             (i (* 3 k))
-             )
-        (set-vector! (-> v i) 128 128 128 128)
-        (set-vector! (-> v (+ i 1))
-                     (the int (* 16.0 (/ (- qx (-> view x0)) (-> view kx))))
-                     (the int (* 16.0 (/ (- qy (-> view y0)) (-> view ky))))
-                     0
-                     0
-                     )
-        (set-vector! (-> v (+ i 2)) (the int (* 16.0 (+ 1792.0 qx))) (the int (* 16.0 (+ 1840.0 qy))) #xfffff0 0)
-        )
-      )
-    (set! (-> buf base) (&+ start 1664))
-    )
-  (none)
-  )
-
 (defun bf-draw-zone-minimap ((zone int))
   "Zone and side pages: ZONE's map (battlefront-minimaps.gc, the minimap of its whole district) in
    the right frame (`bf-zone-view!`), its marks drawn over it by `bf-draw-map-marks`. Its texels
@@ -730,10 +663,7 @@
                            (tex1-1 (new 'static 'gs-tex1 :mmag #x1 :mmin #x1))
                            (texflush 0)
                            )
-    (if (-> *bf-zmap* round?)
-        (bf-map-fan buf)
-        (bf-map-sprite buf zone)
-        )
+    (bf-map-sprite buf zone)
     )
   (set-dirty-mask! (-> *level* level-default) 4 #x1a400 0)
   (none)
@@ -909,7 +839,7 @@
 
 (defun bf-zone-xy ((zone int) (p vector) (out vector))
   "OUT x and y get world point P on ZONE's map in the right frame (`*bf-zone-view*`); returns #f when
-   it falls outside the frame, or outside the radar's disc (`*bf-zmap*` round?)."
+   it falls outside the frame."
   (let* ((view *bf-zone-view*)
          (texel (-> *bf-zone-minimap-corner* (+ (* 3 zone) 2)))
          (tx (/ (- (-> p x) (-> *bf-zone-minimap-corner* (* 3 zone))) texel))
@@ -917,16 +847,7 @@
          )
     (set! (-> out x) (+ (-> view x0) (* (-> view kx) tx)))
     (set! (-> out y) (+ (-> view y0) (* (-> view ky) ty)))
-    (and (< (-> view x0) (-> out x)) (< (-> out x) (-> view x1)) (< (-> view y0) (-> out y)) (< (-> out y) (-> view y1))
-         ;; the radar: inside its disc too
-         (or (not (-> *bf-zmap* round?))
-             (let ((dx (/ (- (-> out x) (-> *bf-zmap* x)) (bf-x-squeeze)))
-                   (dy (- (-> out y) (-> *bf-zmap* y)))
-                   )
-               (< (+ (* dx dx) (* dy dy)) (* (-> *bf-zmap* half) (-> *bf-zmap* half)))
-               )
-             )
-         )
+    (and (< (-> view x0) (-> out x)) (< (-> out x) (-> view x1)) (< (-> view y0) (-> out y)) (< (-> out y) (-> view y1)))
     )
   )
 
@@ -1762,7 +1683,7 @@
    (hud-gun `update-values!` and `draw` above)."
   ;; L3: the whole map, round as in the menus, under the HUD
   (when (-> *bf* overlay?)
-    (bf-zmap-set! 373.0 206.0 120.0 0.0 #t)
+    (bf-zmap-set! 373.0 206.0 120.0 96.0)
     (bf-draw-zone-minimap (-> *bf* zone))
     )
   (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
@@ -2068,25 +1989,26 @@
   "A battle point's mark, the same on the game's minimap and on every map of the menus (the author's
    wish, round 30): a soft glow, a thin luminous ring, a gap, then a solid disc of radius R in its
    holder's color (blue the Freedom League, red the Krimzon Guard, grey neutral) with LETTER in
-   white inside it, sized to the disc so it never runs over (none for a base). BLINK?, a capture
-   under way, dims it every other quarter second; ALPHA fades it with a page."
+   white inside it, sized to the disc so it never runs over (none for a base); round 31, smaller,
+   the glow and the ring closer. BLINK?, a capture under way, dims it every other quarter second;
+   ALPHA fades it with a page."
   (let* ((k (* alpha (if (and blink? (logtest? (/ (-> *display* real-clock frame-counter) (seconds 0.25)) 1)) 0.3 1.0)))
-         (s (* 0.043 r))
+         (s (* 0.05 r))
          )
     (case owner
       ((BF_TEAM_FF)
-       (bf-draw-disc buf x y (* 2.0 r) (bf-rgba-k (static-rgba 40 120 255 22) k))
-       (bf-draw-ring buf x y (* 1.35 r) (* 1.6 r) (bf-rgba-k (static-rgba 90 170 255 120) k))
+       (bf-draw-disc buf x y (* 1.6 r) (bf-rgba-k (static-rgba 40 120 255 22) k))
+       (bf-draw-ring buf x y (* 1.2 r) (* 1.4 r) (bf-rgba-k (static-rgba 90 170 255 120) k))
        (bf-draw-disc buf x y r (bf-rgba-k (static-rgba 40 120 255 128) k))
        )
       ((BF_TEAM_KG)
-       (bf-draw-disc buf x y (* 2.0 r) (bf-rgba-k (static-rgba 255 40 40 22) k))
-       (bf-draw-ring buf x y (* 1.35 r) (* 1.6 r) (bf-rgba-k (static-rgba 255 110 110 120) k))
+       (bf-draw-disc buf x y (* 1.6 r) (bf-rgba-k (static-rgba 255 40 40 22) k))
+       (bf-draw-ring buf x y (* 1.2 r) (* 1.4 r) (bf-rgba-k (static-rgba 255 110 110 120) k))
        (bf-draw-disc buf x y r (bf-rgba-k (static-rgba 235 30 30 128) k))
        )
       (else
-        (bf-draw-disc buf x y (* 2.0 r) (bf-rgba-k (static-rgba 255 255 255 18) k))
-        (bf-draw-ring buf x y (* 1.35 r) (* 1.6 r) (bf-rgba-k (static-rgba 235 235 235 110) k))
+        (bf-draw-disc buf x y (* 1.6 r) (bf-rgba-k (static-rgba 255 255 255 18) k))
+        (bf-draw-ring buf x y (* 1.2 r) (* 1.4 r) (bf-rgba-k (static-rgba 235 235 235 110) k))
         (bf-draw-disc buf x y r (bf-rgba-k (static-rgba 150 150 150 128) k))
         )
       )
@@ -2110,7 +2032,7 @@
           (let ((x (+ -1792.0 (-> *bf-icon-spots* x i)))
                 (y (+ -1840.0 (-> *bf-icon-spots* y i)))
                 )
-            (bf-draw-point-mark buf x y 7.0 (bf-point-letter i) (-> pt owner) (bf-point-capturing? pt) 1.0)
+            (bf-draw-point-mark buf x y 5.0 (bf-point-letter i) (-> pt owner) (bf-point-capturing? pt) 1.0)
             )
           )
         )
@@ -2965,6 +2887,12 @@
            (bf-open-page BF_PAGE_LOADING)
            )
        )
+      ((and (= page BF_PAGE_CLASS) (-> self respawn?) (< i (bf-class-count)))
+       ;; a respawn or a redeploy, X on a class (round 31, the author's wish): that class, the
+       ;; cursor on to the respawn point, whose X then confirms both
+       (set! (-> self pick-class) i)
+       (set! (-> self cursor) (bf-class-count))
+       )
       ((= page BF_PAGE_CLASS)
        ;; a respawn or a redeploy: his class and respawn point, kept for the next deaths
        (set! (-> *bf* class) (+ (* (-> self pick-team) 4) (-> self pick-class)))
@@ -3132,8 +3060,8 @@
   )
 
 (defun bf-draw-map-marks ((buf dma-buffer) (zone int) (pick int))
-  "Over a map of the war zone, the same on every page and on L3 (the author's wish, round 30): its
-   rim when round (`*bf-zmap*`); during a battle the units awake as small dots of their side's
+  "Over a map of the war zone, the same on every page and on L3 (the author's wish, round 30):
+   during a battle the units awake as small dots of their side's
    color (`*bf-unit-dots*`) and each point's mark in its holder's color, live, blinking while a side
    takes it (`bf-draw-point-mark`), Jak in white; before one, where `*bf-point-defs*` puts them,
    the bases in their side's color and the control points grey. The point PICK (-1 none) ringed in
@@ -3146,11 +3074,6 @@
         )
     (if (= *master-mode* 'game)
         (set! alpha 1.0)
-        )
-    (if (-> *bf-zmap* round?)
-        (bf-draw-ring buf (-> *bf-zmap* x) (-> *bf-zmap* y) (+ (-> *bf-zmap* half) -1.5) (-> *bf-zmap* half)
-                      (bf-rgba-k (static-rgba 128 128 64 110) alpha)
-                      )
         )
     (when active?
       (dotimes (d (-> *bf-unit-dots* count))
@@ -3182,11 +3105,11 @@
               )
             )
         (when (bf-zone-xy zone at at)
-          (bf-draw-point-mark buf (-> at x) (-> at y) (if base? 4.5 5.5) (if base? (the-as string #f) (bf-point-letter i)) owner
+          (bf-draw-point-mark buf (-> at x) (-> at y) (if base? 3.0 3.6) (if base? (the-as string #f) (bf-point-letter i)) owner
                               (and active? (bf-point-capturing? (-> *bf* points i))) alpha
                               )
           (if (= i pick)
-              (bf-draw-ring buf (-> at x) (-> at y) 9.5 11.5
+              (bf-draw-ring buf (-> at x) (-> at y) 6.0 7.5
                             (bf-rgba-k (if blink? (static-rgba 255 230 60 128) (static-rgba 255 230 60 60)) alpha)
                             )
               )
@@ -3475,16 +3398,17 @@
   )
 
 (defbehavior bf-page-map bf-director ()
-  "Where the open page shows the war zone's map (`bf-zmap-set!`), and which zone, -1 for none: round
-   on every page (the author's wish, round 30: one map everywhere), on the right of the war zone,
-   side and pause pages, in the middle of the setup, on the right of the class page."
+  "Where the open page shows the war zone's map (`bf-zmap-set!`), and which zone, -1 for none: the
+   same map on every page (the author's wish, round 30), the map alone (round 31: no disc), on the
+   right of the war zone, side and pause pages, in the middle of the setup, on the right of the
+   class page."
   (let ((page (-> self page))
         (w (-> *bf-frame* w))
         (h (-> *bf-frame* h))
         )
     (cond
       ((or (= page BF_PAGE_ZONE) (= page BF_PAGE_TEAM))
-       (bf-zmap-set! (bf-fx 0.76) (bf-fy 0.45) (fmin (* 0.42 h) (+ (/ (* 0.21 w) (bf-x-squeeze)) -2.0)) 0.0 #t)
+       (bf-zmap-set! (bf-fx 0.76) (bf-fy 0.45) (* 0.42 h) (* 0.21 w))
        (cond
          ((= page BF_PAGE_TEAM) (-> self pick-zone))
          ((< (-> self cursor) BF_ZONE_COUNT) (-> self cursor))
@@ -3492,19 +3416,15 @@
          )
        )
       ((= page BF_PAGE_CONFIG)
-       (bf-zmap-set! (bf-fx 0.515) (bf-fy 0.45) (fmin (* 0.44 h) (+ (/ (* 0.125 w) (bf-x-squeeze)) -2.0)) 0.0 #t)
+       (bf-zmap-set! (bf-fx 0.515) (bf-fy 0.45) (* 0.44 h) (* 0.12 w))
        (-> self pick-zone)
        )
       ((= page BF_PAGE_PAUSE)
-       (bf-zmap-set! (bf-fx 0.74) (bf-fy 0.45) (fmin (* 0.44 h) (+ (/ (* 0.24 w) (bf-x-squeeze)) -2.0)) 0.0 #t)
+       (bf-zmap-set! (bf-fx 0.74) (bf-fy 0.45) (* 0.44 h) (* 0.23 w))
        (-> *bf* zone)
        )
       ((= page BF_PAGE_CLASS)
-       (bf-zmap-set! (bf-fx 0.84) (bf-fy 0.6)
-                     (fmin (* 0.29 h) (+ (/ (* 0.15 w) (bf-x-squeeze)) -2.0))
-                     0.0
-                     #t
-                     )
+       (bf-zmap-set! (bf-fx 0.84) (bf-fy 0.6) (* 0.3 h) (* 0.15 w))
        (if (bf-active?) (-> *bf* zone) (-> self pick-zone))
        )
       (else
@@ -3563,7 +3483,7 @@
 (defbehavior bf-menu-input bf-director ()
   "The open page's keys, handed by the START menu (`menu-bf-page-option`): up and down move the
    cursor, Left and Right change a setting or the respawn point, X chooses, Triangle or Circle goes
-   back, neither in the page's first 0.3 s."
+   back."
   (let ((count (bf-page-count (-> self page))))
     (cond
       ((cpad-pressed? 0 up l-analog-up)
@@ -3581,12 +3501,6 @@
        ;; the respawn point: the side's base or a control point it holds (`bf-next-held-point`)
        (set! (-> self pick-point) (bf-next-held-point (-> self pick-point) (-> *bf* team) (if (cpad-pressed? 0 left) -1 1)))
        (sound-play "roll-over")
-       )
-      ;; X and Triangle 0.3 s after the page came up (`page-time`, the real clock): the press that
-      ;; opened it, still down, came back as a new press under the running battle (round 30: the
-      ;; Redeploy page confirmed at once, the death's class page closed at once)
-      ((< (- (-> *display* real-clock frame-counter) (-> self page-time)) (seconds 0.3))
-       0
        )
       ((cpad-pressed? 0 x)
        (bf-menu-confirm)
@@ -3851,6 +3765,10 @@
       (mem-copy! (the-as pointer (&-> *bf-pad-backup* type)) (the-as pointer (&-> pad type)) (the-as int (size-of cpad-info)))
       (cpad-invalid! pad)
       (set! (-> pad valid) (-> *bf-pad-backup* valid))
+      ;; the raw state the next read compares with (pad.gc service-cpads: button0-abs 1 from it):
+      ;; zeroed, a button held under the menu came as a new press every frame (round 31, seen in
+      ;; game: the cursor ran through the pages)
+      (set! (-> pad button0-shadow-abs 0) (-> *bf-pad-backup* button0-shadow-abs 0))
       (dotimes (i 15)
         (set! (-> history button0-abs i) (pad-buttons))
         (set! (-> history button0-rel i) (pad-buttons))
@@ -4265,7 +4183,7 @@
        )
      )
     ((and (= pickup (pickup-type health)) (< 0.0 amount) (bf-fighting?) (!= (-> *bf* class) BF_CLASS_JAK) *target*)
-     (let ((ret (*bf-stock-pickup-collectable* this pickup (* BF_HEALTH_PACK (/ (-> this health-max) 24.0)) pickup-handle)))
+     (let ((ret (*bf-stock-pickup-collectable* this pickup (bf-class-points (-> *bf* class) BF_HEALTH_PACK) pickup-handle)))
        (set! (-> this health) (fmin (-> this health) (bf-class-health (-> *bf* class))))
        ret
        )
@@ -4306,7 +4224,7 @@
            (set! ignore? #t)
            )
           ((<= 0.0 dmg)
-           (let ((hp (* dmg (/ (-> self fact health-max) 24.0))))
+           (let ((hp (bf-class-points (-> *bf* class) dmg)))
              ;; the health ring lights (the int health) segments: a hit that leaves less than one
              ;; shows an empty ring, and took one more hit to die (the author's play). It kills.
              (if (< (- (-> self fact health) hp) 1.0)

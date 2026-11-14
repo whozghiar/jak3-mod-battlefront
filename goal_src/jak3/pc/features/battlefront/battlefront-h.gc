@@ -1010,8 +1010,16 @@
 
 (defun bf-class-health ((class int))
   "Jak's health for CLASS's full health: his whole health bar (fact health-max, the health ring's
-   segments) stands for 24 points, so the spider robot starts half full. Needs *target*."
-  (* (-> *target* fact health-max) (/ (-> *bf-class-hp* class) 24.0))
+   segments) stands for the class's own points (`*bf-class-hp*`: 24, 18 or 12), so every class
+   starts with a full ring (round 31: the spider robot's half ring read as damage at each spawn);
+   `bf-class-points` turns points into segments. Needs *target*."
+  (-> *target* fact health-max)
+  )
+
+(defun bf-class-points ((class int) (points float))
+  "Jak's health for POINTS of CLASS's (`bf-class-health`): a hit or a health pack on the battle's
+   points, in the ring's segments. Needs *target*."
+  (* points (/ (-> *target* fact health-max) (-> *bf-class-hp* class)))
   )
 
 (defun bf-unit-hp ((proc process))

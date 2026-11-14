@@ -455,6 +455,8 @@
   (smoke-wait-for 10.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
   (set! (-> (smoke-dir) cursor) idx)
   (smoke-wait 0.6)
+  ;; round 31: X on the class, the cursor on to the respawn point, X there
+  (smoke-press (pad-buttons x) 0.6)
   (smoke-press (pad-buttons x) 1.0)
   (smoke-wait-for 60.0 (lambda () (and (bf-avatar-alive?) *target* (not (focus-test? *target* dead)) (not (-> *bf* dropping?))
                                        (= (-> *bf* class) (+ (* 4 (-> *bf* team)) idx))
@@ -5020,6 +5022,9 @@
   (smoke-respawn-page 20.0)
   (set! (-> (smoke-dir) cursor) 2)
   (smoke-wait 0.6)
+  ;; round 31: X on the class, then X on the respawn point
+  (smoke-press (pad-buttons x) 0.6)
+  (smoke-check "X on a class: the cursor on to the respawn point" (= (-> (smoke-dir) cursor) (bf-class-count)))
   (smoke-press (pad-buttons x) 1.0)
   (smoke-wait-for 60.0 (lambda () (smoke-respawned?)))
   (smoke-wait 2.0)
@@ -5049,6 +5054,157 @@
     (smoke-check "the jetpack's engine and jets play (flying-turret sounds)" (and av (nonzero? (-> av engine-id)) (nonzero? (-> av thrust-id))))
     )
   (smoke-neutral)
+  0
+  )
+
+(defbehavior smoke-r31-watch process ((tag string) (secs float))
+  "Round 31 diagnosis: every 0.25 s for SECS, the camera, Jak, the camera rig, the class model, the
+   health and the music."
+  (dotimes (k (the int (* 4.0 secs)))
+    (let ((cam (-> *math-camera* trans))
+          (jak (-> *target* control trans))
+          )
+      (format 0 "SMOKE ~S ~D: cam ~M ~M ~M~%" tag k (-> cam x) (-> cam y) (-> cam z))
+      (format 0 "SMOKE ~S ~D: jak ~M ~M ~M~%" tag k (-> jak x) (-> jak y) (-> jak z))
+      (format 0 "SMOKE ~S ~D: rig ~A av ~A health ~f class ~D~%" tag k (if (handle->process (-> *bf* rig)) #t #f) (bf-avatar-alive?)
+              (-> *target* fact health) (-> *bf* class))
+      (format 0 "SMOKE ~S ~D: dead ~A dropping ~A mode ~A~%" tag k (focus-test? *target* dead) (-> *bf* dropping?) *master-mode*)
+      (format 0 "SMOKE ~S ~D: music ~A volume ~f~%" tag k (-> *setting-control* user-current music) (-> *setting-control* user-current music-volume))
+      )
+    (smoke-wait 0.25)
+    )
+  0
+  )
+
+(defbehavior smoke-s57 process ()
+  "Scenario 57 (`smoke-scenario-late`), round 31 diagnosis: a battle watched 150 s from the South
+   Industrial Zone's point (E), every unit's place, goal, foe and the nearest foe every 5 s
+   (`bf-city-target-report`): where units stand still on their way (the passage to the Slums), and
+   whether the Freedom League's take the robotguards and the spiders near them."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (move-to-point! (-> *target* control) (-> *bf* points 8 pos))
+  (smoke-wait 5.0)
+  (dotimes (n 30)
+    (format 0 "SMOKE look ~D~%" n)
+    (bf-city-target-report)
+    (if (zero? (mod n 6))
+        (smoke-shot (if (zero? n) "r31-e-0" "r31-e"))
+        )
+    (smoke-wait 5.0)
+    )
+  (smoke-check "the diagnosis ran" #t)
+  0
+  )
+
+(defbehavior smoke-s56 process ()
+  "Scenario 56 (`smoke-scenario-late`), round 31 diagnosis: the player of the Krimzon Guard as a red
+   guard, the robotguard, then the spider, at the Freedom League's base 8 s each: each unit's foe
+   (`bf-city-target-report`: the Freedom League's on the player, 'target'); the bridges between the
+   meshes (`bf-ways-bridge-report`, and the gaps with none in the log)."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (smoke-wait 3.0)
+  (bf-ways-bridge-report)
+  (move-to-point! (-> *target* control) (-> *bf* points 0 pos))
+  (smoke-wait 3.0)
+  (dotimes (k 3)
+    (let ((idx (-> (new 'static 'array int32 3 0 2 3) k)))
+      ;; the class changed on the spot, as Change class did until round 30: the avatar again
+      (when (> k 0)
+        (set! (-> *bf* class) (+ (* 4 (-> *bf* team)) idx))
+        (bf-avatar-kill)
+        (set! (-> (smoke-dir) want-avatar?) #t)
+        (smoke-wait 2.0)
+        )
+      (smoke-invulnerable #t)
+      (smoke-wait 1.0)
+      (dotimes (n 4)
+        (format 0 "SMOKE targets class ~D look ~D~%" (-> *bf* class) n)
+        (bf-city-target-report)
+        (smoke-wait 2.0)
+        )
+      )
+    )
+  (smoke-check "the diagnosis ran" #t)
+  0
+  )
+
+(defbehavior smoke-s55 process ()
+  "Scenario 55 (`smoke-scenario-late`), round 31 diagnosis: the scrolling on the pause page under the
+   running battle (Down held 1 s); the music; a redeploy as the robotguard, then the spider, then a
+   death and a respawn as the robotguard: the camera, Jak, the rig, the class model, the health."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (smoke-wait 3.0)
+  (smoke-r31-watch "deployed" 1.0)
+  ;; the scrolling
+  (smoke-step "scrolling")
+  (smoke-start-page 'main)
+  (smoke-wait-for 8.0 (lambda () (smoke-page-up? BF_PAGE_PAUSE)))
+  (smoke-wait 0.5)
+  (let ((moves 0)
+        (last (-> (smoke-dir) cursor))
+        )
+    (smoke-hold (pad-buttons down))
+    (dotimes (f 60)
+      (suspend)
+      (when (!= (-> (smoke-dir) cursor) last)
+        (+! moves 1)
+        (set! last (-> (smoke-dir) cursor))
+        )
+      )
+    (smoke-neutral)
+    (format 0 "SMOKE scrolling: Down held 60 frames moved the cursor ~D times~%" moves)
+    (smoke-check "Down held once moves the cursor once" (= moves 1))
+    )
+  (smoke-r31-watch "pause" 1.0)
+  ;; the redeploy as the robotguard
+  (smoke-step "redeploy robotguard")
+  (set! (-> (smoke-dir) cursor) 2)
+  (smoke-wait 0.6)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
+  (set! (-> (smoke-dir) cursor) 2)
+  (smoke-wait 0.6)
+  (smoke-press (pad-buttons x) 0.6)
+  (smoke-press (pad-buttons x) 0.1)
+  (smoke-r31-watch "robot" 6.0)
+  (smoke-shot "r31-robot")
+  ;; the spider
+  (smoke-step "redeploy spider")
+  (smoke-wait 2.0)
+  (smoke-start-page 'main)
+  (smoke-wait-for 8.0 (lambda () (smoke-page-up? BF_PAGE_PAUSE)))
+  (set! (-> (smoke-dir) cursor) 2)
+  (smoke-wait 0.6)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
+  (set! (-> (smoke-dir) cursor) 3)
+  (smoke-wait 0.6)
+  (smoke-invulnerable #f)
+  (smoke-press (pad-buttons x) 0.6)
+  (smoke-press (pad-buttons x) 0.1)
+  (smoke-r31-watch "spider" 7.0)
+  (smoke-shot "r31-spider")
+  ;; a death as the spider, the robotguard again
+  (smoke-step "death spider, respawn robotguard")
+  (smoke-wait 3.0)
+  (smoke-kill-player)
+  (smoke-respawn-page 20.0)
+  (set! (-> (smoke-dir) cursor) 2)
+  (smoke-wait 0.6)
+  (smoke-press (pad-buttons x) 0.6)
+  (smoke-press (pad-buttons x) 0.1)
+  (smoke-r31-watch "respawn-robot" 8.0)
+  (smoke-shot "r31-respawn-robot")
+  (smoke-check "the diagnosis ran" #t)
   0
   )
 
@@ -5585,6 +5741,9 @@
   "Scenarios 36 to 40 (rounds 26 and 27), each in a function of its own, out of `smoke-scenario`:
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
+    ((57) (smoke-s57))
+    ((56) (smoke-s56))
+    ((55) (smoke-s55))
     ((54) (smoke-s54))
     ((53) (smoke-s53))
     ((52) (smoke-s52))
