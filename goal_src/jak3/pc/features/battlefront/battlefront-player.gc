@@ -270,6 +270,8 @@
    (aim         vector :inline) ;; where the class weapon aims this frame
    (flame       float)          ;; jetpack: its flames' size, 0.35 hovering to 1 flying fast, BF_FLAME_BOOST boosting (`bf-avatar-flames`)
    (boost?      symbol)         ;; jetpack: R2 boosts this frame
+   (engine-id   sound-id)       ;; jetpack: the bike engine's loop (`bf-avatar-jet-sound`), 0 none
+   (thrust-id   sound-id)       ;; jetpack: the bike's thrust while R2 boosts, 0 none
    )
   (:state-methods
     idle
@@ -1757,7 +1759,7 @@
   (none)
   )
 
-(defconstant BF_DIE_SPARKS 8) ;; sparks a frame while the class model dissolves (3 until round 27: none seen)
+(defconstant BF_DIE_SPARKS 10) ;; sparks a frame while the class model dissolves (3 until round 27: none seen; 8 in round 28)
 
 (defbehavior bf-avatar-sparks bf-avatar ()
   "The purple sparks of the game's death-default effect (merc-death.gc part 53, which the merc
@@ -1783,7 +1785,8 @@
 
 (defbehavior bf-avatar-dying bf-avatar ()
   "The player's class model dies (`bf-avatar-die`), a frame: a guard plays its death clip
-   (BF_CLIP_DIE, with the guards' death cry), then dissolves in purple sparks (`bf-avatar-sparks`,
+   (BF_CLIP_DIE, with the guards' fall, crimson-fall: no guard death cry is in the banks), then
+   dissolves in purple sparks (`bf-avatar-sparks`,
    the game's enemy-fizz); the robotguard explodes at once; a jetpack guard dissolves, then
    explodes; the spider explodes with its death cry. Then the model goes (deactivate)."
   (let ((t (- (-> self clock frame-counter) (-> self die-time)))
@@ -1794,7 +1797,7 @@
        (case (-> self die-step)
          ((0)
           (bf-avatar-top-stop)
-          (sound-play "guard-die")
+          (sound-play "crimson-fall")
           (ja-channel-push! 1 (seconds 0.1))
           (ja :group! (-> self draw art-group data BF_CLIP_DIE) :num! min)
           (set! (-> self die-step) 1)
@@ -1823,7 +1826,7 @@
       ((or (= class BF_CLASS_BLUE_JETPACK) (= class BF_CLASS_RED_JETPACK))
        (case (-> self die-step)
          ((0)
-          (sound-play "guard-die")
+          (sound-play "crimson-fall")
           (sound-play "enemy-fizz")
           (set! (-> self die-step) 1)
           )
@@ -2392,8 +2395,15 @@
   )
 
 (defmethod deactivate ((this bf-avatar))
-  "Give Jak back his model, speed and camera, and take the shield down, when the avatar goes."
+  "Give Jak back his model, speed and camera, take the shield down and stop the jetpack's sounds,
+   when the avatar goes."
   (set! (-> *setting-control* user-default speed-mult) 1.0)
+  (if (nonzero? (-> this engine-id))
+      (sound-stop (-> this engine-id))
+      )
+  (if (nonzero? (-> this thrust-id))
+      (sound-stop (-> this thrust-id))
+      )
   (bf-shield-close this)
   (bf-cam-rig-kill)
   (if *target*
@@ -2445,6 +2455,58 @@
               (draw-beam (-> *part-id-table* 5203) pos dir #f)
               )
           )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-jet-sound bf-avatar ()
+  "The jetpack classes' sound, the city's bikes' (the author's wish, round 29), as their engine plays
+   it (levels/factory/car/hvehicle-effects.gc): the vehicle-engine loop with the bike's engine
+   select (1, `bike.gc`), its pitch rising with the speed, at full health (reg 1); while R2 boosts,
+   the bike's thrust (bike-thrust) too. Both stop once the model dies or is hidden. Side effects:
+   `engine-id`, `thrust-id`."
+  (cond
+    ((and (or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
+          (not (-> self dying?))
+          (not (logtest? (-> self draw status) (draw-control-status no-draw)))
+          *target*
+          )
+     (if (zero? (-> self engine-id))
+         (set! (-> self engine-id) (new-sound-id))
+         )
+     (let* ((v (-> *target* control transv))
+            (speed (fmin 1.0 (/ (sqrtf (+ (* (-> v x) (-> v x)) (* (-> v z) (-> v z)) (* (-> v y) (-> v y)))) (meters 24))))
+            (spec (static-sound-spec "vehicle-engine" :group 0 :volume 0.0 :mask (pitch reg0)))
+            )
+       (set! (-> spec volume) (the int (* 1024.0 (+ 0.6 (* 0.4 speed)))))
+       (set! (-> spec pitch-mod) (the int (* 1524.0 (+ -0.25 (* 0.25 (if (-> self boost?) 1.0 speed))))))
+       (set! (-> spec reg 0) (the-as uint 1))
+       (set! (-> spec reg 1) (the-as uint 127))
+       (sound-play-by-spec spec (-> self engine-id) (-> self root trans))
+       )
+     (cond
+       ((-> self boost?)
+        (if (zero? (-> self thrust-id))
+            (set! (-> self thrust-id) (new-sound-id))
+            )
+        (sound-play "bike-thrust" :id (-> self thrust-id) :position (-> self root trans))
+        )
+       ((nonzero? (-> self thrust-id))
+        (sound-stop (-> self thrust-id))
+        (set! (-> self thrust-id) (new 'static 'sound-id))
+        )
+       )
+     )
+    (else
+      (when (nonzero? (-> self engine-id))
+        (sound-stop (-> self engine-id))
+        (set! (-> self engine-id) (new 'static 'sound-id))
+        )
+      (when (nonzero? (-> self thrust-id))
+        (sound-stop (-> self thrust-id))
+        (set! (-> self thrust-id) (new 'static 'sound-id))
         )
       )
     )
@@ -2576,6 +2638,7 @@
   :post (behavior ()
     (ja-post)
     (bf-avatar-flames)
+    (bf-avatar-jet-sound)
     )
   )
 
@@ -2606,6 +2669,8 @@
   (set! (-> self rolling?) #f)
   (set! (-> self flame) 0.35)
   (set! (-> self boost?) #f)
+  (set! (-> self engine-id) (new 'static 'sound-id))
+  (set! (-> self thrust-id) (new 'static 'sound-id))
   (set! (-> self salvo-left) 0)
   (set! (-> self salvo-time) 0)
   (set! (-> self melee-time) 0)

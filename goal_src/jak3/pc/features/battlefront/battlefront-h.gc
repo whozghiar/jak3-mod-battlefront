@@ -796,6 +796,10 @@
              (method-of-type effect-control do-effect)
              )
 
+;; For the tests: Jak's effects and sounds printed while on (`do-effect`, battlefront.gc
+;; `sound-play-by-name`).
+(define *bf-log-sounds* #f)
+
 (defmethod do-effect ((this effect-control) (arg0 string) (arg1 float) (arg2 int))
   "Every effect of a clip goes through here (effect-control.gc). A death effect (death-default and
    the other death-* effects) is skipped for the mod's build-actor models (`bf-custom-model?`): it
@@ -813,7 +817,16 @@
                 )
               )
         )
+    (if (and *bf-log-sounds* (= (-> this process) *target*))
+        (format 0 "SMOKE jak effect ~A~%" (if name name arg0))
+        )
     (cond
+      ((and name (= (-> this process) *target*) (string-prefix= "breath" name) (bf-fighting?) (!= (-> *bf* class) BF_CLASS_JAK))
+       ;; Jak's breaths and grunts (breath-in-loud, breath-out-loud, his clips' effects): his voice
+       ;; as a hit lands, not his class's (round 29's tests); his class cries instead
+       ;; (battlefront.gc `bf-class-hit-cry`)
+       (none)
+       )
       ((and name (string-prefix= "death-" name) (-> this process) (bf-custom-model? (-> this process)))
        ;; a red guard of the battle dissolves as the blue ones do, in the dissolve's sparks
        ;; (`bf-fizz-start!`; the author's wish, round 28: its body stayed until the pool took it)
@@ -832,9 +845,9 @@
 ;; The red guards' death: the blue guards' dissolve (the death-default effect, merc-death.gc), which
 ;; a build-actor model cannot take (`do-effect`), made of its purple sparks (Lisp wiki jak3 4.35).
 (defconstant BF_FIZZ_MAX 16)
-(defconstant BF_FIZZ_SPARKS 4)           ;; sparks a frame from a dissolving red guard
-(defconstant BF_FIZZ_HIDE (seconds 1))   ;; its body hidden then
-(defconstant BF_FIZZ_TIME (seconds 1.5)) ;; and let go then
+(defconstant BF_FIZZ_SPARKS 6)             ;; sparks a frame from a dissolving red guard
+(defconstant BF_FIZZ_HIDE (seconds 1.25))  ;; its body hidden then: death-default's 75 frames
+(defconstant BF_FIZZ_TIME (seconds 1.75))  ;; and let go then
 
 (deftype bf-fizz (structure)
   "The red guards dissolving (`bf-fizz-start!`, `bf-fizz-tick`)."
@@ -851,15 +864,22 @@
   )
 
 (defun bf-fizz-sparks ((proc process-drawable) (n int))
-  "N purple sparks of the game's dissolve (merc-death.gc part 53, which the dissolve launches from
-   each vertex) from as many joints of PROC drawn at random. Side effects: particles."
+  "N purple sparks of the game's dissolve from as many joints of PROC drawn at random, each up to
+   0.4 m off it: part 53, launched as the dissolve launches it from the model's vertices
+   (merc-death.gc `merc-death-spawn`: `sp-launch-particles-death` in the 2D particle system).
+   Launched with `launch-particles` (round 28) they showed as a few pale discs, the blue guards'
+   dissolve as a purple cloud (round 29's films). Side effects: particles."
   (let ((joints (-> proc node-list length))
         (pos (new 'stack-no-clear 'vector))
+        (part (-> *part-id-table* 53))
         )
-    (when (< 2 joints)
+    (when (and (< 2 joints) (nonzero? part))
       (dotimes (k n)
         (vector<-cspace! pos (-> proc node-list data (+ 1 (rand-vu-int-count (+ joints -1)))))
-        (launch-particles (-> *part-id-table* 53) pos)
+        (+! (-> pos x) (* (meters 0.4) (+ -1.0 (* 2.0 (rand-vu)))))
+        (+! (-> pos y) (* (meters 0.4) (+ -1.0 (* 2.0 (rand-vu)))))
+        (+! (-> pos z) (* (meters 0.4) (+ -1.0 (* 2.0 (rand-vu)))))
+        (sp-launch-particles-death *sp-particle-system-2d* part pos)
         )
       )
     )
@@ -947,7 +967,9 @@
     ((bf-hover-art? this)
      (let ((joint (-> this node-list data (if (zero? side) 15 17))))
        (vector<-cspace! pos joint)
-       (vector-normalize-copy! dir (-> joint bone transform vector 2) -1.0)
+       ;; straight down under the turbine (the author's wish, round 29: along the joint's -z they
+       ;; pointed back)
+       (set-vector! dir 0.0 -1.0 0.0 1.0)
        )
      #t
      )
@@ -1021,6 +1043,8 @@
       )
   )
 
+(defconstant BF_PLAYER_DAMAGE 2.0) ;; the player's shots and blows on units deal this many times a unit's (`damage-enemy-from-attack!`)
+
 (defun bf-attack-damage ((sender process) (owner process))
   "Damage, on the 24 point scale, of an attack that SENDER sent for OWNER (the attacker: a shot's or
    a blast's owner), -1.0 to leave it to the stock rules. Told by the sender's type. The player's own
@@ -1068,6 +1092,10 @@
       (else
         (if (and owner (>= (bf-unit-team owner) 0) (= (bf-unit-team owner) (bf-unit-team this)))
             (set! dmg 0.0)
+            )
+        ;; the player's shots and blows deal BF_PLAYER_DAMAGE times a unit's (the author's wish, round 29)
+        (if (= owner *target*)
+            (set! dmg (* BF_PLAYER_DAMAGE dmg))
             )
         (let ((max-hp (-> this enemy-info default-hit-points)))
           (set! (-> this hit-points) (fmin (-> this hit-points) max-hp))

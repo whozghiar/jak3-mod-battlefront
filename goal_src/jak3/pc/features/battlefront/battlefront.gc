@@ -477,6 +477,55 @@
   (none)
   )
 
+(defmacro bf-draw-quad (buf x0 y0 x1 y1 x2 y2 x3 y3 color)
+  "A filled quad of COLOR, corners (X0, Y0) to (X3, Y3) in order around it: two triangles
+   (`bf-draw-tri`), in the screen units of `draw-sprite2d-xy`. A macro: a function takes 8
+   arguments at most."
+  `(let ((qx0 ,x0)
+         (qy0 ,y0)
+         (qx2 ,x2)
+         (qy2 ,y2)
+         (qc ,color)
+         )
+     (bf-draw-tri ,buf qx0 qy0 ,x1 ,y1 qx2 qy2 qc)
+     (bf-draw-tri ,buf qx0 qy0 qx2 qy2 ,x3 ,y3 qc)
+     )
+  )
+
+(defun bf-draw-line ((buf dma-buffer) (x0 float) (y0 float) (x1 float) (y1 float) (w float) (color rgba))
+  "A line of COLOR, W screen units thick, from (X0, Y0) to (X1, Y1): a quad (`bf-draw-quad`)."
+  (let* ((dx (- x1 x0))
+         (dy (- y1 y0))
+         (len (fmax 0.001 (sqrtf (+ (* dx dx) (* dy dy)))))
+         (nx (* (/ (- dy) len) 0.5 w))
+         (ny (* (/ dx len) 0.5 w))
+         )
+    (bf-draw-quad buf (+ x0 nx) (+ y0 ny) (+ x1 nx) (+ y1 ny) (- x1 nx) (- y1 ny) (- x0 nx) (- y0 ny) color)
+    )
+  (none)
+  )
+
+(defun bf-draw-ring ((buf dma-buffer) (x float) (y float) (r0 float) (r1 float) (color rgba))
+  "A ring of COLOR around (X, Y), from radius R0 to R1: sixteen quads (`bf-draw-quad`), round with
+   the screen's width (relative-x-scale) as `bf-draw-disc`."
+  (let ((sx (-> *video-params* relative-x-scale)))
+    (dotimes (k 16)
+      (let ((a0 (* 4096.0 (the float k)))
+            (a1 (* 4096.0 (the float (+ k 1))))
+            )
+        (bf-draw-quad buf
+                      (+ x (* sx r0 (sin a0))) (+ y (* r0 (cos a0)))
+                      (+ x (* sx r1 (sin a0))) (+ y (* r1 (cos a0)))
+                      (+ x (* sx r1 (sin a1))) (+ y (* r1 (cos a1)))
+                      (+ x (* sx r0 (sin a1))) (+ y (* r0 (cos a1)))
+                      color
+                      )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-zone-xy ((zone int) (p vector) (out vector))
   "OUT x and y get world point P on ZONE's map in the right frame (`*bf-zone-view*`); returns #f when
    it falls outside the frame."
@@ -997,30 +1046,67 @@
   (none)
   )
 
-(defconstant BF_BAR_HALF 76)  ;; length of a full reserve bar, out from the screen's middle
+
+(defconstant BF_HUD_L 144.0)  ;; the reserve meter's top bar, left end (screen units, 512 wide)
+(defconstant BF_HUD_R 368.0)  ;; its right end
+(defconstant BF_HUD_T 6.0)    ;; its top
+(defconstant BF_HUD_B 24.0)   ;; its bottom, where the counts' compartment hangs
+(defconstant BF_HUD_C 42.0)   ;; the compartment's bottom
 
 (defun bf-draw-reserves ((buf dma-buffer))
-  "Top middle, after the reinforcement meter of Star Wars Battlefront (2004): in a dark panel, the
-   player's side's bar runs left from the middle in green and the enemy's runs right in red, each as
-   long as its reserve (BF_RESERVE fills it), with the two counts under them on either side of a
+  "Top middle, the reinforcement meter as the author drew it (round 29): a wide, flat T in a
+   semi-transparent slate blue with a thin light blue-grey border and a divider down its middle; in
+   its top bar the two reserves fill outward from the middle, the Freedom League's in bright blue to
+   the left, the Krimzon Guard's in bright red to the right, each as long as its reserve
+   (BF_RESERVE fills it); under it, an inverted trapezoid holds the two counts on either side of the
    divider. Narrow enough to stay clear of the stock gun HUD top right."
-  (let* ((mine (-> *bf* team))
-         (them (- 1 mine))
-         (lm (the int (/ (* (the float BF_BAR_HALF) (the float (-> *bf* reserve mine))) (the float BF_RESERVE))))
-         (lt (the int (/ (* (the float BF_BAR_HALF) (the float (-> *bf* reserve them))) (the float BF_RESERVE))))
+  (let* ((l BF_HUD_L)
+         (r BF_HUD_R)
+         (top BF_HUD_T)
+         (bot BF_HUD_B)
+         (mid (* 0.5 (+ top bot)))
+         (cb BF_HUD_C)
+         (bev 9.0)
+         (back (static-rgba 46 64 96 80))
+         (edge (static-rgba 170 192 214 120))
+         (track (static-rgba 20 24 34 90))
+         (half (- 256.0 (+ l bev 3.0)))
+         (ff (* half (/ (the float (-> *bf* reserve BF_TEAM_FF)) (the float BF_RESERVE))))
+         (kg (* half (/ (the float (-> *bf* reserve BF_TEAM_KG)) (the float BF_RESERVE))))
          )
-    (bf-draw-box buf (- 248 BF_BAR_HALF) 4 (+ (* 2 BF_BAR_HALF) 16) 36)
-    (draw-sprite2d-xy buf (- 254 BF_BAR_HALF) 9 BF_BAR_HALF 5 (static-rgba 50 50 50 128) #x3fffff)
-    (draw-sprite2d-xy buf 258 9 BF_BAR_HALF 5 (static-rgba 50 50 50 128) #x3fffff)
-    (draw-sprite2d-xy buf (- 254 lm) 9 lm 5 (static-rgba 60 220 60 128) #x3fffff)
-    (draw-sprite2d-xy buf 258 9 lt 5 (static-rgba 235 50 50 128) #x3fffff)
-    (draw-sprite2d-xy buf 255 16 2 20 (static-rgba 255 255 255 75) #x3fffff)
+    ;; the background: the top bar, an elongated hexagon, then the compartment under its middle
+    (bf-draw-quad buf (+ l bev) top (- r bev) top (- r bev) bot (+ l bev) bot back)
+    (bf-draw-tri buf l mid (+ l bev) top (+ l bev) bot back)
+    (bf-draw-tri buf r mid (- r bev) top (- r bev) bot back)
+    (bf-draw-quad buf 200.0 bot 312.0 bot 298.0 cb 214.0 cb back)
+    ;; the bars' tracks, then the two reserves from the middle outward
+    (bf-draw-quad buf (- 254.0 half) (+ top 4.0) 254.0 (+ top 4.0) 254.0 (- bot 4.0) (- 254.0 half) (- bot 4.0) track)
+    (bf-draw-quad buf 258.0 (+ top 4.0) (+ 258.0 half) (+ top 4.0) (+ 258.0 half) (- bot 4.0) 258.0 (- bot 4.0) track)
+    (if (< 0.5 ff)
+        (bf-draw-quad buf (- 254.0 ff) (+ top 4.0) 254.0 (+ top 4.0) 254.0 (- bot 4.0) (- 254.0 ff) (- bot 4.0) (static-rgba 40 140 255 128))
+        )
+    (if (< 0.5 kg)
+        (bf-draw-quad buf 258.0 (+ top 4.0) (+ 258.0 kg) (+ top 4.0) (+ 258.0 kg) (- bot 4.0) 258.0 (- bot 4.0) (static-rgba 245 45 45 128))
+        )
+    ;; the border, the compartment's sides and the divider
+    (bf-draw-line buf (+ l bev) top (- r bev) top 1.0 edge)
+    (bf-draw-line buf (- r bev) top r mid 1.0 edge)
+    (bf-draw-line buf r mid (- r bev) bot 1.0 edge)
+    (bf-draw-line buf (- r bev) bot 312.0 bot 1.0 edge)
+    (bf-draw-line buf 312.0 bot 298.0 cb 1.0 edge)
+    (bf-draw-line buf 298.0 cb 214.0 cb 1.0 edge)
+    (bf-draw-line buf 214.0 cb 200.0 bot 1.0 edge)
+    (bf-draw-line buf 200.0 bot (+ l bev) bot 1.0 edge)
+    (bf-draw-line buf (+ l bev) bot l mid 1.0 edge)
+    (bf-draw-line buf l mid (+ l bev) top 1.0 edge)
+    (bf-draw-line buf 256.0 top 256.0 cb 1.0 edge)
+    ;; the counts
     (clear *bf-text*)
-    (format *bf-text* "~D" (-> *bf* reserve mine))
-    (bf-draw-text buf *bf-text* 226.0 18.0 0.55 (font-color green) #t)
+    (format *bf-text* "~D" (-> *bf* reserve BF_TEAM_FF))
+    (bf-draw-text buf *bf-text* 232.0 (+ bot 3.0) 0.42 (font-color cyan) #t)
     (clear *bf-text*)
-    (format *bf-text* "~D" (-> *bf* reserve them))
-    (bf-draw-text buf *bf-text* 286.0 18.0 0.55 (font-color red) #t)
+    (format *bf-text* "~D" (-> *bf* reserve BF_TEAM_KG))
+    (bf-draw-text buf *bf-text* 280.0 (+ bot 3.0) 0.42 (font-color red) #t)
     )
   (none)
   )
@@ -1378,20 +1464,29 @@
 (define-extern bf-draw-minimap-letters (function dma-buffer none))
 
 (defun bf-draw-points-hud ((buf dma-buffer))
-  "Under the reserves: each control point's letter in its holder's color (white neutral), A to H
-   from left to right (`bf-point-rank`), and under it the share of a capture under way, in the
-   capturing side's color; on the minimap, each control point's letter over its mark
-   (`bf-draw-minimap-letters`)."
+  "The control points: on the minimap, each one's mark (`bf-draw-minimap-letters`); under the
+   reserves, only the point whose capture zone the player stands in (BF_POINT_RADIUS; the author's
+   wish, round 29: until then all eight, A to H), its letter in its holder's color (white neutral)
+   and, under it, the capture under way in percent in the capturing side's color, else its
+   holder's hold (100 %, 0 % neutral)."
   (bf-draw-minimap-letters buf)
-  (dotimes (i (-> *bf* point-count))
-    (let ((pt (-> *bf* points i)))
-      (when (not (-> pt base?))
-        (let ((x (+ 256.0 (* 30.0 (+ -3.5 (the float (bf-point-rank i)))))))
-          (bf-draw-text buf (bf-point-letter i) x 66.0 0.7 (bf-team-color (-> pt owner)) #t)
-          (when (and (!= (-> pt prog-team) BF_TEAM_NONE) (< 0.0 (-> pt progress)))
-            (clear *bf-text*)
-            (format *bf-text* "~D%" (the int (* 100.0 (/ (-> pt progress) BF_CAPTURE_TIME))))
-            (bf-draw-text buf *bf-text* x 90.0 0.4 (bf-team-color (-> pt prog-team)) #t)
+  (when *target*
+    (dotimes (i (-> *bf* point-count))
+      (let ((pt (-> *bf* points i)))
+        (when (and (not (-> pt base?))
+                   (< (vector-vector-xz-distance (-> *target* control trans) (-> pt pos)) BF_POINT_RADIUS)
+                   )
+          (bf-draw-text buf (bf-point-letter i) 0.0 52.0 0.8 (bf-team-color (-> pt owner)) #t)
+          (clear *bf-text*)
+          (cond
+            ((and (!= (-> pt prog-team) BF_TEAM_NONE) (< 0.0 (-> pt progress)))
+             (format *bf-text* "~D%" (the int (* 100.0 (/ (-> pt progress) BF_CAPTURE_TIME))))
+             (bf-draw-text buf *bf-text* 0.0 76.0 0.5 (bf-team-color (-> pt prog-team)) #t)
+             )
+            (else
+              (format *bf-text* "~D%" (if (= (-> pt owner) BF_TEAM_NONE) 0 100))
+              (bf-draw-text buf *bf-text* 0.0 76.0 0.5 (bf-team-color (-> pt owner)) #t)
+              )
             )
           )
         )
@@ -1744,8 +1839,8 @@
     :default-position (new 'static 'vector :w 1.0)
     :name "bf-point"
     :icon-xy (new 'static 'vector2ub :data (new 'static 'array uint8 2 #x0 #x1))
-    :scale 4.0
-    :color (new 'static 'rgba :r #xff :g #x18 :b #x18 :a #x80)
+    :scale 0.01
+    :color (new 'static 'rgba :a #x80)
     )
   )
 
@@ -1791,18 +1886,39 @@
 (defconstant BF_LETTER_DY 4.7)    ;; its top this far over its mark's center (font units)
 
 (defun bf-draw-minimap-letters ((buf dma-buffer))
-  "Each control point's letter in white over its red mark on the minimap, where the minimap drew it
-   this frame or the one before (`*bf-icon-spots*`): a mark not drawn (out of the minimap, or the
-   minimap hidden) gets no letter. GS units to font units: the 512 by 416 screen starts at 1792,
-   1840 (hud.gc)."
+  "Each control point's mark on the minimap, as the author drew it (round 29): a soft glow, a thin
+   luminous ring, a transparent gap, then a solid dot with the point's letter, in its holder's
+   color: blue for the Freedom League, red for the Krimzon Guard, white neutral. Drawn where the
+   minimap drew the point's own mark, an invisible icon, this frame or the one before
+   (`*bf-icon-spots*`): a mark out of the minimap, or the minimap hidden, gets none. GS units to
+   screen units: the 512 by 416 screen starts at 1792, 1840 (hud.gc)."
   (let ((now (-> *display* base-clock integral-frame-counter)))
     (dotimes (i (-> *bf* point-count))
-      (when (and (not (-> *bf* points i base?)) (>= (-> *bf-icon-spots* frame i) (+ now -1)))
-        (bf-draw-text buf (bf-point-letter i)
-                      (+ -1792.0 BF_LETTER_DX (-> *bf-icon-spots* x i))
-                      (- (+ -1840.0 (-> *bf-icon-spots* y i)) BF_LETTER_DY)
-                      BF_LETTER_SCALE (font-color white) #t
-                      )
+      (let ((pt (-> *bf* points i)))
+        (when (and (not (-> pt base?)) (>= (-> *bf-icon-spots* frame i) (+ now -1)))
+          (let ((x (+ -1792.0 (-> *bf-icon-spots* x i)))
+                (y (+ -1840.0 (-> *bf-icon-spots* y i)))
+                )
+            (case (-> pt owner)
+              ((BF_TEAM_FF)
+               (bf-draw-disc buf x y 12.0 (static-rgba 40 120 255 22))
+               (bf-draw-ring buf x y 8.0 9.5 (static-rgba 90 170 255 120))
+               (bf-draw-disc buf x y 6.0 (static-rgba 40 120 255 128))
+               )
+              ((BF_TEAM_KG)
+               (bf-draw-disc buf x y 12.0 (static-rgba 255 40 40 22))
+               (bf-draw-ring buf x y 8.0 9.5 (static-rgba 255 110 110 120))
+               (bf-draw-disc buf x y 6.0 (static-rgba 235 30 30 128))
+               )
+              (else
+                (bf-draw-disc buf x y 12.0 (static-rgba 255 255 255 18))
+                (bf-draw-ring buf x y 8.0 9.5 (static-rgba 235 235 235 110))
+                (bf-draw-disc buf x y 6.0 (static-rgba 175 175 175 128))
+                )
+              )
+            (bf-draw-text buf (bf-point-letter i) (+ x BF_LETTER_DX) (- y BF_LETTER_DY) BF_LETTER_SCALE (font-color white) #t)
+            )
+          )
         )
       )
     )
@@ -2262,6 +2378,21 @@
    grenade throw, a rifle shot or a tazer stab (`*bf*` still-until, battlefront-player.gc): no
    weapon fires on the run since round 28 (the author's wish; the rifle did in rounds 26 and 27).
    Returns PAD."
+  ;; a guard jumps once, no second jump in the air; the robotguard does not jump (the author's
+  ;; wish, round 29): X off then. Not while a page or a menu is up (X picks there), nor dead
+  (when (and (zero? (-> pad number))
+             (bf-fighting?)
+             (not *popup-menu-open*)
+             *target*
+             (not (focus-test? *target* dead))
+             (or (= (-> *bf* class) BF_CLASS_ROBOGUARD)
+                 (and (bf-guard-class? (-> *bf* class))
+                      (or (not (logtest? (-> *target* control status) (collide-status on-surface))) (bf-target-airborne?))
+                      )
+                 )
+             )
+    (set! (-> pad button0) (logclear (-> pad button0) (pad-buttons x)))
+    )
   (when (and (zero? (-> pad number))
              (or (-> *bf* dropping?) (< (-> *display* game-clock frame-counter) (-> *bf* still-until)))
              (bf-fighting?)
@@ -2927,6 +3058,32 @@
              sound-play-by-name
              )
 
+(define *bf-cry-time* (new 'static 'array time-frame 1 0))
+
+(defun bf-class-hit-cry ()
+  "The player's class cries as a hit lands (the author's wish, round 29), at most every half second:
+   a guard or a jetpack guard as the battle's guards do (their speech, `speech-type` guard-hit,
+   guard.gc; the guards have no hit sound in their banks), the robotguard its metal rattle
+   (robo-mtl-rattle), the spider its jabber (spydroid-jabber), from Jak's place."
+  (let ((now (-> *display* game-clock frame-counter)))
+    (when (and *target* (< (seconds 0.5) (- now (-> *bf-cry-time* 0))))
+      (set! (-> *bf-cry-time* 0) now)
+      (case (-> *bf* class)
+        ((BF_CLASS_ROBOGUARD)
+         (sound-play "robo-mtl-rattle" :position (-> *target* control trans))
+         )
+        ((BF_CLASS_SPYDROID)
+         (sound-play "spydroid-jabber" :position (-> *target* control trans))
+         )
+        (else
+          (speech-control-method-13 *speech-control* *target* (speech-type guard-hit) (rand-vu-int-count 2))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior sound-play-by-name process-drawable ((name sound-name)
                                                   (id sound-id)
                                                   (vol int)
@@ -2935,22 +3092,58 @@
                                                   (group sound-group)
                                                   (trans object)
                                                   )
-  "Every sound the game plays by name. During a fight with the class model up, Jak's cry as a hit
-   lands (target-death.gc target-hit, target-handler.gc: oof, hit-up) is his class's instead: the
-   guards' (the jetpack guards' too), the spider robot's, none for the robotguard, which has no cry
-   of its own. The rest is the stock player."
-  (if (and (or (sound-name= name (static-sound-name "oof")) (sound-name= name (static-sound-name "hit-up")))
-           (bf-fighting?)
-           (bf-avatar-alive?)
-           (= self *target*)
-           )
-      (case (-> *bf* class)
-        ((BF_CLASS_ROBOGUARD) id)
-        ((BF_CLASS_SPYDROID) (*bf-stock-sound-play-by-name* (static-sound-name "spydroid-hit") id vol pitch bend group trans))
-        (else (*bf-stock-sound-play-by-name* (static-sound-name "guard-hit") id vol pitch bend group trans))
-        )
+  "Every sound the game plays by name. During a fight with the class model up: Jak's cries as a hit
+   lands (target-death.gc target-hit, target-handler.gc: oof, hit-up) are silent, his class crying
+   instead (`bf-class-hit-cry`, from `target-attacked`); his jumps (jump, jump-double, target.gc)
+   are his class's (the author's wish, round 29): the guards' and the jetpack guards' crimson-jump
+   (their bank, CITYFFH), the spider's a robot's metal rattle (robo-mtl-rattle, CITYKGF), none for
+   the robotguard, which does not jump. The rest is the stock player."
+  (if (and *bf-log-sounds* (= self *target*))
+      (format 0 "SMOKE jak sound ~A~%" (sound-name->string name))
+      )
+  (cond
+    ((not (and (bf-fighting?) (bf-avatar-alive?) (= self *target*)))
+     (*bf-stock-sound-play-by-name* name id vol pitch bend group trans)
+     )
+    ((or (sound-name= name (static-sound-name "oof")) (sound-name= name (static-sound-name "hit-up")))
+     id
+     )
+    ((or (sound-name= name (static-sound-name "jump")) (sound-name= name (static-sound-name "jump-double")))
+     (case (-> *bf* class)
+       ((BF_CLASS_ROBOGUARD) id)
+       ((BF_CLASS_SPYDROID) (*bf-stock-sound-play-by-name* (static-sound-name "robo-mtl-rattle") id vol pitch bend group trans))
+       (else (*bf-stock-sound-play-by-name* (static-sound-name "crimson-jump") id vol pitch bend group trans))
+       )
+     )
+    (else
       (*bf-stock-sound-play-by-name* name id vol pitch bend group trans)
       )
+    )
+  )
+
+;; Stock pickup step of Jak's facts, kept across REPL reloads of this file (Lisp wiki jak3 4.10).
+(define-perm *bf-stock-pickup-collectable* (function fact-info-target pickup-type float handle float)
+             (method-of-type fact-info-target pickup-collectable!)
+             )
+
+(defconstant BF_HEALTH_PACK 3.0) ;; points of the 24 point scale a health pickup gives back in a fight
+
+(defmethod pickup-collectable! ((this fact-info-target) (pickup pickup-type) (amount float) (pickup-handle handle))
+  "Every pickup Jak takes (game-info.gc). During a fight, with a class, a health pickup gives back
+   BF_HEALTH_PACK points of the 24 point scale (the author's wish, round 29; the stock pack, 2 of
+   the ring's 8 segments, was 6), no more than the class's full health (`bf-class-health`). The
+   rest: the stock step."
+  (cond
+    ((and (= pickup (pickup-type health)) (< 0.0 amount) (bf-fighting?) (!= (-> *bf* class) BF_CLASS_JAK) *target*)
+     (let ((ret (*bf-stock-pickup-collectable* this pickup (* BF_HEALTH_PACK (/ (-> this health-max) 24.0)) pickup-handle)))
+       (set! (-> this health) (fmin (-> this health) (bf-class-health (-> *bf* class))))
+       ret
+       )
+     )
+    (else
+      (*bf-stock-pickup-collectable* this pickup amount pickup-handle)
+      )
+    )
   )
 
 ;; Stock attack handler of the player, kept the same way.
@@ -2994,10 +3187,14 @@
            (logior! (-> arg1 mask) (attack-mask damage))
            )
           )
-        ;; a hit taken: in combat (redeploying waits BF_REDEPLOY_CALM)
-        (if (not ignore?)
-            (bf-combat!)
-            )
+        ;; a hit taken: in combat (redeploying waits BF_REDEPLOY_CALM); the class cries, unless the
+        ;; robotguard's shield stops it
+        (when (not ignore?)
+          (bf-combat!)
+          (if (not (-> *bf* shield?))
+              (bf-class-hit-cry)
+              )
+          )
         )
       )
     (set! (-> self fact shield-level) (if (-> *bf* shield?) 1.0 0.0))

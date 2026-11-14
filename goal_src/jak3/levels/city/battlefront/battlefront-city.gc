@@ -752,6 +752,76 @@
     )
   )
 
+;; Each unit keeps its goal (`bf-city-sticky-goal`) until its side holds it, or it is stuck.
+(defconstant BF_GOAL_SLOTS 256)            ;; units the goals keep, by process id
+(defconstant BF_STUCK_TIME (seconds 10))   ;; a unit that has not moved BF_STUCK_MOVE in this long, away from its point and out of a fight, takes another goal
+(defconstant BF_STUCK_MOVE (meters 3))
+(defconstant BF_STUCK_HOP (seconds 8))        ;; a marching unit stuck this long near its waypoint is put onto it (`bf-march-apply`)
+(defconstant BF_STUCK_HOP_REACH (meters 15))
+(define *bf-stuck-hops* (new 'static 'array int32 1 0)) ;; for the tests: units put onto their waypoint
+
+(deftype bf-goals (structure)
+  "The units' goals (`bf-city-sticky-goal`), by process id (BF_GOAL_SLOTS)."
+  ((unit  handle     BF_GOAL_SLOTS)
+   (goal  int8       BF_GOAL_SLOTS)
+   (salt  int32      BF_GOAL_SLOTS)   ;; how many times it drew again for being stuck
+   (time  time-frame BF_GOAL_SLOTS)   ;; when it last moved BF_STUCK_MOVE (or drew)
+   (pos   vector     BF_GOAL_SLOTS :inline)
+   )
+  )
+
+(define *bf-goals* (new 'static 'bf-goals))
+
+;; no unit yet: a 0 handle is read as a process at address 0 and crashes (Lisp wiki common.md)
+(dotimes (i BF_GOAL_SLOTS)
+  (set! (-> *bf-goals* unit i) (the-as handle #f))
+  )
+
+(defun bf-city-sticky-goal ((proc process) (team int))
+  "The control point unit PROC of side TEAM conquers (`bf-city-unit-goal`): drawn once
+   (`bf-city-goal-point`) and kept until its side holds it. Drawn again at each change of hands
+   (round 27), the units turned back at every capture, one spider going for points 7, 3, 8, 4 in
+   turn (round 29's tests). A unit that has not moved BF_STUCK_MOVE in BF_STUCK_TIME, more than
+   20 m from its point and out of a fight, draws another (its salt): units stood 35 to 80 s at
+   the same spot on their way, at the Port Gate's and the Industrial Zone's seams (round 29's
+   tests). -1 when its side holds every control point."
+  (let* ((g *bf-goals*)
+         (k (logand (-> proc pid) (+ BF_GOAL_SLOTS -1)))
+         (h (process->handle proc))
+         (now (-> *display* game-clock frame-counter))
+         (here (-> (the-as process-drawable proc) root trans))
+         )
+    (when (!= (-> g unit k) h)
+      (set! (-> g unit k) h)
+      (set! (-> g goal k) -1)
+      (set! (-> g salt k) 0)
+      (vector-copy! (-> g pos k) here)
+      (set! (-> g time k) now)
+      )
+    (let ((cur (-> g goal k)))
+      ;; moving, near its point or fighting: not stuck
+      (when (or (< BF_STUCK_MOVE (vector-vector-xz-distance here (-> g pos k)))
+                (bf-city-engaged? proc)
+                (and (>= cur 0) (< (vector-vector-xz-distance here (-> *bf* points cur pos)) (meters 20)))
+                )
+        (vector-copy! (-> g pos k) here)
+        (set! (-> g time k) now)
+        )
+      (when (< BF_STUCK_TIME (- now (-> g time k)))
+        (+! (-> g salt k) 1)
+        (set! cur -1)
+        (vector-copy! (-> g pos k) here)
+        (set! (-> g time k) now)
+        )
+      (when (or (< cur 0) (>= cur (-> *bf* point-count)) (-> *bf* points cur base?) (= (-> *bf* points cur owner) team))
+        (set! cur (bf-city-goal-point team (+ (-> proc pid) (* 7 (-> g salt k)) (bf-city-owners-key))))
+        (set! (-> g goal k) cur)
+        )
+      cur
+      )
+    )
+  )
+
 (defun bf-city-unit-goal ((proc process) (team int))
   "The point unit PROC of side TEAM heads for, as Star Wars Battlefront's units take the command
    posts: a contested point near it first (`bf-city-contested-point`), to clear it of the other
@@ -760,9 +830,10 @@
    one unit in four brought there; with no foe coming, the guards stood around the point already
    taken, the author's play, round 26); else one of the BF_GOAL_PICK points its side does not hold
    nearest its base (`bf-city-goal-point`), to conquer it, drawn at random by its process id and
-   the points' owners (`bf-city-owners-key`): the units spread over the front, and each draws again
-   when a point changes hands (the author's wish, round 27: before, all went for the nearest but 3
-   in 10); with every control point held, the one nearest it (`bf-city-guard-point`). -1 for none."
+   the points' owners (`bf-city-owners-key`): the units spread over the front (the author's wish,
+   round 27: before, all went for the nearest but 3 in 10); kept until its side holds it, or drawn
+   again when the unit is stuck (`bf-city-sticky-goal`, round 29); with every control point held,
+   the one nearest it (`bf-city-guard-point`). -1 for none."
   (let* ((pos (-> (the-as process-drawable proc) root trans))
          (contest (bf-city-contested-point team pos))
          (post (bf-post-point proc))
@@ -776,7 +847,7 @@
        post
        )
       (else
-        (let ((goal (bf-city-goal-point team (+ (-> proc pid) (bf-city-owners-key)))))
+        (let ((goal (bf-city-sticky-goal proc team)))
           (if (>= goal 0)
               goal
               (bf-city-guard-point team pos)
@@ -1637,6 +1708,28 @@
                (set! (-> w unit i) (the-as handle #f))
                )
              )
+            ;; stuck BF_STUCK_HOP near its waypoint (a seam its nav does not cross: two units stood 55
+            ;; and 90 s at (760, 1206), between the Port and the Industrial Zone, round 29's tests):
+            ;; put onto the waypoint, on its mesh
+            ((let ((k (logand (-> unit pid) (+ BF_GOAL_SLOTS -1))))
+               (and (= (-> *bf-goals* unit k) (process->handle unit))
+                    (< BF_STUCK_HOP (- (-> *display* game-clock frame-counter) (-> *bf-goals* time k)))
+                    (< (vector-vector-xz-distance (-> unit root trans) (-> w to i)) BF_STUCK_HOP_REACH)
+                    )
+               )
+             (let ((dest (find-nearest-nav-mesh (-> w to i) (meters 4)))
+                   (k (logand (-> unit pid) (+ BF_GOAL_SLOTS -1)))
+                   )
+               (when dest
+                 (change-to dest unit)
+                 (move-to-point! (-> unit root) (-> w to i))
+                 (+! (-> *bf-stuck-hops* 0) 1)
+                 (format 0 "battlefront: unit ~D stuck, put onto its waypoint at ~M ~M~%" (-> unit pid) (-> w to i x) (-> w to i z))
+                 )
+               (vector-copy! (-> *bf-goals* pos k) (-> unit root trans))
+               (set! (-> *bf-goals* time k) (-> *display* game-clock frame-counter))
+               )
+             )
             (else
               (vector-copy! (-> unit dest-point) (-> w to i))
               (set! (-> unit wait-time) (seconds 3600))
@@ -2186,6 +2279,68 @@
       #t
       )
     *null-kernel-context*
+    )
+  (none)
+  )
+
+(defun bf-unit-kind-name ((p process))
+  "For the tests: a unit's kind with its side: red-guard, blue-guard, red-jet, blue-jet, or its type."
+  (let ((sym (-> p type symbol)))
+    (cond
+      ((= sym 'crimson-guard) (if (bf-red-guard? p) 'red-guard 'blue-guard))
+      ((= sym 'flying-turret) (if (= (bf-unit-team p) BF_TEAM_FF) 'blue-jet 'red-jet))
+      (else sym)
+      )
+    )
+  )
+
+(defun bf-city-target-report ()
+  "For the tests: each unit of the battle the attack controller holds, awake: its process id, kind,
+   side, state, place, goal point and how far, its foe's kind and how far, the nearest unit of the
+   other side within 40 m (kind, how far, in sight), its march and its fight."
+  (when (bf-city-controller?)
+    (let ((ctrl *cty-attack-controller*))
+      (dotimes (i (-> ctrl attackers length))
+        (let* ((info (-> ctrl attackers data i))
+               (p (the-as process-drawable (handle->process (-> info proc))))
+               )
+          (when (and p (!= p *target*) (>= (bf-unit-team p) 0) (-> p next-state) (!= (-> p next-state name) 'inactive)
+                     (logtest? (-> info flags) (city-attacker-info-flag cai0))
+                     )
+            (let* ((team (bf-unit-team p))
+                   (foe (-> info enemy-index))
+                   (fp (if (>= foe 0) (the-as process-drawable (handle->process (-> ctrl attackers data foe proc)))))
+                   (goal (bf-city-unit-goal p team))
+                   (near (the-as process-drawable #f))
+                   (near-d (meters 40))
+                   )
+              (dotimes (j (-> ctrl attackers length))
+                (let ((q (the-as process-drawable (handle->process (-> ctrl attackers data j proc)))))
+                  (when (and q (!= q p) (>= (bf-unit-team q) 0) (!= (bf-unit-team q) team)
+                             (not (focus-test? (the-as process-focusable q) dead inactive))
+                             )
+                    (let ((d (vector-vector-xz-distance (-> q root trans) (-> p root trans))))
+                      (when (< d near-d)
+                        (set! near q)
+                        (set! near-d d)
+                        )
+                      )
+                    )
+                  )
+                )
+              (format 0 "SMOKE tgt ~D ~A ~D ~A at ~M ~M" (-> p pid) (bf-unit-kind-name p) team (-> p next-state name)
+                      (-> p root trans x) (-> p root trans z))
+              (format 0 " goal ~D ~M foe ~A ~M" goal
+                      (if (>= goal 0) (vector-vector-xz-distance (-> p root trans) (-> *bf* points goal pos)) -1.0)
+                      (if fp (bf-unit-kind-name fp) '-)
+                      (if fp (vector-vector-xz-distance (-> fp root trans) (-> p root trans)) -1.0))
+              (format 0 " near ~A ~M sees ~A march ~A fight ~A~%" (if near (bf-unit-kind-name near) '-) (if near near-d -1.0)
+                      (if near (bf-city-sees? p near) #f) (bf-marching? p) (bf-city-engaged? p))
+              )
+            )
+          )
+        )
+      )
     )
   (none)
   )
