@@ -2462,11 +2462,11 @@
   )
 
 (defbehavior bf-avatar-jet-sound bf-avatar ()
-  "The jetpack classes' sound, the city's bikes' (the author's wish, round 29), as their engine plays
-   it (levels/factory/car/hvehicle-effects.gc): the vehicle-engine loop with the bike's engine
-   select (1, `bike.gc`), its pitch rising with the speed, at full health (reg 1); while R2 boosts,
-   the bike's thrust (bike-thrust) too. Both stop once the model dies or is hidden. Side effects:
-   `engine-id`, `thrust-id`."
+  "The jetpack classes' sound, the battle's jetpack guards' own (the author's wish, round 30: a
+   class sounds as its unit), as their flying-turret code plays them (flying-turret.gc): the
+   engine loop (f-turret-engine), louder and higher with the speed, and the jets (fly-turret-jets),
+   louder while R2 boosts. Both stop once the model dies or is hidden. Side effects: `engine-id`,
+   `thrust-id`."
   (cond
     ((and (or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
           (not (-> self dying?))
@@ -2476,27 +2476,23 @@
      (if (zero? (-> self engine-id))
          (set! (-> self engine-id) (new-sound-id))
          )
+     (if (zero? (-> self thrust-id))
+         (set! (-> self thrust-id) (new-sound-id))
+         )
      (let* ((v (-> *target* control transv))
-            (speed (fmin 1.0 (/ (sqrtf (+ (* (-> v x) (-> v x)) (* (-> v z) (-> v z)) (* (-> v y) (-> v y)))) (meters 24))))
-            (spec (static-sound-spec "vehicle-engine" :group 0 :volume 0.0 :mask (pitch reg0)))
+            (speed (fmax 0.0 (fmin 1.0 (/ (sqrtf (+ (* (-> v x) (-> v x)) (* (-> v z) (-> v z)) (* (-> v y) (-> v y)))) (meters 15)))))
+            (jets (if (-> self boost?) 1.0 (* 0.4 speed)))
             )
-       (set! (-> spec volume) (the int (* 1024.0 (+ 0.6 (* 0.4 speed)))))
-       (set! (-> spec pitch-mod) (the int (* 1524.0 (+ -0.25 (* 0.25 (if (-> self boost?) 1.0 speed))))))
-       (set! (-> spec reg 0) (the-as uint 1))
-       (set! (-> spec reg 1) (the-as uint 127))
-       (sound-play-by-spec spec (-> self engine-id) (-> self root trans))
-       )
-     (cond
-       ((-> self boost?)
-        (if (zero? (-> self thrust-id))
-            (set! (-> self thrust-id) (new-sound-id))
-            )
-        (sound-play "bike-thrust" :id (-> self thrust-id) :position (-> self root trans))
-        )
-       ((nonzero? (-> self thrust-id))
-        (sound-stop (-> self thrust-id))
-        (set! (-> self thrust-id) (new 'static 'sound-id))
-        )
+       (sound-play-by-name (static-sound-name "f-turret-engine") (-> self engine-id)
+                           (the int (* 1024.0 (lerp 0.5 1.0 speed)))
+                           (the int (* 1524.0 (lerp 0.0 0.25 speed)))
+                           0 (sound-group) #t
+                           )
+       (sound-play-by-name (static-sound-name "fly-turret-jets") (-> self thrust-id)
+                           (the int (* 1024.0 (lerp 0.5 1.0 jets)))
+                           (the int (* 1524.0 (lerp 0.0 0.2 jets)))
+                           0 (sound-group) #t
+                           )
        )
      )
     (else

@@ -494,5 +494,6 @@
   "battlefront-h.o"
   "battlefront-player.o"
   "battlefront-minimaps.o"
+  "battlefront-portraits.o"
   "battlefront.o"
  ))

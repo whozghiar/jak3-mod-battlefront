@@ -151,7 +151,7 @@
 ;; battlefront-city.gc).
 (defconstant BF_POINT_MAX 10)
 (defconstant BF_CONTROL_POINTS 8) ;; two in each district (one before round 27)
-(defconstant BF_POINT_RADIUS (meters 15))      ;; units within it count for its capture
+(defconstant BF_POINT_RADIUS (meters 25))      ;; units within it count for its capture (15 m until round 30)
 (defconstant BF_CAPTURE_TIME 30.0)             ;; seconds a side's majority on it takes to capture it
 
 (deftype bf-point (structure)
@@ -198,6 +198,7 @@
    (respawn-time  time-frame)     ;; the dead player may choose from then (battlefront.gc `bf-target-death`), 0 alive
    (redeploying?  symbol)         ;; the player's death is a redeploy: the class page at once
    (respawn-choice int32)         ;; the point the class page picked for the dead player's respawn, -1 for none (battlefront.gc `bf-target-death`)
+   (respawn-point int32)          ;; the player's respawn point, kept from one death to the next (round 30): his base at a deployment
    (reserve-max   int32)          ;; units per side at the battle's start (the configuration page, battlefront.gc `*bf-config*`)
    (time-limit    int32)          ;; minutes the fight lasts at most, 0 for no limit
    (victory       int32)          ;; BF_WIN_POINTS or BF_WIN_UNITS

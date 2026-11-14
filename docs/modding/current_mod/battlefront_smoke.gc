@@ -64,6 +64,8 @@
 
 (define *smoke-shot* (new 'static 'smoke-shot-settings :width 1280 :height 720 :msaa 4))
 
+(define *smoke-name* (new 'global 'string 64 (the-as string #f)))
+
 (defun smoke-shot ((tag string))
   "Save <config>/OpenGOAL/jak3/screenshots/smoke-<tag>.png (written about 0.5 s later). The runner
    copies it to out/smoke/<test>/."
@@ -344,9 +346,9 @@
   )
 
 (defbehavior smoke-bf-pause process ((entry int))
-  "START: the battle's pause page (the mode on), ENTRY under the cursor, X: 1 New battle, 2 Change
-   class, 3 Redeploy, 4 Restart the battle, 5 Quit the battle, 6 Options (battlefront.gc
-   `*bf-pause-reqs*`)."
+  "START: the battle's pause page (the mode on), ENTRY under the cursor, X: 1 New battle, 2 Redeploy
+   (the class page), 3 Restart the battle, 4 Quit the battle, 5 Options (battlefront.gc
+   `*bf-pause-reqs*`, round 30)."
   (smoke-start-page 'main)
   (smoke-wait-for 8.0 (lambda () (smoke-page-up? BF_PAGE_PAUSE)))
   (set! (-> (smoke-dir) cursor) entry)
@@ -358,24 +360,21 @@
 
 (defbehavior smoke-game-menu process ()
   "The game's own START menu, through the pause page's Options entry."
-  (smoke-bf-pause 6)
+  (smoke-bf-pause 5)
   (smoke-wait-for 5.0 (lambda () (if *progress-process* #t #f)))
   (smoke-wait 1.5)
   0
   )
 
 (defbehavior smoke-title-battle process ((team int))
-  "Round 29, from the title page: Start a battle, the war zone (Haven City), the configuration page
-   (side TEAM on top), Next: a new game in the city, then the class page, the zone loading under
-   it, its button Start the battle; then the game paused under it once Jak stands at his spawn."
+  "From the title menu: Start a battle, the war zone (Haven City), the configuration page (side
+   TEAM on top), Next: the class page, before the battle (round 30); `smoke-deploy` picks the class
+   and starts it."
   (smoke-step "title: start a battle")
   (set! (-> *progress-process* 0 option-index) 0)
   (smoke-wait 0.5)
   (smoke-press (pad-buttons x) 1.0)
   (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_ZONE)))
-  (format 0 "SMOKE after Start a battle: page ~D progress ~A next ~A depth ~D transition ~f~%"
-          (if (smoke-dir) (-> (smoke-dir) page) -1) (-> *progress-process* 0 current) (-> *progress-process* 0 next)
-          (-> *progress-process* 0 state-pos) (-> *progress-process* 0 menu-transition))
   (smoke-check "Start a battle opens the war zone page" (smoke-page-up? BF_PAGE_ZONE))
   (smoke-shot "zone-page")
   (set! (-> (smoke-dir) cursor) 0)
@@ -392,32 +391,17 @@
   (smoke-wait 0.6)
   (smoke-shot "config-page")
   (smoke-press (pad-buttons x) 1.0)
-  (smoke-wait-for 120.0 (lambda () (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_CLASS))))
-  (format 0 "SMOKE after Next: page ~D phase ~D team ~D~%" (-> (smoke-dir) page) (-> *bf* phase) (-> *bf* team))
-  (smoke-check "Next: the city loads, then the class page"
-               (and (= (-> (smoke-dir) page) BF_PAGE_CLASS) (-> (smoke-dir) from-title?) (= (-> *bf* team) team))
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
+  (smoke-check "Next: the class page, before the battle"
+               (and (smoke-page-up? BF_PAGE_CLASS) (= (-> (smoke-dir) class-mode) BF_CLASS_DEPLOY) (not (bf-active?)))
                )
-  (smoke-wait 1.0)
-  (smoke-shot "class-page-loading")
-  (smoke-wait-for 150.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
-  (smoke-wait 2.0)
-  (format 0 "SMOKE zone ready: page ~D phase ~D mode ~A preview ~A~%" (-> (smoke-dir) page) (-> *bf* phase)
-          *master-mode* (if (handle->process (-> (smoke-dir) preview)) #t #f))
-  (smoke-check "the zone loaded, then the class page in the START menu, the game paused, the preview shown"
-               (and (smoke-page-up? BF_PAGE_CLASS)
-                    (= (-> *bf* phase) BF_PHASE_FIGHT)
-                    (= *master-mode* 'progress)
-                    (if (handle->process (-> (smoke-dir) preview)) #t #f)
-                    )
-               )
-  (smoke-shot "class-page-ready")
+  (smoke-shot "class-page-title")
   0
   )
 
 (defbehavior smoke-battle-start process ((zone int) (team int))
-  "From the title page (round 29): `smoke-title-battle`. In the city: START > New battle, war zone
-   ZONE, side TEAM. Checks the page order: the class page right after the side page, the zone
-   loading under it; then the game paused under it once Jak stands at his spawn."
+  "From the title menu: `smoke-title-battle`. In the city: START > New battle, war zone ZONE, side
+   TEAM, then the class page, before the battle (round 30); `smoke-deploy` picks the class."
   (when (smoke-title-up?)
     (smoke-title-battle team)
     (return 0)
@@ -427,43 +411,34 @@
   (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_ZONE)))
   (smoke-check "New battle opens the war zone page" (smoke-page-up? BF_PAGE_ZONE))
   ;; round 17: one war zone, the whole city (ZONE is kept for the older scenarios' calls)
+  ;; a page takes X 0.3 s after it came up (battlefront.gc `bf-menu-input`)
   (set! (-> (smoke-dir) cursor) 0)
-  (smoke-wait 0.3)
+  (smoke-wait 0.5)
   (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_TEAM)))
   (smoke-check "X on the zone opens the side page" (smoke-page-up? BF_PAGE_TEAM))
   (set! (-> (smoke-dir) cursor) team)
   (smoke-step "side chosen")
-  (smoke-tap (pad-buttons x) 4)
-  (smoke-wait 0.3)
-  (format 0 "SMOKE after side: page ~D phase ~D mode ~A~%" (-> (smoke-dir) page) (-> *bf* phase) *master-mode*)
-  (smoke-check "the class page follows the side page at once, the zone loading under it"
-               (and (= (-> (smoke-dir) page) BF_PAGE_CLASS) (= (-> *bf* phase) BF_PHASE_DEPLOY))
+  (smoke-wait 0.5)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
+  (smoke-check "the side opens the class page, before the battle"
+               (and (smoke-page-up? BF_PAGE_CLASS) (= (-> (smoke-dir) class-mode) BF_CLASS_DEPLOY))
                )
-  (smoke-wait 1.0)
-  (smoke-shot "class-page-loading")
-  (smoke-wait-for 150.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
-  (smoke-wait 2.0)
-  (format 0 "SMOKE zone ready: page ~D phase ~D mode ~A preview ~A~%" (-> (smoke-dir) page) (-> *bf* phase)
-          *master-mode* (if (handle->process (-> (smoke-dir) preview)) #t #f))
-  (smoke-check "the zone loaded, then the class page in the START menu, the game paused, the preview shown"
-               (and (smoke-page-up? BF_PAGE_CLASS)
-                    (= (-> *bf* phase) BF_PHASE_FIGHT)
-                    (= *master-mode* 'progress)
-                    (if (handle->process (-> (smoke-dir) preview)) #t #f)
-                    )
-               )
-  (smoke-shot "class-page-ready")
   0
   )
 
 (defbehavior smoke-deploy process ((idx int) (tag string))
-  "On the open class page: class IDX of the side, X. Checks that the class model is in play."
+  "On the class page before a battle (round 30): class IDX of the side, X; the war zone loads on
+   black, then the player is in as that class. Checks that the class model is in play."
   (smoke-step tag)
   (smoke-wait-for 10.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
   (set! (-> (smoke-dir) cursor) idx)
   (smoke-wait 0.6)
   (smoke-press (pad-buttons x) 1.0)
-  (smoke-wait-for 15.0 (lambda () (bf-avatar-alive?)))
+  (smoke-wait 1.0)
+  (smoke-shot "loading")
+  (smoke-wait-for 180.0 (lambda () (and (bf-avatar-alive?) (= (-> *bf* phase) BF_PHASE_FIGHT) (= (-> (smoke-dir) page) BF_PAGE_NONE))))
   (smoke-wait 1.5)
   (let ((want (+ (* 4 (-> *bf* team)) idx)))
     (format 0 "SMOKE deployed class ~D (want ~D) avatar ~A mode ~A~%" (-> *bf* class) want (bf-avatar-alive?) *master-mode*)
@@ -473,20 +448,29 @@
   )
 
 (defbehavior smoke-change-class process ((idx int) (tag string))
-  "START > Change class, then class IDX."
+  "START > Redeploy (round 30: the class changes there), class IDX, his respawn point kept, X."
   (smoke-step "change class")
   (smoke-neutral)
   (smoke-bf-pause 2)
-  (smoke-wait-for 10.0 (lambda () (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_CLASS))))
-  (smoke-wait 1.0)
-  (smoke-deploy idx tag)
+  (smoke-wait-for 10.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
+  (set! (-> (smoke-dir) cursor) idx)
+  (smoke-wait 0.6)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 60.0 (lambda () (and (bf-avatar-alive?) *target* (not (focus-test? *target* dead)) (not (-> *bf* dropping?))
+                                       (= (-> *bf* class) (+ (* 4 (-> *bf* team)) idx))
+                                       )
+                        )
+                  )
+  (smoke-wait 1.5)
+  (smoke-check tag (and (bf-avatar-alive?) (= (-> *bf* class) (+ (* 4 (-> *bf* team)) idx))))
+  0
   )
 
 (defbehavior smoke-quit process ()
   "START > Quit the battle; the city back, the battle off."
   (smoke-step "quit the battle")
   (smoke-neutral)
-  (smoke-bf-pause 5)
+  (smoke-bf-pause 4)
   (smoke-wait-for 60.0 (lambda () (and (= (-> *bf* phase) BF_PHASE_OFF) (= *master-mode* 'game))))
   (smoke-wait-stand 60.0)
   (smoke-wait 2.0)
@@ -1866,7 +1850,7 @@
   (smoke-step "restart the battle")
   (smoke-neutral)
   (let ((class (-> *bf* class)))
-    (smoke-bf-pause 4)
+    (smoke-bf-pause 3)
     (smoke-wait 1.0)
     (smoke-wait-for 90.0 (lambda () (and (bf-fighting?) (bf-avatar-alive?))))
     (smoke-wait 2.0)
@@ -2183,18 +2167,16 @@
   )
 
 (defbehavior smoke-respawn-page process ((secs float))
-  "After a death or a redeploy, until the respawn page is open (SECS at most): X on the class page
-   (a redeploy's, the class kept), X once the dead player may choose (round 28: he watches the
-   battle until X, or Triangle for the class page)."
+  "After a death, until the class page with the respawn point is open (SECS at most): Triangle once
+   the dead player may choose (round 30: X respawns him at once, Triangle opens the page)."
   (let ((t0 (smoke-now)))
     (until (or (>= (-> *bf* respawn-pick) 0) (< (the int (* 300.0 secs)) (- (smoke-now) t0)))
       (cond
-        ((and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_CLASS))
-         (smoke-press (pad-buttons x) 1.0)
-         )
-        ((and *target* (focus-test? *target* dead) (nonzero? (-> *bf* respawn-time)))
-         ;; X once a second: before the choice opens (BF_RESPAWN_TIME) it does nothing
-         (smoke-press (pad-buttons x) 1.0)
+        ((and *target* (focus-test? *target* dead) (nonzero? (-> *bf* respawn-time))
+              (>= (current-time) (-> *bf* respawn-time))
+              (not (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_CLASS)))
+              )
+         (smoke-press (pad-buttons triangle) 1.0)
          )
         (else
           (suspend)
@@ -2202,6 +2184,7 @@
         )
       )
     )
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
   0
   )
 
@@ -4622,7 +4605,7 @@
    his base, and back as a red guard."
   (smoke-step "redeploy: the class, then the point")
   (smoke-wait 2.0)
-  (smoke-bf-pause 3)
+  (smoke-bf-pause 2)
   (smoke-wait-for 5.0 (lambda () (and (smoke-dir) (= (-> (smoke-dir) page) BF_PAGE_CLASS))))
   (smoke-check "Redeploy opens the class page first" (= (-> (smoke-dir) page) BF_PAGE_CLASS))
   (set! (-> (smoke-dir) cursor) 0)
@@ -4959,13 +4942,160 @@
   0
   )
 
+(defbehavior smoke-respawned? process ()
+  "#t once the player is back: alive, his class model in, not falling from the sky."
+  (and (bf-avatar-alive?) *target* (not (focus-test? *target* dead)) (< (-> *bf* respawn-at) 0) (not (-> *bf* dropping?)))
+  )
+
+(defbehavior smoke-s54 process ()
+  "Scenario 54 (`smoke-scenario-late`), round 30: the class page before the battle with its
+   picture; the battle going on under the pause page; Redeploy's class page and back; a death:
+   the frame on the right, Triangle's class page and back, X back at the base as the same class,
+   Triangle then the robotguard; no damage from the spawn's drop; a 40 m fall hurts the robotguard,
+   its own cry; the jetpack's sound."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (set! (-> (smoke-dir) cursor) 2)
+  (smoke-wait 0.8)
+  (smoke-shot "r30-class-robot")
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (smoke-wait 3.0)
+  (format 0 "SMOKE capture radius ~M m~%" BF_POINT_RADIUS)
+  ;; the battle under the pause page
+  (smoke-step "the battle under the pause page")
+  (smoke-start-page 'main)
+  (smoke-wait-for 8.0 (lambda () (smoke-page-up? BF_PAGE_PAUSE)))
+  (let ((t0 (-> *display* game-clock frame-counter)))
+    (smoke-wait 2.0)
+    (format 0 "SMOKE under the pause page: game clock ~D frames on, mode ~A, ~D units awake~%"
+            (- (-> *display* game-clock frame-counter) t0) *master-mode* (-> *bf-unit-dots* count))
+    (smoke-check "the battle goes on under the pause page (its clock runs)"
+                 (and (smoke-page-up? BF_PAGE_PAUSE) (< (seconds 1.5) (- (-> *display* game-clock frame-counter) t0)))
+                 )
+    )
+  (smoke-shot "r30-pause-live")
+  (set! (-> (smoke-dir) cursor) 2)
+  (smoke-wait 0.4)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
+  (smoke-check "Redeploy: the class page with the respawn point"
+               (and (smoke-page-up? BF_PAGE_CLASS) (= (-> (smoke-dir) class-mode) BF_CLASS_REDEPLOY) (-> (smoke-dir) respawn?))
+               )
+  (smoke-shot "r30-redeploy-page")
+  (smoke-press (pad-buttons triangle) 1.0)
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_PAUSE)))
+  (smoke-check "Triangle: back to the pause page" (smoke-page-up? BF_PAGE_PAUSE))
+  (smoke-press (pad-buttons triangle) 1.0)
+  (smoke-wait-for 6.0 (lambda () (and (= (-> (smoke-dir) page) BF_PAGE_NONE) (not *progress-process*))))
+  (smoke-wait 1.0)
+  ;; a death: the frame, Triangle and back, X
+  (smoke-step "death: X respawns as the same class")
+  (smoke-invulnerable #f)
+  (smoke-kill-player)
+  (smoke-wait-for 15.0 (lambda () (and *target* (focus-test? *target* dead) (nonzero? (-> *bf* respawn-time))
+                                       (>= (current-time) (-> *bf* respawn-time)))))
+  (smoke-wait 0.5)
+  (smoke-shot "r30-death-frame")
+  (smoke-press (pad-buttons triangle) 1.0)
+  (smoke-wait-for 8.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
+  (smoke-check "a death: Triangle opens the class page" (and (smoke-page-up? BF_PAGE_CLASS) (= (-> (smoke-dir) class-mode) BF_CLASS_RESPAWN)))
+  (smoke-shot "r30-respawn-page")
+  (smoke-press (pad-buttons triangle) 1.0)
+  (smoke-wait-for 6.0 (lambda () (and (= (-> (smoke-dir) page) BF_PAGE_NONE) (not *progress-process*))))
+  (smoke-wait 1.0)
+  (smoke-check "Triangle: back to the death screen, still dead" (and *target* (focus-test? *target* dead) (= (-> (smoke-dir) page) BF_PAGE_NONE)))
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 60.0 (lambda () (smoke-respawned?)))
+  (smoke-wait 1.5)
+  (format 0 "SMOKE X respawn: class ~D point ~D health ~f of ~f~%" (-> *bf* class) (-> *bf* respawn-point)
+          (-> *target* fact health) (bf-class-health (-> *bf* class)))
+  (smoke-check "X: back at once at his respawn point as the same class" (and (smoke-respawned?) (= (-> *bf* class) BF_CLASS_RED_GUARD)))
+  (smoke-check "no damage from the spawn's drop" (>= (-> *target* fact health) (bf-class-health (-> *bf* class))))
+  ;; a death, Triangle: the robotguard
+  (smoke-step "death: Triangle, the robotguard")
+  ;; past the spawn shield (3 s)
+  (smoke-wait 3.0)
+  (smoke-kill-player)
+  (smoke-respawn-page 20.0)
+  (set! (-> (smoke-dir) cursor) 2)
+  (smoke-wait 0.6)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 60.0 (lambda () (smoke-respawned?)))
+  (smoke-wait 2.0)
+  (smoke-check "the class page's class: back as the robotguard" (and (smoke-respawned?) (= (-> *bf* class) BF_CLASS_ROBOGUARD)))
+  ;; a fall: the robotguard's own cry
+  (smoke-step "a 40 m fall")
+  (set! *bf-log-sounds* #t)
+  (let ((hp (-> *target* fact health))
+        (at (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
+        )
+    ;; the stock hard landing starts at 30 m (target-util.gc fall-far)
+    (+! (-> at y) (meters 40))
+    (move-to-point! (-> *target* control) at)
+    (smoke-wait 5.0)
+    (format 0 "SMOKE fall: health ~f to ~f, dead ~A~%" hp (-> *target* fact health) (focus-test? *target* dead))
+    (smoke-check "a 40 m fall hurts the robotguard" (< (-> *target* fact health) hp))
+    )
+  (set! *bf-log-sounds* #f)
+  ;; the jetpack's sound
+  (smoke-invulnerable #t)
+  (smoke-wait-for 20.0 (lambda () (smoke-respawned?)))
+  (smoke-change-class 1 "the red jetpack")
+  (smoke-hold (pad-buttons x))
+  (smoke-wait 1.5)
+  (let ((av (smoke-av)))
+    (format 0 "SMOKE jetpack sound: engine ~D jets ~D~%" (if av (the int (-> av engine-id)) -1) (if av (the int (-> av thrust-id)) -1))
+    (smoke-check "the jetpack's engine and jets play (flying-turret sounds)" (and av (nonzero? (-> av engine-id)) (nonzero? (-> av thrust-id))))
+    )
+  (smoke-neutral)
+  0
+  )
+
+(define *smoke-portrait-classes* (new 'static 'array int32 6 0 1 4 5 6 7))
+
+(defbehavior smoke-s53 process ()
+  "Scenario 53 (`smoke-scenario-late`), round 30: the class portraits' captures. In a battle, each
+   class model alone on black (`bf-black-set!`, the game in the 'menu master mode, an empty page:
+   no HUD), turned three quarters, a screenshot each (`smoke-portrait-<class>`); the script
+   scripts/battlefront/make_portraits.py makes the class page's pictures from them."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (smoke-wait 3.0)
+  (set! (-> (smoke-dir) page) 9)
+  (bf-black-set! #t)
+  (set-master-mode 'menu)
+  (smoke-wait 1.5)
+  (dotimes (k 6)
+    (let* ((class (-> *smoke-portrait-classes* k))
+           (icon (bf-icon-spawn class 0.0 25.0 (smoke-dir)))
+           )
+      (format 0 "SMOKE portrait ~D model ~A~%" class (if icon #t #f))
+      (when icon
+        (bf-icon-place icon 256.0 208.0 300.0 (meters 3))
+        (smoke-wait 1.5)
+        (format (clear *smoke-name*) "portrait-~D" class)
+        (smoke-shot *smoke-name*)
+        (smoke-wait 1.0)
+        (deactivate icon)
+        )
+      )
+    )
+  (set-master-mode 'game)
+  (bf-black-set! #f)
+  (set! (-> (smoke-dir) page) BF_PAGE_NONE)
+  (smoke-check "every class model shown alone on black" #t)
+  0
+  )
+
 (defbehavior smoke-s52 process ()
   "Scenario 52 (`smoke-scenario-late`), round 29: the class page in three columns from the title;
    a death: X opens the class page with the respawn point and the radar, the base picked, Spawn;
    a redeploy: the same page, the red jetpack picked, Spawn."
   (smoke-mods-toggle "mods-menu-on")
   (smoke-battle-start 0 BF_TEAM_KG)
-  (smoke-shot "r29-class-page")
   (smoke-deploy 0 "deploy red guard")
   (smoke-invulnerable #t)
   (smoke-wait 3.0)
@@ -4976,7 +5106,7 @@
   (smoke-wait 1.0)
   (format 0 "SMOKE after the death: page ~D respawn ~A pick ~D rows ~D~%" (-> (smoke-dir) page) (-> (smoke-dir) respawn?)
           (-> (smoke-dir) pick-point) (bf-page-count BF_PAGE_CLASS))
-  (smoke-check "a death: X opens the class page with the respawn point"
+  (smoke-check "a death: Triangle opens the class page with the respawn point"
                (and (= (-> (smoke-dir) page) BF_PAGE_CLASS) (-> (smoke-dir) respawn?) (= (bf-page-count BF_PAGE_CLASS) (+ (bf-class-count) 2)))
                )
   (set! (-> (smoke-dir) cursor) (bf-class-count))
@@ -4988,7 +5118,7 @@
   (smoke-wait 2.0)
   (smoke-check "Spawn: back at the point picked, the class kept" (and (bf-avatar-alive?) (= (-> *bf* class) BF_CLASS_RED_GUARD)))
   (smoke-step "redeploy: the class page, the red jetpack")
-  (smoke-bf-pause 3)
+  (smoke-bf-pause 2)
   (smoke-wait-for 12.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
   (smoke-check "Redeploy opens the class page with the respawn point" (and (= (-> (smoke-dir) page) BF_PAGE_CLASS) (-> (smoke-dir) respawn?)))
   (set! (-> (smoke-dir) cursor) 1)
@@ -5455,6 +5585,8 @@
   "Scenarios 36 to 40 (rounds 26 and 27), each in a function of its own, out of `smoke-scenario`:
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
+    ((54) (smoke-s54))
+    ((53) (smoke-s53))
     ((52) (smoke-s52))
     ((51) (smoke-s51))
     ((50) (smoke-s50))
@@ -6281,26 +6413,10 @@
      (set! (-> (smoke-dir) cursor) 0)
      (smoke-wait 2.0)
      (smoke-shot "class-guard")
-     (let ((icon (the-as bf-icon (handle->process (-> (smoke-dir) preview)))))
-       (format 0 "SMOKE preview red guard: art group ~S~%" (if icon (-> icon draw art-group name) "none"))
-       (smoke-check "the red guard's preview plays the blue guard's clips (crimson-guard)"
-                    (and icon (string= (-> icon draw art-group name) "crimson-guard")))
-       )
-     (dotimes (c 3)
-       (set! (-> (smoke-dir) cursor) (+ c 1))
-       (smoke-wait 2.0)
-       (let ((icon (the-as bf-icon (handle->process (-> (smoke-dir) preview)))))
-         (when icon
-           (let ((f0 (-> icon skel root-channel 0 frame-num)))
-             (suspend)
-             (format 0 "SMOKE preview class ~D: ~f clip frames a frame~%" (+ c 1) (- (-> icon skel root-channel 0 frame-num) f0))
-             )
-           )
-         )
-       (if (= c 2)
-           (smoke-shot "class-spider")
-           )
-       )
+     ;; round 30: the class page shows a picture, no turning model to check any more
+     (set! (-> (smoke-dir) cursor) 3)
+     (smoke-wait 2.0)
+     (smoke-shot "class-spider")
      (set! (-> (smoke-dir) cursor) 0)
      (smoke-wait 1.0)
      (smoke-deploy 0 "deploy red guard")
