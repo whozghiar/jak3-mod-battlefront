@@ -16,8 +16,10 @@
 (define-extern bf-keep-unit? (function process symbol))
 ;; MOD battlefront -- a battle is fighting (pc/features/battlefront/battlefront-h.gc, GAME)
 (define-extern bf-fighting? (function symbol))
-;; MOD battlefront -- the guard pool's sleeping units: 64 slots, a battle's 44 guards (same file)
+;; MOD battlefront -- the guard pool's sleeping units: 96 slots, a battle's 70 guards (same file)
 (define-extern *bf-guard-pool-slots* (pointer uint64))
+;; MOD battlefront -- the flying turrets': 48 slots, a battle's 31 (same file)
+(define-extern *bf-turret-pool-slots* (pointer uint64))
 
 (deftype traffic-engine-stack-var0 (structure)
   ((params traffic-object-spawn-params :inline :offset 0)
@@ -136,10 +138,15 @@
   (let* ((v1-2 (-> this traffic object-type-info-array arg0))
          (a1-2 (-> v1-2 inactive-count))
          )
-    ;; MOD battlefront -- the guard pool's own 64 slots (`*bf-guard-pool-slots*`): at 20 a new guard of a
-    ;; bigger pool went unlisted, the pool spawned another every frame, and each kept a nav-control on
-    ;; the default nav mesh until it overflowed
-    (when (< a1-2 (if (= arg0 (traffic-type guard-a)) 64 20))
+    ;; MOD battlefront -- the guard pool's own 96 slots (`*bf-guard-pool-slots*`) and the flying turrets'
+    ;; 48: at 20 a new guard of a bigger pool went unlisted, the pool spawned another every frame, and
+    ;; each kept a nav-control on the default nav mesh until it overflowed
+    (when (< a1-2 (case arg0
+                    (((traffic-type guard-a)) 96)
+                    (((traffic-type flying-turret)) 48)
+                    (else 20)
+                    )
+             )
       (set! (-> v1-2 array a1-2) arg1)
       (+! (-> v1-2 inactive-count) 1)
       (+! (-> v1-2 reserve-count) 1)
@@ -445,6 +452,8 @@
   ;; MOD battlefront -- the guard pool keeps its sleeping units in 64 slots of its own, not 20: a
   ;; battle's 44 guards would run into guard-b's and the Metal Heads' slots
   (set! (-> this object-type-info-array 6 array) (the-as (pointer handle) *bf-guard-pool-slots*))
+  ;; MOD battlefront -- the flying turrets' too (round 40: a battle's 31, the stock 20 slots)
+  (set! (-> this object-type-info-array 16 array) (the-as (pointer handle) *bf-turret-pool-slots*))
   (set! (-> this object-type-info-array 6 guard-type) (the-as uint 0))
   (set! (-> this object-type-info-array 14 guard-type) (the-as uint 6))
   (set! (-> this object-type-info-array 15 guard-type) (the-as uint 9))

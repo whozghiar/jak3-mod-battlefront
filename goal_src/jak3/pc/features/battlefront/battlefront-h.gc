@@ -97,28 +97,35 @@
 (defconstant BF_UNIT_RESPAWN (seconds 5)) ;; a fallen unit's place in its side's army waits this long
 (defconstant BF_RESPAWN_TIME (seconds 2)) ;; a dead player watches the battle at least this long before he chooses (4 s, then the respawn page, until round 27)
 
-;; Army caps: at most 40 units per side on the street at once. Freedom League: 28 blue guards and
-;; 12 blue jetpack guards. Krimzon Guard: 8 red riflemen, 8 red grenadiers, 8 red jetpack guards, 8
-;; robotguards and 8 spider robots. The traffic pools are capped to these sums (`bf-want-count`), and
-;; each new guard or jetpack guard takes the look furthest below its share (`*bf-look-share*`). A
-;; traffic pool keeps its sleeping units in 20 slots (traffic-engine.gc reset-and-init-from-manager):
-;; the guard pool gets `*bf-guard-pool-slots*` instead, the flying turrets fill their 20.
-(defconstant BF_CAP_GUARDS 44)
-(defconstant BF_CAP_TURRETS 20)
-(defconstant BF_CAP_ROBOGUARDS 8)
-(defconstant BF_CAP_SPYDROIDS 8)
+;; Army caps: at most 63 units per side on the street at once (40 until round 39; the author asked for
+;; up to 70, round 40). The four kinds are walkers of the traffic, which wakes them on one tracker
+;; listing 126 units at most (traffic-engine-h.gc active-object-list): 63 a side. Waking the turrets,
+;; robotguards and spiders on the vehicles' tracker instead, unused in a battle, left them asleep (one
+;; of each awake in three minutes, the armies stalled: round 40's tests). Freedom League: 45 blue
+;; guards and 18 blue jetpack guards. Krimzon Guard: 13 red riflemen, 12 red grenadiers, 13 red
+;; jetpack guards, 12 robotguards and 13 spider robots. The traffic pools are capped to these sums
+;; (`bf-want-count`), and each new guard or jetpack guard takes the look furthest below its share
+;; (`*bf-look-share*`). A traffic pool keeps its sleeping units in 20 slots (traffic-engine.gc
+;; reset-and-init-from-manager): the guard pool and the flying turrets' get `*bf-guard-pool-slots*`
+;; and `*bf-turret-pool-slots*` instead.
+(defconstant BF_CAP_GUARDS 70)
+(defconstant BF_CAP_TURRETS 31)
+(defconstant BF_CAP_ROBOGUARDS 12)
+(defconstant BF_CAP_SPYDROIDS 13)
 
 ;; The guard pool's sleeping units (traffic-engine.gc reset-and-init-from-manager points guard-a's
 ;; slots here): BF_CAP_GUARDS and room to spare, where the stock 20 slots would run into the next
 ;; types' (guard-b, the Metal Heads).
-(define *bf-guard-pool-slots* (new 'static 'array uint64 64))
+(define *bf-guard-pool-slots* (new 'static 'array uint64 96))
+;; The same for the flying turrets: BF_CAP_TURRETS and room to spare (round 40).
+(define *bf-turret-pool-slots* (new 'static 'array uint64 48))
 
 ;; The battle's unit kinds (traffic types: guard-a, flying-turret, roboguard, spydroid) and each
 ;; side's share of the caps above, Freedom League then Krimzon Guard, in that order: what its troop
 ;; transports bring it (levels/city/battlefront/bf-transport.gc).
 (defconstant BF_KIND_COUNT 4)
 (define *bf-kinds* (new 'static 'array int32 4 6 16 14 15))
-(define *bf-team-caps* (new 'static 'array int32 8 28 12 0 0 16 8 8 8))
+(define *bf-team-caps* (new 'static 'array int32 8 45 18 0 0 25 13 12 13))
 
 ;; ---------------------------------------------------------------------------------------------
 ;; Types
@@ -311,7 +318,7 @@
 
 ;; The units awake, for the maps (battlefront.gc `bf-draw-city-map`): their places, headings and
 ;; sides, written every frame of a fight by the Haven City side (battlefront-city.gc `bf-city-dots`).
-(defconstant BF_DOT_MAX 128)
+(defconstant BF_DOT_MAX 192) ;; 126 units at most (63 a side) and the player
 
 (deftype bf-unit-dots (structure)
   ((count  int32)
@@ -1370,8 +1377,8 @@
   (none)
   )
 
-;; Share of each look in its pool (army caps above): 28 + 8 + 8 = BF_CAP_GUARDS, 12 + 8 = BF_CAP_TURRETS.
-(define *bf-look-share* (new 'static 'array int32 5 28 8 8 12 8))
+;; Share of each look in its pool (army caps above): 45 + 13 + 12 = BF_CAP_GUARDS, 18 + 13 = BF_CAP_TURRETS.
+(define *bf-look-share* (new 'static 'array int32 5 45 13 12 18 13))
 
 (defun bf-take-look ((look int))
   "Count one more unit of LOOK (it is being spawned) and return LOOK."

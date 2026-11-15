@@ -6330,6 +6330,61 @@
   0
   )
 
+(defbehavior smoke-s74 process ()
+  "Scenario 74 (`smoke-scenario-late`), round 40 milestone 5: 63 units a side in Jak 2's Haven City
+   (the traffic's walkers' tracker lists 126 at most), three minutes of battle, the armies counted
+   every 30 s, no crash."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start BF_ZONE_JAK2 BF_TEAM_FF)
+  (smoke-deploy 0 "deploy blue guard")
+  (smoke-invulnerable #t)
+  (let ((c (new 'stack-no-clear 'array 'int32 4))
+        (best-ff 0)
+        (best-kg 0)
+        )
+    (dotimes (k 6)
+      (smoke-wait 30.0)
+      (smoke-team-line "30 s")
+      (set! best-ff (max best-ff (bf-transport-team-count BF_TEAM_FF c)))
+      (set! best-kg (max best-kg (bf-transport-team-count BF_TEAM_KG c)))
+      (if (= k 2)
+          (smoke-shot "r40-j2-90s")
+          )
+      )
+    (format 0 "SMOKE most units awake: FF ~D, KG ~D~%" best-ff best-kg)
+    (smoke-check "each side's army grows past its old 40" (and (< 40 best-ff) (< 40 best-kg)))
+    (smoke-check "up to 63 a side" (and (>= 63 best-ff) (>= 63 best-kg)))
+    (smoke-check "close to 63 a side at some point" (and (< 55 best-ff) (< 55 best-kg)))
+    )
+  (smoke-points-line "3 min")
+  (smoke-shot "r40-j2-3min")
+  0
+  )
+
+(defbehavior smoke-s75 process ()
+  "Scenario 75 (`smoke-scenario-late`), round 40 milestone 5: the same 63 units a side in Jak 3's
+   Haven City (its six street sections loaded), two minutes, the armies counted, no crash."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_FF)
+  (smoke-deploy 0 "deploy blue guard")
+  (smoke-invulnerable #t)
+  (let ((c (new 'stack-no-clear 'array 'int32 4))
+        (best-ff 0)
+        (best-kg 0)
+        )
+    (dotimes (k 4)
+      (smoke-wait 30.0)
+      (smoke-team-line "30 s")
+      (set! best-ff (max best-ff (bf-transport-team-count BF_TEAM_FF c)))
+      (set! best-kg (max best-kg (bf-transport-team-count BF_TEAM_KG c)))
+      )
+    (format 0 "SMOKE most units awake: FF ~D, KG ~D~%" best-ff best-kg)
+    (smoke-check "Jak 3's city holds 63 a side too" (and (< 55 best-ff) (< 55 best-kg) (>= 63 best-ff) (>= 63 best-kg)))
+    )
+  (smoke-shot "r40-j3-2min")
+  0
+  )
+
 (defbehavior smoke-s58 process ()
   "Scenario 58 (`smoke-scenario-late`), round 32: four pickups queued 15 m up, 8 m in front of the
    player (`bf-spawn-drops`, as a jetpack guard's): dark eco, yellow ammo, red ammo, health. They
@@ -7249,6 +7304,8 @@
   "Scenarios 36 to 40 (rounds 26 and 27), each in a function of its own, out of `smoke-scenario`:
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
+    ((75) (smoke-s75))
+    ((74) (smoke-s74))
     ((73) (smoke-s73))
     ((72) (smoke-s72))
     ((71) (smoke-s71))
