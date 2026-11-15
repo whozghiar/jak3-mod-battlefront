@@ -118,14 +118,14 @@
 (deftype bf-config (structure)
   ((minutes  int32)   ;; time limit, 0 for none (`*bf-time-choices*`)
    (units    int32)   ;; units per side, 50 to 1000 by 50
-   (at-once  int32)   ;; units per side on the street at once, 30 to 100 by 10 (`bf-caps-set!`, round 41), 60 by default (100 crashed in long fights, round 42)
+   (at-once  int32)   ;; units per side on the street at once, 30 to 100 by 10 (`bf-caps-set!`, round 41), 100 by default (round 43: 60 while 100 overflowed the DMA buffer, display.gc)
    (victory  int32)   ;; BF_WIN_POINTS or BF_WIN_UNITS
    (team-a   int32)   ;; the player's side, the top panel
    (team-b   int32)   ;; the other side, the bottom panel: never the same
    )
   )
 
-(define *bf-config* (new 'static 'bf-config :minutes 0 :units 500 :at-once 60 :victory 0 :team-a 1 :team-b 0))
+(define *bf-config* (new 'static 'bf-config :minutes 0 :units 500 :at-once 100 :victory 0 :team-a 1 :team-b 0))
 (define *bf-time-choices* (new 'static 'array int32 6 0 5 10 15 20 30))
 (defconstant BF_CONFIG_COUNT 8) ;; the configuration page's rows: 5 settings, 2 sides, Next
 (defconstant BF_CONFIG_SETTINGS 5)

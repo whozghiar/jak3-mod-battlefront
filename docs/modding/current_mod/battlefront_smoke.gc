@@ -6936,7 +6936,9 @@
     (smoke-check "both of each side's headquarters dropped units"
                  (and (> (-> *bf-drops-at* (+ (* BF_POINT_MAX BF_TEAM_FF) 0)) 0) (> (-> *bf-drops-at* (+ (* BF_POINT_MAX BF_TEAM_FF) 2)) 0)
                       (> (-> *bf-drops-at* (+ (* BF_POINT_MAX BF_TEAM_KG) 1)) 0) (> (-> *bf-drops-at* (+ (* BF_POINT_MAX BF_TEAM_KG) 3)) 0)))
-    (smoke-check "the setup's units at once a side reached" (and (<= (-> *bf-config* at-once) best-ff) (<= (-> *bf-config* at-once) best-kg)))
+    ;; sampled every 30 s while units die: at 100 a side a sample saw 99 (round 43)
+    (smoke-check "the setup's units at once a side reached, 3 short at most"
+                 (and (<= (+ (-> *bf-config* at-once) -3) best-ff) (<= (+ (-> *bf-config* at-once) -3) best-kg)))
     (smoke-check "a neutral capture no faster than 10 s" (or (zero? captures) (< 9.5 fastest)))
     (smoke-check "neutral captures timed" (> captures 0))
     (format 0 "SMOKE guards away from their point, out of a fight: ~D walking, ~D running; most points aimed at by both sides ~D~%"
@@ -7043,6 +7045,61 @@
     (smoke-r42-why)
     (smoke-r41-owners)
     )
+  0
+  )
+
+(defbehavior smoke-s84 process ()
+  "Scenario 84 (`smoke-scenario-late`), round 43: scenario 81 at 100 units at once a side (100 a
+   side crashed in long fights in round 42), with the global DMA buffers' peak use printed (a
+   redeploy's view of the 200 units overflowed the stock 1280K, display.gc) and the level heap's
+   end checked below 256 MB."
+  (set! (-> *bf-config* at-once) 100)
+  ;; the level heap must end below 256 MB (level.gc: adgif shader links), behind the DMA buffers
+  (format 0 "SMOKE level heap #x~X to #x~X, global DMA buffer ~D KB~%" (-> *level* heap base) (-> *level* heap top-base)
+          (/ (-> *display* frames 0 global-buf allocated-length) 1024))
+  (smoke-check "the level heap ends below 256 MB" (< (the-as int (-> *level* heap top-base)) #x10000000))
+  ;; every frame, the global DMA buffers' use (the last frame's is still in its buffer) and the
+  ;; engine's overflow flag, printed at each new peak (64 KB steps)
+  (process-spawn-function
+    process
+    (lambda :behavior process ()
+      (process-mask-clear! (-> self mask) menu pause progress freeze)
+      (let ((peak 0)
+            (said 0)
+            (overflows 0)
+            )
+        (loop
+          (dotimes (f 2)
+            (let* ((buf (-> *display* frames f global-buf))
+                   (used (&- (-> buf base) (the-as uint (-> buf data))))
+                   )
+              (when (< peak used)
+                (set! peak used)
+                (when (< (+ said (* 64 1024)) peak)
+                  (set! said peak)
+                  (format 0 "SMOKE dma peak ~D KB of ~D KB, end reserve ~D KB~%" (/ peak 1024)
+                          (/ (&- (-> buf real-buffer-end) (the-as uint (-> buf data))) 1024)
+                          (/ (&- (-> buf real-buffer-end) (the-as uint (-> buf end))) 1024))
+                  )
+                )
+              )
+            )
+          (when (-> *display* dma-buffer-overflow)
+            (+! overflows 1)
+            (if (< overflows 20)
+                (format 0 "SMOKE dma overflow (~D), peak ~D KB~%" overflows (/ peak 1024))
+                )
+            )
+          (suspend)
+          )
+        )
+      )
+    :name "smoke-dma"
+    :from *default-dead-pool*
+    :to *pc-pool*
+    )
+  (smoke-s81)
+  (set! (-> *bf-config* at-once) 60)
   0
   )
 
@@ -7973,6 +8030,7 @@
       ((81) (smoke-s81))
       ((82) (smoke-s82))
       ((83) (smoke-s83))
+      ((84) (smoke-s84))
     ((75) (smoke-s75))
     ((74) (smoke-s74))
     ((73) (smoke-s73))

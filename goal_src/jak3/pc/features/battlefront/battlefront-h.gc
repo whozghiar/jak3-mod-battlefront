@@ -98,8 +98,8 @@
 (defconstant BF_UNIT_RESPAWN (seconds 5)) ;; a fallen unit's place in its side's army waits this long
 (defconstant BF_RESPAWN_TIME (seconds 2)) ;; a dead player watches the battle at least this long before he chooses (4 s, then the respawn page, until round 27)
 
-;; Army caps: units per side on the street at once, the battle setup's choice (30 to 100, 60 by
-;; default; round 41, the author's wish: 40 until round 39, 63 in round 40). `bf-caps-set!` splits it:
+;; Army caps: units per side on the street at once, the battle setup's choice (30 to 100, 100 by
+;; default since round 43; round 41, the author's wish: 40 until round 39, 63 in round 40). `bf-caps-set!` splits it:
 ;; Freedom League, 72 % blue guards, the rest blue jetpack guards; Krimzon Guard, a fifth each of red
 ;; riflemen, red grenadiers, red jetpack guards, robotguards and spider robots. The traffic pools are
 ;; capped to their sums (`*bf-pool-caps*`, `bf-want-count`), and each new guard or jetpack guard takes
