@@ -8,7 +8,7 @@
     directions (the source game's SUN_DIRECTIONS). The background palettes follow the same layout
     (0 ambient, 1-4 the sun directions weighted by the hour), so each vertex gets palette 0 =
     ambient, palette 1-4 = its normal facing each sun direction, times the model's own vertex
-    shading. Solid props also get an invisible collision box.
+    shading. Solid props also get an invisible collision box, colliding from both sides.
   - the pool and fountain surfaces of the level's "water" block (steps/water.py), translucent,
     without collision, lit the same way.
 
@@ -204,7 +204,11 @@ def write_level(port, level):
         nodes.append({"name": f"{name}-collide-{material}", "mesh": len(meshes) - 1,
                       "extras": {"set_invisible": 1, "set_collision": 1, "ignore": 0,
                                  "collide_material": material, "collide_event": 0,
-                                 "nolineofsight": 0, "noedge": 0, "nocamera": 0, "noentity": 0}})
+                                 "nolineofsight": 0, "noedge": 0, "nocamera": 0, "noentity": 0,
+                                 # the builder's collision is one-sided (gltf_mesh_extract.cpp):
+                                 # Jak walked through boxes from outside (a closed door, seen in
+                                 # the battlefront mod's tests)
+                                 "double_sided": 1}})
     out.write(mesh_path(level), nodes, meshes)
     nverts = sum(len(v) for v, _ in groups.values())
     ntris = sum(len(t) for _, t in groups.values()) // 3

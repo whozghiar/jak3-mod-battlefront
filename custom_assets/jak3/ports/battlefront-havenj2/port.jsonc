@@ -32,6 +32,23 @@
       "bf-havenj2-height-map": ["height-map-h"]
     }
   },
+  // The city's map for the battle's menus and its L3 map (battlefront.gc bf-draw-zone-minimap):
+  // Jak 2's minimap textures, where its minimap.gc lays them out, as one picture (steps/citymap.py),
+  // read by GAME's battlefront-havenj2-info.gc. Generated from the player's Jak 2: kept out of git
+  "city_map": {
+    "file": "goal_src/jak3/levels/bf-havenj2/bf-havenj2-map.gc",
+    "var": "bf-zone-jak2-map",
+    "minimap": "goal_src/jak2/engine/ui/minimap.gc",
+    "textures": [["ctypal-minimap", ["map-ctypala", "map-ctypalb"]], ["ctygena-minimap", ["map-ctygena"]],
+                 ["ctygenb-minimap", ["map-ctygenb"]], ["ctygenc-minimap", ["map-ctygenc", "map-ctyfarma"]],
+                 ["ctyinda-minimap", ["map-ctyinda"]], ["ctyindb-minimap", ["map-ctyindb"]],
+                 ["stadium-minimap", ["map-stadium"]], ["ctymarka-minimap", ["map-ctymarka", "map-ctyfarmb"]],
+                 ["ctymarkb-minimap", ["map-ctymarkb"]],
+                 ["ctyport-minimap", ["map-ctyporta", "map-ctyportb", "map-ctyportc", "map-ctyportd", "map-ctyporte", "map-ctyportf"]],
+                 ["ctysluma-minimap", ["map-ctysluma"]], ["ctyslumb-minimap", ["map-ctyslumb"]],
+                 ["ctyslumc-minimap", ["map-ctyslumc"]]],
+    "max_size": [256, 384]
+  },
   "level_info": {
     // not compiled by itself: GAME's goal_src/jak3/pc/features/battlefront/battlefront-havenj2-info.gc
     // takes its forms when it exists (a player without Jak 2 has none)
@@ -79,8 +96,38 @@
                     "ctyfarmb-start", "ctymarka-brutter", "ctymarkb-tanker", "ctypal-tomb",
                     "ctyport-warp", "ctyinda-consite", "ctyindb-start"],
       "water": {"ocean_region": {"center": [350.0, 0.0, 575.0], "radius": 1950.0}, "below": 3.0, "above": 2.0, "pools": []},
+      // no particles: a texture page of its own for Jak 2's minimap textures alone (their names
+      // as Jak 2's minimap.gc gives them), which the game's minimap finds by name
+      // (battlefront-havenj2-info.gc bfh-map-pages-on)
+      "particles": {
+        "files": [],
+        "textures_from": ["ctypal", "ctygena", "ctygenb", "ctygenc", "ctyinda", "ctyindb", "stadium",
+                          "ctymarka", "ctymarkb", "ctyport", "ctysluma", "ctyslumb", "ctyslumc"],
+        "page": "auto", "parts": "auto", "groups": "auto",
+        "source_textures": [["ctypal-minimap", ["map-ctypala", "map-ctypalb"]], ["ctygena-minimap", ["map-ctygena"]],
+                            ["ctygenb-minimap", ["map-ctygenb"]], ["ctygenc-minimap", ["map-ctygenc", "map-ctyfarma"]],
+                            ["ctyinda-minimap", ["map-ctyinda"]], ["ctyindb-minimap", ["map-ctyindb"]],
+                            ["stadium-minimap", ["map-stadium"]], ["ctymarka-minimap", ["map-ctymarka", "map-ctyfarmb"]],
+                            ["ctymarkb-minimap", ["map-ctymarkb"]],
+                            ["ctyport-minimap", ["map-ctyporta", "map-ctyportb", "map-ctyportc", "map-ctyportd", "map-ctyporte", "map-ctyportf"]],
+                            ["ctysluma-minimap", ["map-ctysluma"]], ["ctyslumb-minimap", ["map-ctyslumb"]],
+                            ["ctyslumc-minimap", ["map-ctyslumc"]]]
+      },
       "mesh": {
+        // Jak 2's doors to the places the war zone leaves out (the palace's gate, Mar's tomb's and
+        // the other airlocks, the Hip Hog's, the hideout's, the oracle's, Vin's, the fortress's
+        // gates, the stadium's garage doors): background in their closed pose, with a collision
+        // box, so they never open (round 41: the doorways stood open on nothing)
         "props": {
+          "palace-door": ["box", 16],
+          "com-airlock-outer": ["box", 16],
+          "com-airlock-inner": ["box", 16],
+          "hip-door-a": ["box", 16],
+          "hide-door-a": ["box", 16],
+          "oracle-door": ["box", 16],
+          "vin-door-ctyinda": ["box", 16],
+          "fort-entry-gate": ["box", 16],
+          "gar-door": ["box", 16],
           "lurker-pipe-lid": [null, null],
           "barons-ship-lores": [null, null],
           "ctypal-baron-statue-broken": [null, null],
@@ -114,8 +161,12 @@
         // Jak 3's ctywide's own callbacks (ctywide-init.o, in the city code above): the traffic
         // engine, the squads, the faction and borrow managers and the attack controller, as the
         // battle's code expects them
-        "callbacks": [[33, "ctywide-login"], [34, "ctywide-logout"],
-                      [35, "ctywide-activate"], [36, "ctywide-deactivate"]],
+        // (34 and 35 wrapped in bf-havenj2-obs.gc to bring Jak 2's minimap textures in)
+        "callbacks": [[33, "ctywide-login"], [34, "bf-havenj2-logout"],
+                      [35, "bf-havenj2-activate"], [36, "ctywide-deactivate"]],
+        // the minimap's squares (bit 5 * row + column of the 5x7 city grid, Jak 2's and Jak 3's)
+        // that have a Jak 2 map: all of them, in its texture page (particles source_textures)
+        "city_map_bits": "0x39d6f59cc",
         "draw_priority": "9.0",
         // Jak 3's ctywide's borrow heaps (KB), where ctypesa and ctypesc load
         "borrow_sizes": [420, 420, 420, 780, 810],

@@ -7,7 +7,8 @@
 
 #|
   Battlefront mod -- the Jak 2 Haven City war zone's level-load-info (bf-havenj2), in GAME so that
-  it is known at boot.
+  it is known at boot, its map for the battle's menus, and its textures for the game's minimap
+  (round 41).
 
   The level is made from the player's own Jak 2 and Jak 3 discs by scripts/level_port
   (custom_assets/jak3/ports/battlefront-havenj2/port.jsonc), which also writes its level-load-info
@@ -32,3 +33,215 @@
   )
 
 (bfh-include-levels "goal_src/jak3/levels/bf-havenj2/bf-havenj2-levels.gc")
+
+(defmacro bfh-include-map (file)
+  "The forms of FILE (the city's map the level port makes from Jak 2's minimap textures,
+   scripts/level_port/steps/citymap.py: *bf-zone-jak2-map-texels*, -clut*, -size*, -corner*,
+   -tex0*) and *bfh-map?* #t; without FILE, no picture (*bfh-map?* #f): the map's place alone, fitted
+   to the city's streets (x -700 to 1400 m, z -1000 to 2150 m) in 256 x 384 texels of 8.2 m, for
+   the marks (battlefront.gc `bf-zone-map-corner`)."
+  (if (file-exists? file)
+      `(begin
+         ,@(read-data-file file)
+         (define *bfh-map?* #t)
+         )
+      `(begin
+         (define *bf-zone-jak2-map-texels* (new 'static 'array uint64 1 0))
+         (define *bf-zone-jak2-map-clut* (new 'static 'array uint32 1 0))
+         (define *bf-zone-jak2-map-size* (new 'static 'array int32 3 256 384 256))
+         (define *bf-zone-jak2-map-corner* (new 'static 'array float 3 -2867200.0 -4096000.0 33587.2))
+         (define *bf-zone-jak2-map-tex0* (new 'static 'array uint64 1 0))
+         (define *bfh-map?* #f)
+         )
+      )
+  )
+
+(bfh-include-map "goal_src/jak3/levels/bf-havenj2/bf-havenj2-map.gc")
+
+;; The game's minimap (the HUD's radar) /////////////////////////////////////////////////////////
+;;
+;; Jak 3's minimap (minimap.gc update!) draws the map of the city grid square Jak is in: the same
+;; 5x7 grid, texture names (map-ctysluma...) and corners as Jak 2's, a square drawn when an active
+;; level's city-map-bits names it, its texture found by name in the active levels' minimap page
+;; (level texture-page 8). bf-havenj2 brings Jak 2's: its fr3 holds them as a texture page of an id
+;; Jak 3 never uses (port.jsonc particles source_textures, scripts/level_port), its code makes the
+;; matching texture-page while it loads (bf-havenj2-part.gc: `bfh-sprite-page-new`,
+;; `bfh-sprite-page-register`), and its activation (bf-havenj2-obs.gc) makes it the level's sprite
+;; page and a copy of it its minimap page (`bfh-map-pages-on`). Jak 3 lays out the minimap pages and
+;; the sprite pages separately (lay-out-hud-tex, lay-out-sprite-tex), each moving the texture
+;; addresses of its pages, so the two can't share texture objects; on PC an address only names a
+;; texture pool slot, which the upload maps to the fr3 texture of the same page id and index: the
+;; copy keeps the id and the indices. Haven City: New Dawn's hj2-sprite-page-new and
+;; hj2-minimap-page-on.
+
+;; bf-havenj2's texture page (`bfh-sprite-page-register`), #f while it isn't loaded
+(define *bfh-sprite-page* (the-as texture-page #f))
+
+;; its minimap copy (`bfh-map-pages-on`), made in the global heap the first time and reused
+(define *bfh-minimap-page* (the-as texture-page #f))
+
+(defun bfh-sprite-page-new ((id int) (names (array string)) (sizes (array uint32)))
+  "A texture-page of id ID for textures NAMES of SIZES (w | h << 16), in order, made in the loading
+   level's heap. On PC a texture's VRAM address is only the key of its slot in the texture pool, so
+   each texture takes one block (64 words) whatever its size. Returns the page."
+  (let* ((count (-> names length))
+         (words (* 64 count))
+         (page (the-as texture-page
+                       ((method-of-type object new) 'loading-level texture-page (+ (the-as int (-> texture-page size)) (* 4 count)))
+                       )
+               )
+         )
+    (set! (-> page info) #f)
+    (set! (-> page name) "bfh-sprite")
+    (set! (-> page id) (the-as uint id))
+    (set! (-> page length) count)
+    (set! (-> page mip0-size) (the-as uint words))
+    (set! (-> page size) (the-as uint words))
+    (set! (-> page segment 0 block-data) (malloc 'loading-level (* 4 words)))
+    (set! (-> page segment 0 size) (the-as uint words))
+    (set! (-> page segment 0 dest) (the-as uint 0))
+    (dotimes (seg 2)
+      (set! (-> page segment (+ seg 1) block-data) (-> page segment 0 block-data))
+      (set! (-> page segment (+ seg 1) size) (the-as uint 0))
+      (set! (-> page segment (+ seg 1) dest) (the-as uint words))
+      )
+    (set! (-> page dram-size) (the-as uint (* 4 words)))
+    (set! (-> page vram-size) (the-as uint words))
+    ;; the texture-page-dir entry's shader links, one (empty) per texture, kept in pad 0
+    (let ((links (the-as (pointer uint32) (malloc 'loading-level (* 4 count)))))
+      (dotimes (i count)
+        (set! (-> links i) (the-as uint 0))
+        )
+      (set! (-> page pad 0) (the-as uint links))
+      )
+    (dotimes (i count)
+      (let ((tex (new 'loading-level 'texture))
+            (w (the-as int (logand (-> sizes i) #xffff)))
+            (h (the-as int (shr (-> sizes i) 16)))
+            )
+        (set! (-> tex w) w)
+        (set! (-> tex h) h)
+        (set! (-> tex num-mips) (the-as uint 1))
+        (set! (-> tex tex1-control) (the-as uint 3))
+        (set! (-> tex psm) (gs-psm ct32))
+        (set! (-> tex mip-shift) (the-as uint 0))
+        (set! (-> tex clutpsm) (the-as uint 0))
+        (dotimes (m 7)
+          (set! (-> tex dest m) (the-as uint i))
+          (set! (-> tex width m) (the-as uint (max 1 (/ (+ w 63) 64))))
+          )
+        (set! (-> tex clutdest) (the-as uint 0))
+        (set! (-> tex name) (-> names i))
+        (set! (-> tex size) (the-as uint 64))
+        (set! (-> tex uv-dist) 0.0)
+        (set! (-> tex masks data 0 mask quad) (the-as uint128 0))
+        (set! (-> tex masks data 1 mask quad) (the-as uint128 0))
+        (set! (-> tex masks data 2 mask quad) (the-as uint128 0))
+        (set! (-> page data i) tex)
+        )
+      )
+    page
+    )
+  )
+
+(defun bfh-sprite-page-register ((level-name symbol) (page texture-page))
+  "Called by bf-havenj2's code while it loads (bf-havenj2-part.gc): PAGE, its texture page, taken in
+   use when the level is activated (`bfh-map-pages-on`). LEVEL-NAME: always bf-havenj2."
+  (set! *bfh-sprite-page* page)
+  (none)
+  )
+
+(defun bfh-map-pages-on ((lev level))
+  "bf-havenj2 (LEV) is active: its texture page (`*bfh-sprite-page*`) in texture-page-dir and as its
+   sprite page (level texture-page 7), and `*bfh-minimap-page*`, a copy of it holding its map-
+   textures alone, as its minimap page (texture-page 8). The copy is made in the global heap the
+   first time (about 3 KB, kept: the same textures at the same indices on every load). Side effects:
+   texture-page-dir, LEV's texture pages 7 and 8, the HUD textures laid out again."
+  (let ((src *bfh-sprite-page*))
+    (when src
+      (let ((entry (-> *texture-page-dir* entries (-> src id))))
+        (set! (-> entry length) (-> src length))
+        (set! (-> entry page) src)
+        ;; no shader links, but unlink-shaders-in-heap walks one per texture
+        (set! (-> entry link) (the-as texture-link (-> src pad 0)))
+        )
+      (set! (-> lev texture-page 7) src)
+      (let ((count (-> src length)))
+        ;; a new page when none yet, or when the page's length changed (a rebuilt level)
+        (when (or (not *bfh-minimap-page*) (!= (-> *bfh-minimap-page* length) count))
+          (let ((page (the-as texture-page
+                              ((method-of-type object new) 'global texture-page (+ (the-as int (-> texture-page size)) (* 4 count)))
+                              )
+                      )
+                )
+            (dotimes (i count)
+              (set! (-> page data i) #f)
+              )
+            (set! (-> page length) count)
+            (set! *bfh-minimap-page* page)
+            )
+          )
+        (let ((page *bfh-minimap-page*))
+          (set! (-> page info) #f)
+          (set! (-> page name) "bfh-minimap")
+          (set! (-> page id) (-> src id))
+          (set! (-> page mip0-size) (-> src mip0-size))
+          (set! (-> page size) (-> src size))
+          ;; the source page's segments, so that the copied texture addresses stay relative to them
+          (dotimes (seg 3)
+            (set! (-> page segment seg block-data) (-> src segment seg block-data))
+            (set! (-> page segment seg size) (-> src segment seg size))
+            (set! (-> page segment seg dest) (-> src segment seg dest))
+            )
+          (set! (-> page dram-size) (-> src dram-size))
+          (set! (-> page vram-size) (-> src vram-size))
+          (dotimes (i count)
+            (let ((tex (-> src data i)))
+              (cond
+                ((and tex (string-prefix= "map-" (-> tex name)))
+                 (if (not (-> page data i))
+                     (set! (-> page data i) (new 'global 'texture))
+                     )
+                 ;; every field after the type tag
+                 (mem-copy! (&-> (-> page data i) w) (&-> tex w) (+ (the-as int (size-of texture)) -4))
+                 )
+                (else
+                  (set! (-> page data i) #f)
+                  )
+                )
+              )
+            )
+          (set! (-> lev texture-page 8) page)
+          )
+        )
+      (mark-hud-warp-sprite-dirty *texture-pool*)
+      )
+    )
+  (none)
+  )
+
+(defun bfh-map-pages-off ((lev level))
+  "bf-havenj2 (LEV) is unloaded: its texture page leaves texture-page-dir and LEV's texture pages 7
+   and 8 (their texture names are in its heap), and `*bfh-sprite-page*` goes. Side effects: the HUD
+   textures laid out again."
+  (let ((src *bfh-sprite-page*))
+    (when src
+      (let ((entry (-> *texture-page-dir* entries (-> src id))))
+        (when (= (-> entry page) src)
+          (set! (-> entry page) #f)
+          (set! (-> entry link) #f)
+          (set! (-> entry length) 0)
+          )
+        )
+      (if (= (-> lev texture-page 7) src)
+          (set! (-> lev texture-page 7) #f)
+          )
+      )
+    )
+  (if (and *bfh-minimap-page* (= (-> lev texture-page 8) *bfh-minimap-page*))
+      (set! (-> lev texture-page 8) #f)
+      )
+  (set! *bfh-sprite-page* #f)
+  (mark-hud-warp-sprite-dirty *texture-pool*)
+  (none)
+  )

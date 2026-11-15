@@ -6491,6 +6491,268 @@
   0
   )
 
+(define *smoke-r41-name* (new 'global 'string 64 (the-as string #f)))
+
+(defbehavior smoke-r41-shot process ((shape string) (page string))
+  "A screenshot named r41-SHAPE-PAGE."
+  (format (clear *smoke-r41-name*) "r41-~S-~S" shape page)
+  (smoke-shot *smoke-r41-name*)
+  0
+  )
+
+(defbehavior smoke-r41-pages process ((shape string))
+  "The battle's pages in the screen shape set now (SHAPE names the shots, round 41): START's pause
+   page, the war zone page on Jak 2's city and the battle setup on its units at once row (both
+   forced under the pause page), Redeploy's class page with its four classes, the L3 map."
+  (smoke-start-page 'main)
+  (smoke-wait-for 8.0 (lambda () (smoke-page-up? BF_PAGE_PAUSE)))
+  (smoke-wait 0.5)
+  (smoke-r41-shot shape "pause")
+  (set! (-> (smoke-dir) page) BF_PAGE_ZONE)
+  (set! (-> (smoke-dir) cursor) BF_ZONE_JAK2)
+  (smoke-wait 0.6)
+  (smoke-r41-shot shape "zone")
+  (set! (-> (smoke-dir) page) BF_PAGE_CONFIG)
+  (set! (-> (smoke-dir) cursor) 2)
+  (smoke-wait 0.6)
+  (smoke-r41-shot shape "config")
+  (set! (-> (smoke-dir) cursor) 4)
+  (smoke-wait 0.6)
+  (smoke-r41-shot shape "config-special")
+  (set! (-> (smoke-dir) page) BF_PAGE_PAUSE)
+  (set! (-> (smoke-dir) cursor) 2)
+  (smoke-wait 0.6)
+  (smoke-press (pad-buttons x) 1.0)
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_CLASS)))
+  (smoke-check "Redeploy: the class page" (smoke-page-up? BF_PAGE_CLASS))
+  (dotimes (k 4)
+    (set! (-> (smoke-dir) cursor) k)
+    (smoke-wait 0.6)
+    (smoke-r41-shot shape (-> (new 'static 'boxed-array :type string "class-0" "class-1" "class-2" "class-3") k))
+    )
+  (smoke-press (pad-buttons triangle) 1.0)
+  (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_PAUSE)))
+  (smoke-press (pad-buttons triangle) 1.0)
+  (smoke-wait-for 6.0 (lambda () (and (= (-> (smoke-dir) page) BF_PAGE_NONE) (not *progress-process*))))
+  (smoke-wait 1.0)
+  (set! (-> *bf* overlay?) #t)
+  (smoke-wait 0.6)
+  (smoke-r41-shot shape "l3")
+  (set! (-> *bf* overlay?) #f)
+  (smoke-wait 0.5)
+  0
+  )
+
+(defbehavior smoke-s78 process ()
+  "Scenario 78 (`smoke-scenario-late`), round 41: the battle's pages laid out again (the setup's rows
+   fitted to the screen, paragraphs wrapped by their width at one size, the class help a button a
+   line, its names in a column, the buttons' labels in their middle), shot on a 4:3 screen then on
+   a 16:9 one (`smoke-r41-pages`), the title's war zone, setup and class pages first. The shapes are
+   the screenshots' to judge; the checks are the pages coming up."
+  (let ((shape (-> *setting-control* user-default aspect-ratio)))
+    (set! (-> *setting-control* user-default aspect-ratio) 'aspect4x3)
+    (smoke-wait 1.0)
+    (smoke-mods-toggle "mods-menu-on")
+    (smoke-battle-start BF_ZONE_JAK2 BF_TEAM_KG)
+    (smoke-deploy 0 "deploy red guard")
+    (smoke-invulnerable #t)
+    (smoke-wait 2.0)
+    (smoke-r41-pages "43")
+    (set! (-> *setting-control* user-default aspect-ratio) 'aspect16x9)
+    (smoke-wait 1.5)
+    (smoke-r41-pages "169")
+    (set! (-> *setting-control* user-default aspect-ratio) shape)
+    )
+  0
+  )
+
+;; Five of Jak 2's doors in the Jak 2 war zone: x, y, z (meters) and the heading of the door's +z
+;; (degrees), from Jak 2's actors (palace-door-1, com-airlock-outer-22 to Mar's tomb, hip-door-a-6 of
+;; the Hip Hog, hide-door-a-3 of the hideout, fort-entry-gate-17)
+(define *smoke-r41-doors*
+  (new 'static 'boxed-array :type float
+    192.0 20.0 716.5 0.0
+    191.95 8.57 925.75 180.0
+    -73.39 9.12 1323.58 33.6
+    1162.22 8.06 59.27 -90.0
+    756.14 11.4 227.04 90.0
+    )
+  )
+
+(define *smoke-r41-door-names*
+  (new 'static 'boxed-array :type string "palace" "tomb" "hiphog" "hideout" "fortress")
+  )
+
+(defbehavior smoke-r41-door-spot process ((k int) (side float) (dist float) (out vector))
+  "OUT: DIST meters from door K of `*smoke-r41-doors*`, on its SIDE (1.0 its +z, -1.0 the other),
+   1.5 m above it."
+  (let ((d *smoke-r41-doors*)
+        (yaw (degrees (-> *smoke-r41-doors* (+ (* 4 k) 3))))
+        )
+    (set-vector! out
+                 (+ (meters (-> d (* 4 k))) (* side (meters dist) (sin yaw)))
+                 (meters (+ (-> d (+ (* 4 k) 1)) 1.5))
+                 (+ (meters (-> d (+ (* 4 k) 2))) (* side (meters dist) (cos yaw)))
+                 1.0
+                 )
+    )
+  out
+  )
+
+(defbehavior smoke-r41-face-door process ((k int))
+  "The battle's camera turned toward door K, level."
+  (let ((d (new 'stack-no-clear 'vector)))
+    (set-vector! d
+                 (- (meters (-> *smoke-r41-doors* (* 4 k))) (-> *target* control trans x))
+                 0.0
+                 (- (meters (-> *smoke-r41-doors* (+ (* 4 k) 2))) (-> *target* control trans z))
+                 1.0
+                 )
+    (set! (-> *bf* view-yaw) (vector-y-angle d))
+    (set! (-> *bf* view-pitch) 0.0)
+    (set! (-> *bf* view-set?) #t)
+    )
+  0
+  )
+
+(defun smoke-r41-door-side ((k int))
+  "Jak's side of door K: + along its +z, - the other."
+  (let ((yaw (degrees (-> *smoke-r41-doors* (+ (* 4 k) 3)))))
+    (+ (* (sin yaw) (- (-> *target* control trans x) (meters (-> *smoke-r41-doors* (* 4 k)))))
+       (* (cos yaw) (- (-> *target* control trans z) (meters (-> *smoke-r41-doors* (+ (* 4 k) 2)))))
+       )
+    )
+  )
+
+(defun smoke-r41-door-probe ((k int) (from-side float))
+  "A sphere of 0.3 m sent through door K, 1.5 m above its foot, from 4 m on FROM-SIDE to 4 m on the
+   other: the share of the way it went before it hit the scenery (-1.0: nothing hit)."
+  (let ((cq (new 'stack-no-clear 'collide-query))
+        (a (new 'stack-no-clear 'vector))
+        (b (new 'stack-no-clear 'vector))
+        )
+    (smoke-r41-door-spot k from-side 4.0 a)
+    (smoke-r41-door-spot k (- from-side) 4.0 b)
+    (set! (-> cq radius) (meters 0.3))
+    (set! (-> cq collide-with) (collide-spec backgnd obstacle))
+    (set! (-> cq ignore-process0) *target*)
+    (set! (-> cq ignore-process1) #f)
+    (set! (-> cq ignore-pat) (new 'static 'pat-surface :nocamera #x1 :probe #x1 :noendlessfall #x1))
+    (set! (-> cq action-mask) (collide-action solid))
+    (vector-copy! (-> cq start-pos) a)
+    (vector-! (-> cq move-dist) b a)
+    (fill-and-probe-using-line-sphere *collide-cache* cq)
+    )
+  )
+
+(defbehavior smoke-s79 process ()
+  "Scenario 79 (`smoke-scenario-late`), round 41: Jak 2's doors to the places the Jak 2 war zone
+   leaves out stand closed in its background (port.jsonc mesh props). At five of them (the palace's
+   gate, Mar's tomb's airlock, the Hip Hog's, the hideout's, the fortress's gate), Jak 14 m off each
+   side, the camera on the door: a shot. Then from the side where he stands on the ground, he walks
+   at it 3 s from 10 m off (the palace gate's box is 10 m deep): he must stay on his side (its
+   collision box, two-sided)."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start BF_ZONE_JAK2 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (let ((at (new 'stack-no-clear 'vector))
+        (blocked 0)
+        (tried 0)
+        )
+    (dotimes (k 5)
+      (format 0 "SMOKE door ~S probe: from + ~f, from - ~f~%" (-> *smoke-r41-door-names* k)
+              (smoke-r41-door-probe k 1.0) (smoke-r41-door-probe k -1.0))
+      (let ((ground-side 0.0))
+        (dotimes (j 2)
+          (let ((side (if (zero? j) 1.0 -1.0)))
+            (smoke-r41-door-spot k side 14.0 at)
+            (move-to-point! (-> *target* control) at)
+            (smoke-r41-face-door k)
+            (smoke-wait 2.0)
+            (smoke-r41-face-door k)
+            (smoke-wait 0.5)
+            (format 0 "SMOKE door ~S side ~f: Jak at ~M ~M ~M (door y ~f m)~%" (-> *smoke-r41-door-names* k) side
+                    (-> *target* control trans x) (-> *target* control trans y) (-> *target* control trans z)
+                    (-> *smoke-r41-doors* (+ (* 4 k) 1)))
+            (smoke-shot (if (zero? j)
+                            (-> (new 'static 'boxed-array :type string "r41-door-palace-a" "r41-door-tomb-a" "r41-door-hiphog-a" "r41-door-hideout-a" "r41-door-fortress-a") k)
+                            (-> (new 'static 'boxed-array :type string "r41-door-palace-b" "r41-door-tomb-b" "r41-door-hiphog-b" "r41-door-hideout-b" "r41-door-fortress-b") k)
+                            )
+                        )
+            ;; on the ground there (not fallen far below the door's foot)
+            (if (and (= ground-side 0.0)
+                     (< (fabs (- (-> *target* control trans y) (meters (-> *smoke-r41-doors* (+ (* 4 k) 1))))) (meters 4))
+                     )
+                (set! ground-side side)
+                )
+            )
+          )
+        (when (!= ground-side 0.0)
+          (smoke-r41-door-spot k ground-side 10.0 at)
+          (move-to-point! (-> *target* control) at)
+          (smoke-r41-face-door k)
+          (smoke-wait 1.5)
+          (smoke-r41-face-door k)
+          (smoke-stick 128 0 128 128)
+          (dotimes (w 6)
+            (smoke-wait 0.5)
+            (format 0 "SMOKE door ~S walk: ~M off its plane, y ~M~%" (-> *smoke-r41-door-names* k) (smoke-r41-door-side k)
+                    (-> *target* control trans y))
+            )
+          (smoke-neutral)
+          (let ((now (smoke-r41-door-side k)))
+            (format 0 "SMOKE door ~S: walked at it from side ~f, now ~M off its plane~%" (-> *smoke-r41-door-names* k) ground-side now)
+            (+! tried 1)
+            (if (< 0.0 (* now ground-side))
+                (+! blocked 1)
+                )
+            )
+          )
+        )
+      )
+    (format 0 "SMOKE doors walked at: ~D, held: ~D~%" tried blocked)
+    (smoke-check "a door walked at holds Jak on his side" (and (> tried 0) (= blocked tried)))
+    )
+  0
+  )
+
+(define-extern *bfh-sprite-page* texture-page)
+(define-extern *bfh-minimap-page* texture-page)
+
+(defbehavior smoke-s80 process ()
+  "Scenario 80 (`smoke-scenario-late`), round 41: the HUD's minimap in Jak 2's city shows Jak 2's
+   map. bf-havenj2's activation (bf-havenj2-obs.gc) makes its texture page of Jak 2's minimap
+   textures its minimap page (battlefront-havenj2-info.gc `bfh-map-pages-on`): checked, then the HUD
+   shot at the palace (the Krimzon Guard's base), in the slums by the Freedom League's and at the
+   port."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start BF_ZONE_JAK2 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (smoke-wait 3.0)
+  (let ((lev (level-get *level* 'bf-havenj2)))
+    (format 0 "SMOKE bf-havenj2 ~A, its sprite page ~A, minimap page ~A (ours ~A), map bits #x~X~%"
+            (if lev (-> lev status) 'none) *bfh-sprite-page* (if lev (-> lev texture-page 8) #f) *bfh-minimap-page*
+            (if lev (-> lev info city-map-bits) 0))
+    (smoke-check "Jak 2's minimap textures are bf-havenj2's minimap page"
+                 (and lev *bfh-sprite-page* *bfh-minimap-page* (= (-> lev texture-page 8) *bfh-minimap-page*)))
+    )
+  (smoke-shot "r41-radar-palace")
+  (let ((at (new 'stack-no-clear 'vector)))
+    (vector-copy! at (-> *bf* points BF_TEAM_FF pos))
+    (+! (-> at y) (meters 2))
+    (move-to-point! (-> *target* control) at)
+    (smoke-wait 3.0)
+    (smoke-shot "r41-radar-slums")
+    (set-vector! at (meters 90.0) (meters 12.0) (meters 1500.0) 1.0)
+    (move-to-point! (-> *target* control) at)
+    (smoke-wait 3.0)
+    (smoke-shot "r41-radar-port")
+    )
+  0
+  )
+
 (defbehavior smoke-s58 process ()
   "Scenario 58 (`smoke-scenario-late`), round 32: four pickups queued 15 m up, 8 m in front of the
    player (`bf-spawn-drops`, as a jetpack guard's): dark eco, yellow ammo, red ammo, health. They
@@ -7412,6 +7674,9 @@
   (case SMOKE_SCENARIO
     ((76) (smoke-s76))
       ((77) (smoke-s77))
+      ((78) (smoke-s78))
+      ((79) (smoke-s79))
+      ((80) (smoke-s80))
     ((75) (smoke-s75))
     ((74) (smoke-s74))
     ((73) (smoke-s73))

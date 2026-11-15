@@ -2163,7 +2163,9 @@
           )
         )
       (else
-        (set! (-> this ctywide) (level-get *level* 'ctywide))
+        ;; MOD battlefront -- the Jak 2 war zone's city (bf-havenj2) is a city too: the HUD's minimap
+        ;; shows only while this finds one (round 41)
+        (set! (-> this ctywide) (the-as level (or (level-get *level* 'ctywide) (level-get *level* 'bf-havenj2))))
         (let ((s5-1 (the int (* 0.0000006357829 (+ 3145728.0 (-> (target-pos 0) x)))))
               (s4-1 (the int (* 0.0000006357829 (+ 3145728.0 (-> (target-pos 0) z)))))
               )

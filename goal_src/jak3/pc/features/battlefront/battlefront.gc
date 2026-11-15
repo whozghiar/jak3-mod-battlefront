@@ -337,25 +337,53 @@
   )
 
 (defun bf-pwrap ((buf dma-buffer) (str string) (x float) (y float) (scale float) (width float) (max-chars int))
-  "STR from Y down in the START menu's yellow (`bf-ptext`, WIDTH wide), broken at spaces into lines
-   of at most MAX-CHARS bytes: the font does not wrap."
-  (let ((len (length str))
+  "STR from Y down in the START menu's yellow at SCALE (`bf-ptext`), broken at spaces into lines
+   WIDTH wide at most, measured in the font: cut at MAX-CHARS bytes and each line shrunk to fit, a
+   paragraph came out in mixed sizes (round 41). A word wider than WIDTH stands alone on its line,
+   shrunk. MAX-CHARS: the most bytes a line takes (127 at most, `*bf-line*`). Lines 40 units apart
+   at scale 1 (34 before round 41: the lines touched)."
+  (let ((font (new 'stack 'font-context *font-default-matrix* 0 0 0.0 (font-color default) (font-flags kerning large)))
+        (len (length str))
+        (most (min 127 max-chars))
         (start 0)
         (line-y y)
         )
+    (set-scale! font scale)
     (while (< start len)
-      (let ((end (min len (+ start max-chars))))
-        ;; cut inside a word: back up to the last space of the line
-        (when (< end len)
-          (let ((cut end))
-            (while (and (> cut start) (!= (-> str data cut) 32))
-              (+! cut -1)
+      (let ((end start)
+            (more? #t)
+            )
+        ;; whole words while the line fits
+        (while more?
+          (let ((next end))
+            (while (and (< next len) (= (-> str data next) 32))
+              (+! next 1)
               )
-            (if (> cut start)
-                (set! end cut)
+            (while (and (< next len) (!= (-> str data next) 32))
+              (+! next 1)
+              )
+            (cond
+              ((or (= next end) (< most (- next start)))
+               (set! more? #f)
+               )
+              (else
+                (dotimes (i (- next start))
+                  (set! (-> *bf-line* data i) (-> str data (+ start i)))
+                  )
+                (set! (-> *bf-line* data (- next start)) (the-as uint 0))
+                (pc-encode-utf8-string *bf-line* *pc-encoded-temp-string*)
+                (if (or (= end start) (>= width (-> (get-string-length *pc-encoded-temp-string* font) length)))
+                    (set! end next)
+                    (set! more? #f)
+                    )
                 )
+              )
             )
           )
+        ;; a word longer than MAX-CHARS: cut there
+        (if (= end start)
+            (set! end (min len (+ start most)))
+            )
         (dotimes (i (- end start))
           (set! (-> *bf-line* data i) (-> str data (+ start i)))
           )
@@ -365,9 +393,19 @@
         (while (and (< start len) (= (-> str data start) 32))
           (+! start 1)
           )
-        (+! line-y (* 34.0 scale))
+        (+! line-y (* 40.0 scale))
         )
       )
+    )
+  (none)
+  )
+
+(defun bf-pbutton-text ((buf dma-buffer) (str string) (x float) (box-y float) (box-h float) (scale float) (color font-color) (width float))
+  "STR centered on X in a button from BOX-Y, BOX-H tall: at SCALE, or smaller to fit WIDTH
+   (`bf-fit-scale`), its capitals in the button's middle (28 units tall at scale 1). Drawn from the
+   button's top, a label shrunk to fit sat high in it (round 41)."
+  (let ((sc (bf-fit-scale str scale width)))
+    (bf-ptext buf str x (+ box-y (* 0.5 (- box-h (* 28.0 sc)))) sc color #t width)
     )
   (none)
   )
@@ -391,13 +429,14 @@
   (none)
   )
 
-(defun bf-prow ((buf dma-buffer) (str string) (x float) (y float) (w float) (on? symbol) (ok? symbol))
-  "A choice of a page's list at (X, Y), W wide: under the START menu's highlight bar and in its
-   white when ON? (the cursor's), in its yellow otherwise, grey when not OK?."
+(defun bf-prow ((buf dma-buffer) (str string) (x float) (y float) (w float) (on? symbol) (ok? symbol) (scale float))
+  "A choice of a page's list at (X, Y), W wide, at SCALE (the list's: `bf-list-scale`): under the
+   START menu's highlight bar and in its white when ON? (the cursor's), in its yellow otherwise, grey
+   when not OK?."
   (if on?
       (bf-pbox buf (+ x -4.0) (+ y -2.0) (+ w 8.0) 17.0 (static-rgba 128 128 64 64))
       )
-  (bf-ptext buf str x y 0.45
+  (bf-ptext buf str x y scale
             (cond
               ((not ok?) (font-color menu-invalid))
               (on? (font-color font-color-33))
@@ -407,6 +446,12 @@
             w
             )
   (none)
+  )
+
+(defun bf-list-scale ((str string) (scale float) (w float))
+  "SCALE, or the smaller one at which STR is W wide (`bf-fit-scale`): called on every choice of a
+   list in turn, the list's one size (round 41: a long choice alone shrunk stood out)."
+  (fmin scale (bf-fit-scale str 0.45 w))
   )
 
 (defun bf-progress-on? ()
@@ -598,11 +643,9 @@
 
 (define *bf-zone-view* (new 'static 'bf-zone-view))
 
-;; Jak 2's city's map (round 40): no picture yet (its marks on the frame's dark background), its
-;; size and corner fitted to the city's streets (x -700 to 1400 m, z -1000 to 2150 m), the shape of
-;; Jak 3's map (256 x 384 texels, 8.2 m each).
-(define *bf-zone-jak2-map-size* (new 'static 'array int32 3 256 384 256))
-(define *bf-zone-jak2-map-corner* (new 'static 'array float 3 -2867200.0 -4096000.0 33587.2))
+;; Jak 2's city's map: *bf-zone-jak2-map-texels*, -clut*, -size*, -corner*, -tex0* in
+;; battlefront-havenj2-info.gc, made by the level port from the player's Jak 2 (round 41; *bfh-map?*
+;; #f without it: the marks alone on the frame's dark background, as in round 40).
 
 (defun bf-zone-map-size ((zone int) (k int))
   "ZONE's map: stored width (K 0), height (1), width the map fills (2), in texels
@@ -674,8 +717,9 @@
    drawn as one sprite in a bucket of their own, under the page's. The upload marks the default
    level's VRAM dirty, as the START menu's map does."
   (bf-zone-view! zone)
-  ;; Jak 2's city has no picture yet: its marks alone
-  (when (!= zone BF_ZONE_JAK2)
+  ;; Jak 2's city: its picture made from the player's Jak 2 (battlefront-havenj2-info.gc), else its
+  ;; marks alone
+  (when (or (!= zone BF_ZONE_JAK2) *bfh-map?*)
   (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id tex-hud-hud-alpha))
     (dma-buffer-add-gs-set buf
                            (test-1 (new 'static 'gs-test :ate #x1 :afail #x3 :zte #x1 :ztst (gs-ztest always)))
@@ -683,15 +727,26 @@
                            (clamp-1 (new 'static 'gs-clamp :wms (gs-tex-wrap-mode clamp) :wmt (gs-tex-wrap-mode clamp)))
                            )
     (pc-upload-map-texture buf
-                           (the-as pointer (&-> *bf-zone-minimap-texels* (-> *bf-zone-minimap-offset* zone)))
-                           (the-as pointer (&-> *bf-zone-minimap-clut* 0))
-                           (-> *bf-zone-minimap-size* (* 3 zone))
-                           (-> *bf-zone-minimap-size* (+ (* 3 zone) 1))
+                           (if (= zone BF_ZONE_JAK2)
+                               (the-as pointer (&-> *bf-zone-jak2-map-texels* 0))
+                               (the-as pointer (&-> *bf-zone-minimap-texels* (-> *bf-zone-minimap-offset* zone)))
+                               )
+                           (if (= zone BF_ZONE_JAK2)
+                               (the-as pointer (&-> *bf-zone-jak2-map-clut* 0))
+                               (the-as pointer (&-> *bf-zone-minimap-clut* 0))
+                               )
+                           (bf-zone-map-size zone 0)
+                           (bf-zone-map-size zone 1)
                            8
                            0
                            )
     (dma-buffer-add-gs-set buf
-                           (tex0-1 (the-as gs-tex0 (-> *bf-zone-minimap-tex0* zone)))
+                           (tex0-1 (the-as gs-tex0 (if (= zone BF_ZONE_JAK2)
+                                                      (-> *bf-zone-jak2-map-tex0* 0)
+                                                      (-> *bf-zone-minimap-tex0* zone)
+                                                      )
+                                           )
+                                   )
                            (tex1-1 (new 'static 'gs-tex1 :mmag #x1 :mmin #x1))
                            (texflush 0)
                            )
@@ -3412,12 +3467,18 @@
          (w (* 0.45 (-> *bf-frame* w)))
          )
     (bf-pheader buf (if (= page BF_PAGE_ZONE) (bf-tr "War zone" "Zone de guerre") (bf-tr "Your side" "Votre camp")))
-    (dotimes (i (bf-page-count page))
-      (bf-prow buf (bf-page-label page (-> self pick-team) i) x (+ (bf-fy 0.03) (* 21.0 (the float i))) w (= i cur)
-               (not (and (= page BF_PAGE_ZONE) (not (bf-zone-open? i))))
-               )
+    (let ((sc 0.45))
+      (dotimes (i (bf-page-count page))
+        (set! sc (bf-list-scale (bf-page-label page (-> self pick-team) i) sc w))
+        )
+      (dotimes (i (bf-page-count page))
+        (bf-prow buf (bf-page-label page (-> self pick-team) i) x (+ (bf-fy 0.03) (* 21.0 (the float i))) w (= i cur)
+                 (not (and (= page BF_PAGE_ZONE) (not (bf-zone-open? i))))
+                 sc
+                 )
+        )
       )
-    (bf-pwrap buf (bf-page-desc page (-> self pick-team) cur) x (bf-fy 0.4) 0.36 w (the int (/ w 6.0)))
+    (bf-pwrap buf (bf-page-desc page (-> self pick-team) cur) x (bf-fy 0.4) 0.34 w 127)
     (if (and (= page BF_PAGE_ZONE) (not (bf-zone-open? cur)))
         (bf-ptext buf (if (>= cur BF_ZONE_COUNT) (bf-tr "Coming soon" "À venir") (bf-tr "Needs Jak 2" "Jak 2 requis")) (bf-fx 0.76) (bf-fy 0.42) 0.6 (font-color menu-invalid) #t (* 0.45 (-> *bf-frame* w)))
         (bf-draw-map-marks buf (if (= page BF_PAGE_ZONE) cur (-> self pick-zone)) -1)
@@ -3428,80 +3489,87 @@
   )
 
 (defbehavior bf-draw-config-page bf-director ((buf dma-buffer))
-  "The battle setup (round 29), in three columns: its settings on the left, each its value between
-   arrows; the war zone's map with its points in the middle; the two sides on the right, the
-   player's on top, and Next. The cursor's row in the START menu's white under its highlight bar."
+  "The battle setup (round 29), in three columns: its settings on the left, each its name over its
+   value between arrows; the war zone's map with its points in the middle; the two sides on the
+   right, on the first two settings' lines, the player's on top, and Next on the last one's. The
+   rows share the screen's height (round 41: five rows of 50 units ran into the keys on a 4:3
+   screen). The cursor's row in the START menu's white under its highlight bar."
   (let* ((cur (-> self cursor))
          (lx (bf-fx 0.0))
          (lw (* 0.37 (-> *bf-frame* w)))
          (rx (bf-fx 0.66))
          (rw (* 0.34 (-> *bf-frame* w)))
-         (rh (fmin 50.0 (* 0.2 (-> *bf-frame* h))))
+         (top (bf-fy 0.02))
+         (rh (fmin 40.0 (/ (* 0.84 (-> *bf-frame* h)) (the float BF_CONFIG_SETTINGS))))
+         (vy (* 0.45 rh)) ;; a row's value under its name
+         (next (+ BF_CONFIG_COUNT -1))
          )
     (bf-pheader buf (bf-tr "Battle setup" "Configuration de la bataille"))
     (dotimes (i BF_CONFIG_SETTINGS)
-      (let ((y (+ (bf-fy 0.02) (* rh (the float i)))))
+      (let ((y (+ top (* rh (the float i)))))
         (if (= i cur)
-            (bf-pbox buf lx (+ y -2.0) lw (+ rh -6.0) (static-rgba 128 128 64 64))
+            (bf-pbox buf lx (+ y -2.0) lw (+ rh -3.0) (static-rgba 128 128 64 64))
             )
         (bf-ptext buf
                   (case i
                     ((0) (bf-tr "Time limit" "Limite de temps"))
                     ((1) (bf-tr "Units per side" "Unités par équipe"))
-                    ((2) (bf-tr "Units at once per side" "Unités simultanées par équipe"))
+                    ((2) (bf-tr "Units at once" "Unités simultanées"))
                     ((3) (bf-tr "Victory" "Condition de victoire"))
                     (else (bf-tr "Special characters" "Personnages spéciaux"))
                     )
-                  (+ lx 4.0) y 0.36 (font-color font-color-32) #f (+ lw -8.0)
+                  (+ lx 6.0) y 0.34 (font-color font-color-32) #f (+ lw -12.0)
                   )
         (bf-config-value i)
-        (bf-draw-arrow buf (+ lx 4.0) (+ y 23.0) -1.0 (= i cur))
-        (bf-ptext buf *bf-text* (+ lx (* 0.5 lw)) (+ y 17.0) 0.4
+        ;; none yet: said on the value's line
+        (if (= i 4)
+            (format *bf-text* (bf-tr " (Yes: coming soon)" " (Oui : à venir)"))
+            )
+        (bf-draw-arrow buf (+ lx 6.0) (+ y vy 5.0) -1.0 (= i cur))
+        (bf-ptext buf *bf-text* (+ lx (* 0.5 lw)) (+ y vy) 0.38
                   (cond
                     ((= i 4) (font-color menu-invalid))
                     ((= i cur) (font-color font-color-33))
                     (else (font-color font-color-32))
                     )
-                  #t (+ lw -26.0)
+                  #t (+ lw -30.0)
                   )
-        (bf-draw-arrow buf (+ lx lw -4.0) (+ y 23.0) 1.0 (= i cur))
+        (bf-draw-arrow buf (+ lx lw -6.0) (+ y vy 5.0) 1.0 (= i cur))
         )
       )
-    (bf-ptext buf (bf-tr "Yes: coming soon" "Oui : à venir") (+ lx (* 0.5 lw)) (+ (bf-fy 0.02) (* 4.0 rh) 31.0) 0.3
-              (font-color menu-invalid) #t lw
-              )
     ;; the sides
     (dotimes (k 2)
-      (let ((y (+ (bf-fy 0.04) (* 54.0 (the float k))))
+      (let ((y (+ top (* rh (the float k))))
             (row (+ BF_CONFIG_SETTINGS k))
             )
         (if (= row cur)
-            (bf-pbox buf rx (+ y -2.0) rw 42.0 (static-rgba 128 128 64 64))
+            (bf-pbox buf rx (+ y -2.0) rw (+ rh -3.0) (static-rgba 128 128 64 64))
             )
         (bf-ptext buf (if (zero? k) (bf-tr "Your side" "Votre camp") (bf-tr "The enemy" "L'adversaire"))
-                  (+ rx (* 0.5 rw)) y 0.36 (font-color font-color-32) #t rw
+                  (+ rx (* 0.5 rw)) y 0.34 (font-color font-color-32) #t (+ rw -12.0)
                   )
         (bf-config-value row)
-        (bf-draw-arrow buf (+ rx 4.0) (+ y 23.0) -1.0 (= row cur))
-        (bf-ptext buf *bf-text* (+ rx (* 0.5 rw)) (+ y 17.0) 0.4
+        (bf-draw-arrow buf (+ rx 6.0) (+ y vy 5.0) -1.0 (= row cur))
+        (bf-ptext buf *bf-text* (+ rx (* 0.5 rw)) (+ y vy) 0.38
                   (if (= row cur)
                       (font-color font-color-33)
                       (bf-team-color (if (zero? k) (-> *bf-config* team-a) (-> *bf-config* team-b)))
                       )
-                  #t (+ rw -26.0)
+                  #t (+ rw -30.0)
                   )
-        (bf-draw-arrow buf (+ rx rw -4.0) (+ y 23.0) 1.0 (= row cur))
+        (bf-draw-arrow buf (+ rx rw -6.0) (+ y vy 5.0) 1.0 (= row cur))
         )
       )
-    (let ((y (bf-fy 0.78)))
-      (if (= cur (+ BF_CONFIG_COUNT -1))
-          (bf-pbox buf (+ rx 4.0) (+ y -3.0) (+ rw -10.0) 22.0 (static-rgba 128 128 64 64))
+    ;; Next, in the middle of the last setting's line
+    (let ((y (+ top (* rh (the float (+ BF_CONFIG_SETTINGS -1))) (* 0.5 (- rh 25.0)) -2.0)))
+      (if (= cur next)
+          (bf-pbox buf (+ rx 4.0) y (+ rw -8.0) 22.0 (static-rgba 128 128 64 64))
           )
-      (bf-draw-panel-border buf (+ rx 4.0) (+ y -3.0) (+ rw -10.0) 22.0 (bf-fade (static-rgba 128 128 64 110)))
-      (bf-ptext buf (bf-tr "Next" "Suivant") (+ rx (* 0.5 rw)) y 0.5
-                (if (= cur (+ BF_CONFIG_COUNT -1)) (font-color font-color-33) (font-color font-color-32))
-                #t rw
-                )
+      (bf-draw-panel-border buf (+ rx 4.0) y (+ rw -8.0) 22.0 (bf-fade (static-rgba 128 128 64 110)))
+      (bf-pbutton-text buf (bf-tr "Next" "Suivant") (+ rx (* 0.5 rw)) y 22.0 0.45
+                       (if (= cur next) (font-color font-color-33) (font-color font-color-32))
+                       (+ rw -16.0)
+                       )
       )
     (bf-draw-map-marks buf (-> self pick-zone) -1)
     (bf-pkeys buf (bf-tr "<PAD_X> Next    <PAD_DPAD_ANY> Change    <PAD_TRIANGLE> Back"
@@ -3510,6 +3578,12 @@
               )
     )
   (none)
+  )
+
+(defun bf-help-tall? ((line string))
+  "#t for a class help line whose icon is the D-pad's, taller than a line (battlefront-h.gc
+   `*bf-guard-help*`)."
+  (or (string-prefix= "~Y~" line) (string-prefix= "~Y<PAD_DPAD" line))
   )
 
 (defbehavior bf-draw-class-page bf-director ((buf dma-buffer))
@@ -3569,18 +3643,30 @@
       (bf-draw-arrow buf (+ lx lw -8.0) (+ y 18.0) 1.0 (= cur n))
       (+! y 30.0)
       )
-    (+! y 4.0)
-    (let ((lines (if (bf-fr?) (-> *bf-classes* class desc-fr) (-> *bf-classes* class desc))))
+    (+! y 5.0)
+    ;; one button a line, their names in one column (battlefront-h.gc `*bf-guard-help*`), all at one
+    ;; size (the largest at which every line fits, 0.22 at least), the lines closer when they would
+    ;; run into the keys (round 41: each line shrunk alone came out in mixed sizes)
+    (let* ((lines (if (bf-fr?) (-> *bf-classes* class desc-fr) (-> *bf-classes* class desc)))
+           (sc 0.27)
+           (need 0.0)
+           )
       (dotimes (i (-> lines length))
-        (let* ((line (-> lines i))
-               ;; a D-pad icon stands taller than a line
-               (tall? (or (string-prefix= "~Y" line) (string-prefix= "<PAD_DPAD" line)))
-               )
-          (if tall?
-              (+! y 2.0)
-              )
-          (bf-ptext buf line (+ lx 6.0) y 0.27 (font-color font-color-32) #f (+ lw -10.0))
-          (+! y (if tall? 13.0 11.0))
+        (set! sc (fmin sc (bf-fit-scale (-> lines i) 0.27 (+ lw -12.0))))
+        (+! need (if (bf-help-tall? (-> lines i)) 15.0 11.0))
+        )
+      (set! sc (fmax 0.22 sc))
+      (let ((k (if (< 0.0 need) (fmax 0.7 (fmin 1.0 (/ (- (bf-fy 0.91) y) need))) 1.0)))
+        (dotimes (i (-> lines length))
+          (let* ((line (-> lines i))
+                 (tall? (bf-help-tall? line))
+                 )
+            (if tall?
+                (+! y (* 2.0 k))
+                )
+            (bf-ptext buf line (+ lx 6.0) y sc (font-color font-color-32) #f (+ lw -12.0))
+            (+! y (* k (if tall? 13.0 11.0)))
+            )
           )
         )
       )
@@ -3616,20 +3702,20 @@
           (bf-pbox buf mx (+ by -3.0) mw 22.0 (static-rgba 128 128 64 64))
           )
       (bf-draw-panel-border buf mx (+ by -3.0) mw 22.0 rim)
-      (bf-ptext buf
-                (cond
-                  ((= (-> *bf* phase) BF_PHASE_DEPLOY) (bf-tr "Loading..." "Chargement..."))
-                  (respawn? (bf-tr "Spawn" "Apparaître"))
-                  ((-> self from-title?) (bf-tr "Start the battle" "Démarrer la bataille"))
-                  (else (bf-tr "Deploy" "Déployer"))
-                  )
-                cxm by 0.45 (if (= cur button) (font-color font-color-33) (font-color font-color-32)) #t (+ mw -6.0)
-                )
+      (bf-pbutton-text buf
+                       (cond
+                         ((= (-> *bf* phase) BF_PHASE_DEPLOY) (bf-tr "Loading..." "Chargement..."))
+                         (respawn? (bf-tr "Spawn" "Apparaître"))
+                         ((-> self from-title?) (bf-tr "Start the battle" "Démarrer la bataille"))
+                         (else (bf-tr "Deploy" "Déployer"))
+                         )
+                       cxm (+ by -3.0) 22.0 0.45 (if (= cur button) (font-color font-color-33) (font-color font-color-32)) (+ mw -12.0)
+                       )
       )
     ;; right: the objective, the radar
     (bf-ptext buf (bf-tr "Objective" "Objectif") (+ rx 4.0) (bf-fy 0.01) 0.4 (font-color font-color-33) #f (+ rw -6.0))
     (bf-pwrap buf (bf-tr "For now: capture the control points" "Pour le moment : capturer les points de contrôle")
-              (+ rx 4.0) (+ (bf-fy 0.01) 17.0) 0.32 (+ rw -6.0) (the int (/ rw 5.0))
+              (+ rx 4.0) (+ (bf-fy 0.01) 17.0) 0.3 (+ rw -6.0) 127
               )
     (bf-draw-map-marks buf (if (bf-active?) (-> *bf* zone) (-> self pick-zone)) (if respawn? (-> self pick-point) -1))
     (bf-pkeys buf (if respawn?
@@ -3648,8 +3734,13 @@
         (w (* 0.42 (-> *bf-frame* w)))
         )
     (bf-pheader buf "Battlefront")
-    (dotimes (i BF_PAUSE_COUNT)
-      (bf-prow buf (bf-pause-label i) x (+ (bf-fy 0.03) (* 21.0 (the float i))) w (= i (-> self cursor)) (bf-pause-ok? i))
+    (let ((sc 0.45))
+      (dotimes (i BF_PAUSE_COUNT)
+        (set! sc (bf-list-scale (bf-pause-label i) sc w))
+        )
+      (dotimes (i BF_PAUSE_COUNT)
+        (bf-prow buf (bf-pause-label i) x (+ (bf-fy 0.03) (* 21.0 (the float i))) w (= i (-> self cursor)) (bf-pause-ok? i) sc)
+        )
       )
     (bf-draw-map-marks buf (-> *bf* zone) -1)
     (bf-pkeys buf (bf-tr "<PAD_X> Select    <PAD_TRIANGLE> Resume" "<PAD_X> Choisir    <PAD_TRIANGLE> Reprendre"))

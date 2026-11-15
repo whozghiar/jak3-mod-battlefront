@@ -65,6 +65,7 @@ port's install sequence and error codes: [Launcher install](../../docs/modding/c
 | `mesh` | `<level>-mesh.glb`: the source props kept as background, and the pool surfaces (`mesh`, `water`) |
 | `ocean` | `<level>-ocean.gc`: a level's own ocean map, copied from the source game (`ocean_source`) |
 | `nav` | `<level>-nav.json`: the traffic navigation data merged for the level (`nav`), and its height map |
+| `citymap` | The `city_map` GOAL file: the source game's city map, its minimap textures laid out by its `minimap.gc` in one 8-bit picture of 255 colors at most, as static arrays the mod's GAME code reads ([steps/citymap.py](steps/citymap.py)) |
 | `levels` | Each level's `.jsonc` and `.gd`, its regions and water regions (`<level>-water-regions.json`), its particles (`<level>-part.gc`), the models its actors use (`<model>.glb`), the level-load-infos and continue points (`level_info`), and the levels' `goalc` build steps (`build`), with the steps copying and packing the source game's sound (`sound`), and the source banks each level needs besides its wanted ones (`sound.level_banks_var`) |
 | `sound` | Nothing: the sound check of the levels written ([steps/sound_check.py](steps/sound_check.py)), per level the sounds its content plays that no loaded bank has (MISSING), that only some of its want sets have (partial), or that no bank of either game has (NOBANK); then the sounds the source game's animations of the rebuilt models play (their art groups' `effect-name` tags, which `build-actor` models lack), each `played` by its class's code, `UNPLAYED` or `NOBANK` |
 
@@ -115,6 +116,7 @@ names (`callbacks_file`) are in the same folder. Top-level keys:
 | `level_defaults` | The `level_info` of a level unless it says otherwise (`callbacks`, `draw_priority`, `mood`: `update-mood-{name}` by default) |
 | `level_templates` | Named sets of level keys: a level with `template` takes the keys of that set it doesn't set itself (the districts of a city) |
 | `ocean_map` | The ocean map of the levels whose `ocean` is `true` |
+| `city_map` | The city map of the mod's menus ([steps/citymap.py](steps/citymap.py)): `file` (the GOAL file written), `var` (its arrays' names' stem), `minimap` (the source game's `minimap.gc`), `textures` (`[[source texture page, [textures]], ...]`), `max_size` (texels across and down). The `extract` step then saves the source game's texture PNGs |
 | `levels` | The levels, below |
 | `particles` | For every level: `copied_callbacks`, `level_callbacks`, `reserved` ids ([steps/particles.py](steps/particles.py)) |
 | `doors`, `closed_doors` | Source doors and elevators placed, as `[source level, name]`; the closed ones never open |

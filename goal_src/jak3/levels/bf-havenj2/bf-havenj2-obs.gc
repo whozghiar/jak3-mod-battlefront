@@ -8,8 +8,9 @@
 #|
   Battlefront mod -- the level code of bf-havenj2, Jak 2's Haven City as the battle's second war
   zone (custom_assets/jak3/ports/battlefront-havenj2/port.jsonc, built by scripts/level_port from
-  the player's discs). Its level callbacks are Jak 3's ctywide's (ctywide-init.o, in the same DGO);
-  this file holds what Jak 3's city lacks: its mood.
+  the player's discs). Its level callbacks are Jak 3's ctywide's (ctywide-init.o, in the same DGO),
+  wrapped here to bring Jak 2's minimap in; this file holds what Jak 3's city lacks: its mood and
+  its minimap.
 |#
 
 ;; The background comes from Jak 2's city levels, whose time-of-day palettes are laid out like this
@@ -19,6 +20,23 @@
 ;; Jak 3's update-mood-ctywide leaves palette 7 at 0, which keeps Jak 2's neon signs and industrial
 ;; lights dark: this is Jak 2's slums mood, which drives all three light palettes (the state offsets
 ;; are ctysluma's: light 0, neon 8, flames 16). Haven City: New Dawn's update-mood-havenj2.
+(defun bf-havenj2-activate ((lev level) (mode symbol))
+  "bf-havenj2's activation callback (slot 35): Jak 3's ctywide's (the traffic, the squads...), and
+   Jak 2's minimap textures as its minimap page (battlefront-havenj2-info.gc `bfh-map-pages-on`), so
+   the HUD's minimap shows Jak 2's city (round 41). LEV: the level; MODE: the activation mode."
+  (ctywide-activate lev mode)
+  (bfh-map-pages-on lev)
+  (none)
+  )
+
+(defun bf-havenj2-logout ((lev level))
+  "bf-havenj2's logout callback (slot 34): its texture pages out of the texture system
+   (`bfh-map-pages-off`: their names are in its heap), then Jak 3's ctywide's. LEV: the level."
+  (bfh-map-pages-off lev)
+  (ctywide-logout lev)
+  (none)
+  )
+
 (defbehavior update-mood-bf-havenj2 time-of-day-proc ((arg0 mood-context) (arg1 float) (arg2 int))
   "bf-havenj2's mood: the exterior mood, and while the level is active (outside the special
    time-of-day modes above 8) the street lights, flames and neon signs animated as in Jak 2's city."

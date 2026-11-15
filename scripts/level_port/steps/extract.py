@@ -114,6 +114,13 @@ def source_needs(port):
         for path in (f"{src.ENTITIES}/{lv}-actors.json", f"{src.FR3}/{lv}.fr3"):
             if stale(path):
                 missing.setdefault(lv, []).append(path)
+    # the city map's textures (steps/citymap.py), in their levels' texture pages
+    if "city_map" in port.data:
+        for page, names in port["city_map"]["textures"]:
+            for name in names:
+                path = f"decompiler_out/{src.NAME}/textures/{page}/{name}.png"
+                if stale(path):
+                    missing.setdefault(page.removesuffix("-minimap"), []).append(path)
     # the models and their extra models (a lamp's cone of light...)
     for model in [m for top in port.get("models", {}).values()
                   for m in [top] + top.get("extras", [])]:
@@ -164,6 +171,9 @@ def run(port):
         overrides = {"decompile_code": False, "levels_extract": True, "allowed_objects": [],
                      "rip_levels": True, "extra_texture_replacement_dirs":
                      [f"custom_assets/{dst.NAME}/texture_replacements"]}
+        # the city map is made of texture PNGs (steps/citymap.py)
+        if "city_map" in port.data:
+            overrides["save_texture_pngs"] = True
         if whole:
             print(f"  {src.TITLE} isn't extracted with its model rips: extracting it all")
         else:
