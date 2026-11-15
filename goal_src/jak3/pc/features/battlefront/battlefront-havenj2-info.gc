@@ -1,0 +1,34 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: battlefront-havenj2-info.gc
+;; name in dgo: battlefront-havenj2-info
+;; dgos: GAME
+
+#|
+  Battlefront mod -- the Jak 2 Haven City war zone's level-load-info (bf-havenj2), in GAME so that
+  it is known at boot.
+
+  The level is made from the player's own Jak 2 and Jak 3 discs by scripts/level_port
+  (custom_assets/jak3/ports/battlefront-havenj2/port.jsonc), which also writes its level-load-info
+  and continue point into goal_src/jak3/levels/bf-havenj2/bf-havenj2-levels.gc (not in git). A
+  player without Jak 2 has neither: GAME's object list can't name a generated object, so this file
+  takes the generated one's forms when it exists, at compile time, and *bfh-built* tells the
+  battle whether the war zone exists (else it is greyed). After `task level-port` creates the file
+  for the first time, compile this one again (`(make-group "iso" :force #t)` or touch it): the
+  build doesn't see the generated file as its input.
+|#
+
+(defmacro bfh-include-levels (file)
+  "The forms of FILE (the generated level-load-info), without its first (in-package goal), and
+   *bfh-built* #t; or *bfh-built* #f alone when FILE doesn't exist (no Jak 2 extraction)."
+  (if (file-exists? file)
+      `(begin
+         ,@(cdr (read-data-file file))
+         (define *bfh-built* #t)
+         )
+      `(define *bfh-built* #f)
+      )
+  )
+
+(bfh-include-levels "goal_src/jak3/levels/bf-havenj2/bf-havenj2-levels.gc")

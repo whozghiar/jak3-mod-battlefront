@@ -303,11 +303,20 @@ ExtractorErrorCode run_level_ports(const fs::path& iso_data_path, const std::str
     if (!fs::exists(manifest)) {
       continue;
     }
-    const std::string source =
-        parse_commented_json(file_util::read_text_file(manifest), manifest.string())
-            .value("source_game", "");
+    const auto port =
+        parse_commented_json(file_util::read_text_file(manifest), manifest.string());
+    const std::string source = port.value("source_game", "");
     const auto title = source.size() > 3 ? "Jak " + source.substr(3) : source;  // jak2: Jak 2
     const auto source_iso = find_game_iso(source, iso_data_path);
+    // og:battlefront-havenj2 added: an optional port (its manifest's "optional": true) is skipped
+    // without its source game, the mod's levels from it left out (the mod plays without them)
+    if (!source_iso && port.value("optional", false)) {
+      lg::warn(
+          "Part of this mod is made from your own copy of {0}, which isn't installed: it is left "
+          "out. Install {0} in the OpenGOAL Launcher, then reinstall this mod to have it.",
+          title);
+      continue;
+    }
     if (!source_iso) {
       lg::error(
           "This mod builds its levels from your own copy of {0}, which isn't installed. Install "

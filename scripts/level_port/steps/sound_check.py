@@ -658,7 +658,11 @@ def print_anim_sounds(rows):
 
 
 def run(port):
-    """The "sound" step: the check of the generated levels, printed (writes nothing)."""
+    """The "sound" step: the check of the generated levels, printed (writes nothing). Nothing to
+    check for a port without a "sound" block (its levels are silent)."""
+    if port.get("sound") is None:
+        print("  no sound block: nothing to check")
+        return
     check = Check(port)
     print_report(check.run(continue_sets_written(port)))
     print_anim_sounds(check.anim_sounds())

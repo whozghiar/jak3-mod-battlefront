@@ -6228,6 +6228,59 @@
   0
   )
 
+(defun smoke-r40-line ((tag string))
+  "Jak's place, ground, the Jak 2 city level's status and the city code's objects."
+  (let ((l (level-get *level* 'bf-havenj2)))
+    (format 0 "SMOKE ~S: Jak at ~M ~M ~M, on surface ~A; " tag (-> *target* control trans x)
+            (-> *target* control trans y) (-> *target* control trans z)
+            (logtest? (-> *target* control status) (collide-status on-surface)))
+    (format 0 "bf-havenj2 ~A; traffic engine ~A, faction ~A, borrow ~A~%" (if l (-> l status) 'none)
+            (if *traffic-engine* #t #f) (if *cty-faction-manager* #t #f) (if *city-borrow-manager* #t #f))
+    )
+  0
+  )
+
+(defbehavior smoke-s72 process ()
+  "Scenario 72 (`smoke-scenario-late`), round 40 milestone 1: the Jak 2 city level (bf-havenj2) on its
+   own, out of a battle. Battlefront mode off and its page closed, Jak sent to its continue point:
+   the level loads and becomes active, Jak 3's city code logs in (traffic engine, faction and borrow
+   managers), Jak stands on its collision and walks; screenshots."
+  (set! *mod-battlefront-enable* #f)
+  (let ((dir (handle->process (-> *bf* director))))
+    (if (and dir (!= (-> (the-as bf-director dir) page) BF_PAGE_NONE))
+        (run-now-in-process dir bf-close-page)
+        )
+    )
+  (smoke-wait 1.0)
+  (smoke-step "warp")
+  (initialize! *game-info* 'game (the-as game-save #f) "bf-havenj2-start" (the-as resetter-spec #f))
+  (smoke-wait-for 120.0 (lambda () (let ((l (level-get *level* 'bf-havenj2))) (and l (= (-> l status) 'active)))))
+  (smoke-wait 3.0)
+  (smoke-r40-line "arrived")
+  (smoke-check "the Jak 2 city level is active"
+               (let ((l (level-get *level* 'bf-havenj2))) (and l (= (-> l status) 'active))))
+  (smoke-check "Jak 3's city code logged in with it" (and *traffic-engine* *cty-faction-manager* *city-borrow-manager*))
+  (smoke-check "Jak stands on the Jak 2 city" (logtest? (-> *target* control status) (collide-status on-surface)))
+  (smoke-shot "r40-city-start")
+  (smoke-step "walk")
+  (let ((from (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans))))
+    (smoke-stick 128 0 128 128)
+    (smoke-wait 3.0)
+    (smoke-stick 128 128 128 128)
+    (smoke-wait 0.5)
+    (smoke-r40-line "walked")
+    (format 0 "SMOKE walked ~M m~%" (vector-vector-xz-distance from (-> *target* control trans)))
+    (smoke-check "Jak walks on it" (< (meters 5) (vector-vector-xz-distance from (-> *target* control trans))))
+    )
+  (smoke-shot "r40-city-walk")
+  (smoke-stick 128 128 0 128)
+  (smoke-wait 1.5)
+  (smoke-stick 128 128 128 128)
+  (smoke-wait 0.5)
+  (smoke-shot "r40-city-turn")
+  0
+  )
+
 (defbehavior smoke-s58 process ()
   "Scenario 58 (`smoke-scenario-late`), round 32: four pickups queued 15 m up, 8 m in front of the
    player (`bf-spawn-drops`, as a jetpack guard's): dark eco, yellow ammo, red ammo, health. They
@@ -7147,6 +7200,7 @@
   "Scenarios 36 to 40 (rounds 26 and 27), each in a function of its own, out of `smoke-scenario`:
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
+    ((72) (smoke-s72))
     ((71) (smoke-s71))
     ((70) (smoke-s70))
     ((69) (smoke-s69))

@@ -491,6 +491,7 @@
   "shield-sphere.o"
   "entity-debug.o" ;; added
   ;; MOD battlefront -- after the engine code they use (enemy, guard-projectile) and mods-menu.o
+  "battlefront-havenj2-info.o" ;; the Jak 2 Haven City war zone's level-load-info, when scripts/level_port generated it
   "battlefront-h.o"
   "battlefront-player.o"
   "battlefront-minimaps.o"
