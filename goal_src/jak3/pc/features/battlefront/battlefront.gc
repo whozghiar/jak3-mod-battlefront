@@ -532,6 +532,11 @@
 (defun bf-page-desc ((page int) (team int) (i int))
   "Description of choice I of PAGE."
   (cond
+    ((and (= page BF_PAGE_ZONE) (< i BF_ZONE_COUNT) (not (bf-zone-open? i)))
+     (bf-tr "Made from your own Jak 2: install Jak 2 in the OpenGOAL Launcher, then reinstall this mod."
+            "Faite à partir de votre propre Jak 2 : installez Jak 2 dans l'OpenGOAL Launcher, puis réinstallez ce mod."
+            )
+     )
     ((= page BF_PAGE_ZONE) (if (< i BF_ZONE_COUNT)
                                (bf-tr (-> *bf-zones* i desc) (-> *bf-zones* i desc-fr))
                                (bf-tr "The Wastelanders' desert city: coming in a later version."
@@ -591,13 +596,36 @@
 
 (define *bf-zone-view* (new 'static 'bf-zone-view))
 
+;; Jak 2's city's map (round 40): no picture yet (its marks on the frame's dark background), its
+;; size and corner fitted to the city's streets (x -700 to 1400 m, z -1000 to 2150 m), the shape of
+;; Jak 3's map (256 x 384 texels, 8.2 m each).
+(define *bf-zone-jak2-map-size* (new 'static 'array int32 3 256 384 256))
+(define *bf-zone-jak2-map-corner* (new 'static 'array float 3 -2867200.0 -4096000.0 33587.2))
+
+(defun bf-zone-map-size ((zone int) (k int))
+  "ZONE's map: stored width (K 0), height (1), width the map fills (2), in texels
+   (battlefront-minimaps.gc, or Jak 2's city's)."
+  (if (= zone BF_ZONE_JAK2)
+      (-> *bf-zone-jak2-map-size* k)
+      (-> *bf-zone-minimap-size* (+ (* 3 zone) k))
+      )
+  )
+
+(defun bf-zone-map-corner ((zone int) (k int))
+  "ZONE's map: world x (K 0) and z (1) of its top left corner, and the world units a texel covers (2)."
+  (if (= zone BF_ZONE_JAK2)
+      (-> *bf-zone-jak2-map-corner* k)
+      (-> *bf-zone-minimap-corner* (+ (* 3 zone) k))
+      )
+  )
+
 (defun bf-zone-view! ((zone int))
   "Fit ZONE's whole map (battlefront-minimaps.gc: the minimap of its district) in the right frame,
    centered, its shape kept, into `*bf-zone-view*`. A texel is square in the world: on the 512 x 416
    screen stretched to the display, it is `bf-x-squeeze` times wider than tall in units."
   (let* ((view *bf-zone-view*)
-         (w (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 2))))
-         (h (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 1))))
+         (w (the float (bf-zone-map-size zone 2)))
+         (h (the float (bf-zone-map-size zone 1)))
          (aspect (bf-x-squeeze))
          (ky (fmin (/ (* 2.0 (-> *bf-zmap* half)) h) (/ (* 2.0 (-> *bf-zmap* half-w)) (* w aspect))))
          (kx (* ky aspect))
@@ -625,8 +653,8 @@
     (set-vector! (-> p 3) 0 0 0 0)
     (set-vector! (-> p 4) (* (+ (the int (-> view x0)) 1792) 16) (* (+ (the int (-> view y0)) 1840) 16) #xfffff0 0)
     (set-vector! (-> p 5)
-                 (* 16 (-> *bf-zone-minimap-size* (+ (* 3 zone) 2)))
-                 (* 16 (-> *bf-zone-minimap-size* (+ (* 3 zone) 1)))
+                 (* 16 (bf-zone-map-size zone 2))
+                 (* 16 (bf-zone-map-size zone 1))
                  0
                  0
                  )
@@ -644,6 +672,8 @@
    drawn as one sprite in a bucket of their own, under the page's. The upload marks the default
    level's VRAM dirty, as the START menu's map does."
   (bf-zone-view! zone)
+  ;; Jak 2's city has no picture yet: its marks alone
+  (when (!= zone BF_ZONE_JAK2)
   (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id tex-hud-hud-alpha))
     (dma-buffer-add-gs-set buf
                            (test-1 (new 'static 'gs-test :ate #x1 :afail #x3 :zte #x1 :ztst (gs-ztest always)))
@@ -666,6 +696,7 @@
     (bf-map-sprite buf zone)
     )
   (set-dirty-mask! (-> *level* level-default) 4 #x1a400 0)
+  )
   (none)
   )
 
@@ -841,9 +872,9 @@
   "OUT x and y get world point P on ZONE's map in the right frame (`*bf-zone-view*`); returns #f when
    it falls outside the frame."
   (let* ((view *bf-zone-view*)
-         (texel (-> *bf-zone-minimap-corner* (+ (* 3 zone) 2)))
-         (tx (/ (- (-> p x) (-> *bf-zone-minimap-corner* (* 3 zone))) texel))
-         (ty (/ (- (-> p z) (-> *bf-zone-minimap-corner* (+ (* 3 zone) 1))) texel))
+         (texel (bf-zone-map-corner zone 2))
+         (tx (/ (- (-> p x) (bf-zone-map-corner zone 0)) texel))
+         (ty (/ (- (-> p z) (bf-zone-map-corner zone 1)) texel))
          )
     (set! (-> out x) (+ (-> view x0) (* (-> view kx) tx)))
     (set! (-> out y) (+ (-> view y0) (* (-> view ky) ty)))
@@ -1372,7 +1403,7 @@
   "The battle's points as its fight starts: the two bases at the sides' spawns (`*bf*` spawn, point
    0 the Freedom League's, 1 the Krimzon Guard's), then a control point in each district, neutral,
    where `*bf-point-defs*` puts it."
-  (set! (-> *bf* point-count) (+ 2 BF_CONTROL_POINTS))
+  (set! (-> *bf* point-count) (-> *bf-point-defs* length))
   (set! (-> *bf* respawn-pick) -1)
   (set! (-> *bf* point-time) 0)
   (dotimes (i (-> *bf* point-count))
@@ -1412,7 +1443,7 @@
 (defun bf-point-rank ((i int))
   "Place of control point I in `*bf-point-order*` (battlefront-h.gc), 0 for the first; -1 for a
    base."
-  (dotimes (r BF_CONTROL_POINTS)
+  (dotimes (r (bf-control-count))
     (if (= (-> *bf-point-order* r) i)
         (return r)
         )
@@ -1420,7 +1451,8 @@
   -1
   )
 
-(define *bf-letters* (new 'static 'boxed-array :type string "A" "B" "C" "D" "E" "F" "G" "H"))
+;; A to O: Jak 2's city has 15 control points (round 40; Jak 3's 8 take A to H)
+(define *bf-letters* (new 'static 'boxed-array :type string "A" "B" "C" "D" "E" "F" "G" "H" "I" "J" "K" "L" "M" "N" "O"))
 
 (defun bf-point-letter ((i int))
   "Letter of control point I on the HUD and the minimap: A to H from the Krimzon Guard's base to the
@@ -1830,7 +1862,7 @@
 (defun bf-city-call ((cmd int))
   "Run CMD on the Haven City side when ctywide is active (its hook then points into the current
    link of battlefront-city.gc)."
-  (when (and *bf-city-hook* (= (level-status? *level* 'ctywide #f) 'active))
+  (when (and *bf-city-hook* (= (level-status? *level* (bf-city-level) #f) 'active))
     (*bf-city-hook* cmd)
     )
   (none)
@@ -1895,6 +1927,7 @@
        )
       (else
         (set! (-> *bf* zone) zone)
+        (bf-zone-select! zone)
         (set! (-> *bf* team) team)
         (set! (-> *bf* class) class)
         (set! (-> *bf* weapon) BF_WEAPON_RIFLE)
@@ -1942,14 +1975,14 @@
         (vector-copy! (-> *bf* spawn BF_TEAM_KG) (-> kg trans))
         ;; the district's middle, and the radius around it that covers its map (battlefront-minimaps.gc):
         ;; the reinforcements search their lanes there
-        (let ((texel (-> *bf-zone-minimap-corner* (+ (* 3 zone) 2)))
-              (w (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 2))))
-              (h (the float (-> *bf-zone-minimap-size* (+ (* 3 zone) 1))))
+        (let ((texel (bf-zone-map-corner zone 2))
+              (w (the float (bf-zone-map-size zone 2)))
+              (h (the float (bf-zone-map-size zone 1)))
               )
           (set-vector! (-> *bf* center)
-                       (+ (-> *bf-zone-minimap-corner* (* 3 zone)) (* 0.5 w texel))
+                       (+ (bf-zone-map-corner zone 0) (* 0.5 w texel))
                        (* 0.5 (+ (-> ff trans y) (-> kg trans y)))
-                       (+ (-> *bf-zone-minimap-corner* (+ (* 3 zone) 1)) (* 0.5 h texel))
+                       (+ (bf-zone-map-corner zone 1) (* 0.5 h texel))
                        (* 0.5 texel (sqrtf (+ (* w w) (* h h))))
                        )
           )
@@ -2195,7 +2228,7 @@
   (when (and (bf-active?)
              *target*
              (focus-test? *target* pilot)
-             (= (level-status? *level* 'ctywide #f) 'active)
+             (= (level-status? *level* (bf-city-level) #f) 'active)
              )
     (set! (-> self end-pending?) #t)
     (return #f)
@@ -2211,7 +2244,7 @@
   (set! (-> *bf* overlay?) #f)
   (remove-setting! 'minimap)
   (bf-hud-health-update #f)
-  (let ((city? (and (bf-active?) (= (level-status? *level* 'ctywide #f) 'active))))
+  (let ((city? (and (bf-active?) (= (level-status? *level* (bf-city-level) #f) 'active))))
     (when (bf-active?)
       ;; phase off first: the pools spawned again by the respawn below get the stock skins
       (bf-set-phase! BF_PHASE_OFF)
@@ -2239,12 +2272,14 @@
         )
     )
   (bf-set-phase! BF_PHASE_OFF)
+  ;; the units' levels back to Jak 3's city as their host: the stock game's (`bf-zone-select!`)
+  (bf-zone-select! 0)
   (none)
   )
 
 (defun bf-whole-city-section? ((name symbol))
-  "#t when level NAME is one of the street sections a battle loads at once (`*bf-whole-city*`)."
-  (let ((l *bf-whole-city*))
+  "#t when level NAME is one of the street sections a battle loads at once (`bf-zone-sections`)."
+  (let ((l (bf-zone-sections (-> *bf* zone))))
     (while (not (null? l))
       (if (= (car l) name)
           (return #t)
@@ -2305,12 +2340,12 @@
     (dotimes (i 10)
       (bf-whole-city-set-want ls i #f #f)
       )
-    (bf-whole-city-set-want ls 0 'ctywide 'display)
+    (bf-whole-city-set-want ls 0 (bf-city-level) 'display)
     (bf-whole-city-set-want ls 1 'ctypesa 'special)
     (bf-whole-city-set-want ls 2 'ctypesc 'special)
     (when (= (-> *bf* city-load) BF_LOAD_WHOLE)
       (let ((i 3)
-            (l *bf-whole-city*)
+            (l (bf-zone-sections (-> *bf* zone)))
             )
         (while (not (null? l))
           (bf-whole-city-set-want ls i (the-as symbol (car l)) 'display)
@@ -2325,7 +2360,10 @@
 
 (defun bf-whole-city-drained? ()
   "#t when no level but ctywide and the levels it borrows holds a chunk the street sections take
-   (0 to 5, 12 to 17)."
+   (0 to 5, 12 to 17); at once for a zone without sections (Jak 2's city, one level)."
+  (if (null? (bf-zone-sections (-> *bf* zone)))
+      (return #t)
+      )
   (dotimes (i 10)
     (let ((lev (-> *level* level i)))
       (if (and (!= (-> lev status) 'inactive) (logtest? (-> lev memory-mask) #x3f03f))
@@ -2344,7 +2382,7 @@
   (dotimes (i 10)
     (let ((lev (-> *level* level i)))
       (when (and (!= (-> lev status) 'inactive)
-                 (not (or (= (-> lev name) 'ctywide) (= (-> lev name) 'ctypesa) (= (-> lev name) 'ctypesc)))
+                 (not (or (= (-> lev name) (bf-city-level)) (= (-> lev name) 'ctypesa) (= (-> lev name) 'ctypesc)))
                  )
         (return lev)
         )
@@ -2354,8 +2392,8 @@
   )
 
 (defun bf-whole-city-loaded? ()
-  "#t when every street section (`*bf-whole-city*`) is active."
-  (let ((l *bf-whole-city*))
+  "#t when every street section of the zone (`bf-zone-sections`) is active."
+  (let ((l (bf-zone-sections (-> *bf* zone))))
     (while (not (null? l))
       (if (!= (level-status? *level* (the-as symbol (car l)) #f) 'active)
           (return #f)
@@ -2431,7 +2469,7 @@
        (logtest? (-> *target* control status) (collide-status on-surface))
        (= (-> *target* state name) 'target-stance)
        (< (-> *game-info* blackout-time) (current-time))
-       (= (level-status? *level* 'ctywide #f) 'active)
+       (= (level-status? *level* (bf-city-level) #f) 'active)
        (= (level-status? *level* 'ctypesa #f) 'active)
        (= (level-status? *level* 'ctypesc #f) 'active)
        (= (-> *bf* city-load) BF_LOAD_WHOLE)
@@ -3060,18 +3098,23 @@
         (i (-> self cursor))
         )
     (cond
-      ((and (= page BF_PAGE_ZONE) (>= i BF_ZONE_COUNT))
-       ;; Spargus, to come: refused
+      ((and (= page BF_PAGE_ZONE) (not (bf-zone-open? i)))
+       ;; Spargus, to come, and Jak 2's city without Jak 2: refused
        (sound-play "menu-back")
        (return #f)
        )
       ((and (= page BF_PAGE_ZONE) (-> self from-title?))
        (set! (-> self pick-zone) i)
+       ;; its tables and its city level as the units' levels' host, before its levels load
+       (set! (-> *bf* zone) i)
+       (bf-zone-select! i)
        (bf-open-page BF_PAGE_CONFIG)
        (set! (-> self cursor) (+ BF_CONFIG_COUNT -1))
        )
       ((= page BF_PAGE_ZONE)
        (set! (-> self pick-zone) i)
+       (set! (-> *bf* zone) i)
+       (bf-zone-select! i)
        (bf-open-page BF_PAGE_TEAM)
        )
       ((and (= page BF_PAGE_CONFIG) (< i (+ BF_CONFIG_COUNT -1)))
@@ -3290,6 +3333,10 @@
    takes it (`bf-draw-point-mark`), Jak in white; before one, where `*bf-point-defs*` puts them,
    the bases in their side's color and the control points grey. The point PICK (-1 none) ringed in
    blinking yellow."
+  ;; out of a battle, the zone shown is the one picked or under the cursor: its points
+  (if (not (bf-active?))
+      (bf-zone-select! zone)
+      )
   (bf-zone-view! zone)
   (let ((at (new 'stack-no-clear 'vector))
         (blink? (logtest? (/ (-> *display* real-clock frame-counter) (seconds 0.25)) 1))
@@ -3308,7 +3355,7 @@
             )
         )
       )
-    (dotimes (i (+ 2 BF_CONTROL_POINTS))
+    (dotimes (i (-> *bf-point-defs* length))
       (let ((base? (< i 2))
             (owner (cond
                      ((< i 2) i)
@@ -3359,12 +3406,12 @@
     (bf-pheader buf (if (= page BF_PAGE_ZONE) (bf-tr "War zone" "Zone de guerre") (bf-tr "Your side" "Votre camp")))
     (dotimes (i (bf-page-count page))
       (bf-prow buf (bf-page-label page (-> self pick-team) i) x (+ (bf-fy 0.03) (* 21.0 (the float i))) w (= i cur)
-               (not (and (= page BF_PAGE_ZONE) (>= i BF_ZONE_COUNT)))
+               (not (and (= page BF_PAGE_ZONE) (not (bf-zone-open? i))))
                )
       )
     (bf-pwrap buf (bf-page-desc page (-> self pick-team) cur) x (bf-fy 0.4) 0.36 w (the int (/ w 6.0)))
-    (if (and (= page BF_PAGE_ZONE) (>= cur BF_ZONE_COUNT))
-        (bf-ptext buf (bf-tr "Coming soon" "À venir") (bf-fx 0.76) (bf-fy 0.42) 0.6 (font-color menu-invalid) #t (* 0.45 (-> *bf-frame* w)))
+    (if (and (= page BF_PAGE_ZONE) (not (bf-zone-open? cur)))
+        (bf-ptext buf (if (>= cur BF_ZONE_COUNT) (bf-tr "Coming soon" "À venir") (bf-tr "Needs Jak 2" "Jak 2 requis")) (bf-fx 0.76) (bf-fy 0.42) 0.6 (font-color menu-invalid) #t (* 0.45 (-> *bf-frame* w)))
         (bf-draw-map-marks buf (if (= page BF_PAGE_ZONE) cur (-> self pick-zone)) -1)
         )
     (bf-pkeys buf (bf-tr "<PAD_X> Select    <PAD_TRIANGLE> Back" "<PAD_X> Choisir    <PAD_TRIANGLE> Retour"))
@@ -3635,7 +3682,7 @@
        (bf-zmap-set! (bf-fx 0.76) (bf-fy 0.45) (* 0.42 h) (* 0.21 w))
        (cond
          ((= page BF_PAGE_TEAM) (-> self pick-zone))
-         ((< (-> self cursor) BF_ZONE_COUNT) (-> self cursor))
+         ((bf-zone-open? (-> self cursor)) (-> self cursor))
          (else -1)
          )
        )
@@ -4185,7 +4232,7 @@
             (bf-can-open-menu?)
             *target*
             (not (focus-test? *target* dead))
-            (= (level-status? *level* 'ctywide #f) 'active)
+            (= (level-status? *level* (bf-city-level) #f) 'active)
             (logtest? (-> *target* control status) (collide-status on-surface))
             )
        ;; the new game stands in the city: the battle's deployment and its class page, which starts it
@@ -4240,7 +4287,7 @@
      )
     ((= (-> *bf* phase) BF_PHASE_FIGHT)
      (cond
-       ((!= (level-status? *level* 'ctywide #f) 'active)
+       ((!= (level-status? *level* (bf-city-level) #f) 'active)
         ;; Haven City is gone (a warp, a cutscene): the battle cannot go on
         (when (< (-> *game-info* blackout-time) (current-time))
           (format 0 "battlefront: Haven City unloaded, battle cancelled~%")
@@ -4623,7 +4670,9 @@
   "#t when entry I of continue point CONT's level list is a city section or an interior it shows
    (not the Haven City base: the battle loads its own alias of ctywide)."
   (let ((name (-> cont want i name)))
-    (and name (-> cont want i display?) (not (string-prefix= "ctywide" (symbol->string name))))
+    (and name (-> cont want i display?) (not (string-prefix= "ctywide" (symbol->string name)))
+         (!= name (bf-city-level))
+         )
     )
   )
 

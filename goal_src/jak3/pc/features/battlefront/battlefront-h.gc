@@ -36,7 +36,8 @@
 (defconstant BF_RESERVE 500)          ;; units in stock per side at the start of a battle
 (defconstant BF_TEAM_COUNT 2)
 (defconstant BF_CLASS_COUNT 8)
-(defconstant BF_ZONE_COUNT 1)          ;; the whole of Haven City (`*bf-zones*`)
+(defconstant BF_ZONE_COUNT 2)          ;; Jak 3's Haven City, Jak 2's Haven City (`*bf-zones*`)
+(defconstant BF_ZONE_JAK2 1)           ;; Jak 2's Haven City (bf-havenj2), when the player's discs built it
 
 ;; Teams. The values index `reserve` and `losses` in `bf-state`.
 (defconstant BF_TEAM_NONE -1)
@@ -132,6 +133,7 @@
    (desc-fr     string)
    (ff-continue string)    ;; Freedom League base
    (kg-continue string)    ;; Krimzon Guard base
+   (city        symbol)    ;; the level holding the battle's city code (Jak 3's ctywide, or bf-havenj2)
    )
   )
 
@@ -152,8 +154,9 @@
 ;; district the units fight in, neutral at the start (`*bf-point-defs*`). A side holding one sends
 ;; its troop transports there and its player may respawn there (battlefront.gc `bf-update-points`,
 ;; battlefront-city.gc).
-(defconstant BF_POINT_MAX 10)
-(defconstant BF_CONTROL_POINTS 8) ;; two in each district (one before round 27)
+(defconstant BF_POINT_MAX 17)     ;; the most a war zone has: Jak 2's city, 2 bases and 15 control points
+;; (Jak 3's city: 2 bases and 8 control points, two in each district). A zone's count is its table's
+;; (`bf-control-count`).
 (defconstant BF_POINT_RADIUS (meters 35))      ;; units within it count for its capture (25 m until round 35, 15 m until round 30)
 (defconstant BF_CAPTURE_TIME 30.0)             ;; seconds a side's majority on it takes to capture it
 
@@ -377,6 +380,20 @@
       :desc-fr "Toute la ville : un point de contrôle dans chaque quartier, le Port, la zone industrielle, les bas quartiers et le QG de la Ligue."
       :ff-continue "ctyslumc-freehq-exit"
       :kg-continue "ctyport-bbush-8"
+      :city 'ctywide
+      )
+    ;; Jak 2's Haven City (round 40, the author's wish), one level made from the player's Jak 2 and
+    ;; Jak 3 discs at install (bf-havenj2: battlefront-havenj2-info.gc); without Jak 2, greyed
+    ;; (`bf-zone-open?`). The Freedom League's base by the hideout, the Krimzon Guard's at the
+    ;; palace's foot; a control point in each of its 15 districts.
+    (new 'static 'bf-zone
+      :name "Haven City (Jak 2)"
+      :desc "Jak 2's Haven City, whole: a control point in each of its 15 districts. The Freedom League holds the slums by the hideout, the Krimzon Guard the palace."
+      :name-fr "Haven City (Jak 2)"
+      :desc-fr "La Haven City de Jak 2, entière : un point de contrôle dans chacun de ses 15 quartiers. La Ligue tient les bas quartiers près de la planque, la Grenagarde le palais."
+      :ff-continue "bfh-ctysluma-alley"
+      :kg-continue "bfh-ctypal-shaft"
+      :city 'bf-havenj2
       )
     )
   )
@@ -384,7 +401,7 @@
 ;; The battle points, in `*bf*` points order: the bases (their places are their continue points),
 ;; then a control point in each district, the middle of a lane between that district's ends (found
 ;; on its streets by the battles of round 16), with a continue point of its section.
-(define *bf-point-defs*
+(define *bf-point-defs-jak3*
   (new 'static 'boxed-array :type bf-point-def
     (new 'static 'bf-point-def :name "Freedom League base" :name-fr "Base de la Ligue" :continue "ctyslumc-freehq-exit")
     (new 'static 'bf-point-def :name "Krimzon Guard base" :name-fr "Base de la Grenagarde" :continue "ctyport-bbush-8")
@@ -415,11 +432,11 @@
 
 ;; The control points in their order from the Krimzon Guard's base to the Freedom League's, the
 ;; order of their letters (`bf-point-letter`, A first) on the HUD and the minimap.
-(define *bf-point-order* (new 'static 'array int32 8 2 6 7 3 8 4 9 5))
+(define *bf-point-order-jak3* (new 'static 'array int32 8 2 6 7 3 8 4 9 5))
 
 ;; Which points are next to which (the districts' streets): a side fights for a point away from
 ;; the player only from one next to it (battlefront.gc `bf-update-points`). Bit i: point i.
-(define *bf-point-links*
+(define *bf-point-links-jak3*
   (new 'static 'array uint32 10
     #b0000100000  ;; Freedom League base: Freedom HQ
     #b0000000100  ;; Krimzon Guard base (the Port's middle): Port
@@ -432,6 +449,132 @@
     #b0000011000  ;; South Industrial Zone: Industrial Zone, Slums
     #b0000110000  ;; Sewer Exit: Slums, Freedom HQ
     )
+  )
+
+;; Jak 2's Haven City (round 40): the bases on the continue points by the hideout and at the
+;; palace's foot, then a control point in each district, on a continue point of it (Jak's place
+;; there, on the street); the letters from the Krimzon Guard's side (the palace) to the Freedom
+;; League's (the slums), the links from Jak 2's own city navigation (the districts whose nav graphs
+;; link to each other). Made from Jak 2's continue points and nav graphs by a script of round 40.
+(define *bf-point-defs-jak2*
+  (new 'static 'boxed-array :type bf-point-def
+    (new 'static 'bf-point-def :name "Freedom League base" :name-fr "Base de la Ligue" :continue "bfh-ctysluma-alley")
+    (new 'static 'bf-point-def :name "Krimzon Guard base" :name-fr "Base de la Grenagarde" :continue "bfh-ctypal-shaft")
+    (new 'static 'bf-point-def :name "Hideout Slums" :name-fr "Bas quartiers de la planque" :continue "bf-havenj2-start"
+      :x 1062.23 :y 8.14 :z 221.91)
+    (new 'static 'bf-point-def :name "Fortress Slums" :name-fr "Bas quartiers de la forteresse" :continue "bfh-ctyslumb-start"
+      :x 587.99 :y 7.99 :z -248.02)
+    (new 'static 'bf-point-def :name "South Slums" :name-fr "Bas quartiers sud" :continue "bfh-ctyslumc-slums"
+      :x 755.85 :y 9.37 :z -715.60)
+    (new 'static 'bf-point-def :name "Stadium" :name-fr "Stade" :continue "bfh-stadium-start"
+      :x 298.14 :y -4.00 :z -454.45)
+    (new 'static 'bf-point-def :name "West Quarter" :name-fr "Quartier ouest" :continue "bfh-ctygena-start"
+      :x -234.58 :y 9.71 :z -196.67)
+    (new 'static 'bf-point-def :name "South Quarter" :name-fr "Quartier sud" :continue "bfh-ctygenb-start"
+      :x 167.61 :y 9.83 :z -247.85)
+    (new 'static 'bf-point-def :name "Central Quarter" :name-fr "Quartier central" :continue "bfh-ctygenc-start"
+      :x 190.80 :y 9.70 :z 322.86)
+    (new 'static 'bf-point-def :name "West Farms" :name-fr "Fermes ouest" :continue "bfh-ctyfarma-start"
+      :x -328.65 :y 8.58 :z 209.53)
+    (new 'static 'bf-point-def :name "North Farms" :name-fr "Fermes nord" :continue "bfh-ctyfarmb-start"
+      :x -359.80 :y 8.00 :z 1146.27)
+    (new 'static 'bf-point-def :name "West Market" :name-fr "Marché ouest" :continue "bfh-ctymarka-brutter"
+      :x -107.20 :y 8.00 :z 477.73)
+    (new 'static 'bf-point-def :name "East Market" :name-fr "Marché est" :continue "bfh-ctymarkb-tanker"
+      :x 524.29 :y 8.41 :z 475.59)
+    (new 'static 'bf-point-def :name "Palace Plaza" :name-fr "Place du palais" :continue "bfh-ctypal-tomb"
+      :x 191.79 :y 8.00 :z 907.77)
+    (new 'static 'bf-point-def :name "Port" :name-fr "Port" :continue "bfh-ctyport-warp"
+      :x 372.63 :y 7.68 :z 1799.35)
+    (new 'static 'bf-point-def :name "North Industrial Zone" :name-fr "Zone industrielle nord" :continue "bfh-ctyinda-consite"
+      :x 777.32 :y 7.99 :z 867.17)
+    (new 'static 'bf-point-def :name "South Industrial Zone" :name-fr "Zone industrielle sud" :continue "bfh-ctyindb-start"
+      :x 971.42 :y 8.00 :z 546.11)
+    )
+  )
+
+(define *bf-point-order-jak2* (new 'static 'array int32 15 10 13 11 14 9 8 15 6 12 7 16 5 3 4 2))
+
+(define *bf-point-links-jak2*
+  (new 'static 'array uint32 17
+    #b00000000000000100  ;; Freedom League base: Hideout Slums
+    #b00010000000000000  ;; Krimzon Guard base: Palace Plaza
+    #b10000000000001001  ;; Hideout Slums: Freedom League base, Fortress Slums, South Industrial Zone
+    #b00000000010010100  ;; Fortress Slums: Hideout Slums, South Slums, South Quarter
+    #b00000000000001000  ;; South Slums: Fortress Slums
+    #b00000000010000000  ;; Stadium: South Quarter
+    #b00000001110000000  ;; West Quarter: South Quarter, Central Quarter, West Farms
+    #b00000000001101000  ;; South Quarter: Fortress Slums, Stadium, West Quarter
+    #b00010000001000000  ;; Central Quarter: West Quarter, Palace Plaza
+    #b00000100001000000  ;; West Farms: West Quarter, West Market
+    #b00100100000000000  ;; North Farms: West Market, Port
+    #b00010011000000000  ;; West Market: West Farms, North Farms, Palace Plaza
+    #b10010000000000000  ;; East Market: Palace Plaza, South Industrial Zone
+    #b00101100100000010  ;; Palace Plaza: Krimzon Guard base, Central Quarter, West Market, East Market, Port
+    #b01010010000000000  ;; Port: North Farms, Palace Plaza, North Industrial Zone
+    #b10100000000000000  ;; North Industrial Zone: Port, South Industrial Zone
+    #b01001000000000100  ;; South Industrial Zone: Hideout Slums, East Market, North Industrial Zone
+    )
+  )
+
+;; The current war zone's tables: the whole battle code reads these three, which `bf-zone-select!`
+;; points at the zone's own (Jak 3's city until a zone is picked).
+(define *bf-point-defs* *bf-point-defs-jak3*)
+(define *bf-point-order* *bf-point-order-jak3*)
+(define *bf-point-links* *bf-point-links-jak3*)
+
+(defun bf-zone-select! ((zone int))
+  "Point the battle's tables (`*bf-point-defs*`, `*bf-point-order*`, `*bf-point-links*`) at war zone
+   ZONE's, and the units' levels (ctypesa, ctypesc) at its city level as their host: they load into
+   its borrow heaps (level.gc level-find-borrow-slot: a borrow-city-small level borrows from its
+   master level only), Jak 3's ctywide's or bf-havenj2's."
+  (let ((city (-> *bf-zones* zone city)))
+    (cond
+      ((= zone BF_ZONE_JAK2)
+       (set! *bf-point-defs* *bf-point-defs-jak2*)
+       (set! *bf-point-order* *bf-point-order-jak2*)
+       (set! *bf-point-links* *bf-point-links-jak2*)
+       )
+      (else
+        (set! *bf-point-defs* *bf-point-defs-jak3*)
+        (set! *bf-point-order* *bf-point-order-jak3*)
+        (set! *bf-point-links* *bf-point-links-jak3*)
+        )
+      )
+    (let ((a (lookup-level-info 'ctypesa))
+          (c (lookup-level-info 'ctypesc))
+          )
+      (if a (set! (-> a master-level) city))
+      (if c (set! (-> c master-level) city))
+      )
+    )
+  (none)
+  )
+
+(defun bf-control-count ()
+  "The current war zone's control points (its table's points but the two bases)."
+  (+ (-> *bf-point-defs* length) -2)
+  )
+
+(defun bf-zone-open? ((zone int))
+  "#t when war zone ZONE can be played: one of `*bf-zones*`, Jak 2's only once the player's discs
+   built its level (`*bfh-built*`)."
+  (and (< zone BF_ZONE_COUNT) (or (!= zone BF_ZONE_JAK2) *bfh-built*))
+  )
+
+(defun bf-zone-sections ((zone int))
+  "The street sections a battle in war zone ZONE loads besides its city level: Jak 3's six
+   (`*bf-whole-city*`), none for Jak 2's city, one level."
+  (if (= zone BF_ZONE_JAK2)
+      '()
+      *bf-whole-city*
+      )
+  )
+
+(defun bf-city-level ()
+  "The level holding the current battle's city code (its zone's `city`): Jak 3's ctywide or
+   bf-havenj2."
+  (-> *bf-zones* (-> *bf* zone) city)
   )
 
 (define *bf-team-names* (new 'static 'boxed-array :type string "Freedom League" "Krimzon Guard"))

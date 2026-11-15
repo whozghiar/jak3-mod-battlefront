@@ -71,7 +71,13 @@
       // the playable city with a margin: the kilometers of backdrop mountains would blow the
       // collide hash grid up (Haven City: New Dawn's bounds)
       "collision_bounds": [-700, -200, -1000, 1400, 470, 2150],
-      "continues": ["ctysluma-start"],
+      // the bases (the Freedom League's by the hideout, the Krimzon Guard's at the palace's foot)
+      // and a continue point in each district, the control points' respawn places
+      "continues": ["ctysluma-alley", "ctypal-shaft",
+                    "ctysluma-start", "ctyslumb-start", "ctyslumc-slums", "stadium-start",
+                    "ctygena-start", "ctygenb-start", "ctygenc-start", "ctyfarma-start",
+                    "ctyfarmb-start", "ctymarka-brutter", "ctymarkb-tanker", "ctypal-tomb",
+                    "ctyport-warp", "ctyinda-consite", "ctyindb-start"],
       "water": {"ocean_region": {"center": [350.0, 0.0, 575.0], "radius": 1950.0}, "below": 3.0, "above": 2.0, "pools": []},
       "mesh": {
         "props": {

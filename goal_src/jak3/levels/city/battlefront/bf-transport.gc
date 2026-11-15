@@ -303,7 +303,7 @@
 
 ;; Units dropped at each point, side by side (index BF_POINT_MAX team + point), for the tests
 ;; (docs/modding/current_mod/battlefront_smoke.gc reads and clears it).
-(define *bf-drops-at* (new 'static 'array int32 20))
+(define *bf-drops-at* (new 'static 'array int32 34)) ;; 2 BF_POINT_MAX
 
 (defconstant BF_DEFEND_REACH (meters 60))  ;; foes this close to a held point attack it (battlefront-city.gc BF_ZONE_REACH)
 (defconstant BF_DEFEND_SHARE 0.5)          ;; share of a side's units brought to its points under attack

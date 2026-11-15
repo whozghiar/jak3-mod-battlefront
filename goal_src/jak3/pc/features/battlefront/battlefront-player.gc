@@ -1203,7 +1203,7 @@
         (vector-normalize! to BF_GRENADE_RANGE)
         )
     (vector+! to to from)
-    (if (and *bf-city-grenade* (= (level-status? *level* 'ctywide #f) 'active))
+    (if (and *bf-city-grenade* (= (level-status? *level* (bf-city-level) #f) 'active))
         (*bf-city-grenade* from to)
         )
     )

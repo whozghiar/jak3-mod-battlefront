@@ -115,11 +115,11 @@
 
 ;; Each side's units in each battle point's zone (BF_ZONE_REACH), counted twice a second from
 ;; `*bf-unit-dots*` (`bf-city-steer`): index BF_POINT_MAX side + point.
-(define *bf-zone-near* (new 'static 'array int32 20))
+(define *bf-zone-near* (new 'static 'array int32 34)) ;; 2 BF_POINT_MAX
 
 ;; The same within BF_THREAT_REACH: a point's guards (`bf-post-point`) hold it while the other side's
 ;; units are this close, and go on to the next point once none is.
-(define *bf-threat-near* (new 'static 'array int32 20))
+(define *bf-threat-near* (new 'static 'array int32 34)) ;; 2 BF_POINT_MAX
 
 ;; The units with a foe within BF_ENGAGE_REACH at the last retarget (`bf-city-retarget`): they fight
 ;; instead of marching (`bf-march-plan`). Stopped by a foe up to BF_HATE_REACH (100 m), the units
@@ -976,8 +976,8 @@
   ((count         int32)
    (time          time-frame)                     ;; last build
    (mesh          nav-mesh BF_WAY_MESHES)
-   (next          int16    7680)                  ;; BF_POINT_MAX (10) times BF_WAY_MESHES
-   (depth         int16    7680)                  ;; the same: meshes from it to the point's (0 its own)
+   (next          int16    13056)                 ;; BF_POINT_MAX (17) times BF_WAY_MESHES
+   (depth         int16    13056)                 ;; the same: meshes from it to the point's (0 its own)
    (queue         int16    BF_WAY_MESHES)
    (prev          nav-mesh BF_WAY_MESHES)         ;; the meshes listed when the bridges were made
    (prev-count    int32)
@@ -2593,7 +2593,9 @@
         (a (new 'stack-no-clear 'vector))
         (b (new 'stack-no-clear 'vector))
         )
-    (when parent
+    ;; Jak 3's city only: its walls are its own places, and spawn-security-wall is its ctywide-obs.o,
+    ;; which Jak 2's city's DGO leaves out
+    (when (and parent (!= (-> *bf* zone) BF_ZONE_JAK2))
       (dotimes (i BF_FIELD_COUNT)
         (when (not (handle->process (-> *bf-city-fields* wall i)))
           (let ((e (* i 7)))

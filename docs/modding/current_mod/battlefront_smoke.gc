@@ -366,6 +366,9 @@
   0
   )
 
+;; The war zone `smoke-title-battle` picks (`smoke-battle-start` sets it; Jak 3's city by default).
+(define *smoke-zone* 0)
+
 (defbehavior smoke-title-battle process ((team int))
   "From the title menu: Start a battle, the war zone (Haven City), the configuration page (side
    TEAM on top), Next: the class page, before the battle (round 30); `smoke-deploy` picks the class
@@ -376,8 +379,9 @@
   (smoke-press (pad-buttons x) 1.0)
   (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_ZONE)))
   (smoke-check "Start a battle opens the war zone page" (smoke-page-up? BF_PAGE_ZONE))
+  (set! (-> (smoke-dir) cursor) *smoke-zone*)
+  (smoke-wait 0.3)
   (smoke-shot "zone-page")
-  (set! (-> (smoke-dir) cursor) 0)
   (smoke-wait 0.3)
   (smoke-press (pad-buttons x) 1.0)
   (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_CONFIG)))
@@ -402,6 +406,7 @@
 (defbehavior smoke-battle-start process ((zone int) (team int))
   "From the title menu: `smoke-title-battle`. In the city: START > New battle, war zone ZONE, side
    TEAM, then the class page, before the battle (round 30); `smoke-deploy` picks the class."
+  (set! *smoke-zone* zone)
   (when (smoke-title-up?)
     (smoke-title-battle team)
     (return 0)
@@ -410,9 +415,8 @@
   (smoke-bf-pause 1)
   (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_ZONE)))
   (smoke-check "New battle opens the war zone page" (smoke-page-up? BF_PAGE_ZONE))
-  ;; round 17: one war zone, the whole city (ZONE is kept for the older scenarios' calls)
   ;; a page takes X 0.3 s after it came up (battlefront.gc `bf-menu-input`)
-  (set! (-> (smoke-dir) cursor) 0)
+  (set! (-> (smoke-dir) cursor) zone)
   (smoke-wait 0.5)
   (smoke-press (pad-buttons x) 1.0)
   (smoke-wait-for 6.0 (lambda () (smoke-page-up? BF_PAGE_TEAM)))
@@ -938,7 +942,7 @@
       (let ((best 2)
             (base (-> *bf* points (-> *bf* team) pos))
             )
-        (dotimes (k BF_CONTROL_POINTS)
+        (dotimes (k (bf-control-count))
           (if (< (vector-vector-xz-distance (-> *bf* points (+ k 2) pos) base)
                  (vector-vector-xz-distance (-> *bf* points best pos) base)
                  )
@@ -4169,8 +4173,8 @@
   )
 
 (define *smoke-r27* (new 'static 'smoke-r27-stats))
-(define *smoke-r27-idle* (new 'static 'array int32 20))
-(define *smoke-r27-post* (new 'static 'array int32 20))
+(define *smoke-r27-idle* (new 'static 'array int32 34))
+(define *smoke-r27-post* (new 'static 'array int32 34))
 (define *smoke-r27-bits* (new 'static 'array int32 2))
 (define *smoke-r27-tag* (new 'global 'string 32 (the-as string #f)))
 
@@ -6281,6 +6285,51 @@
   0
   )
 
+(defbehavior smoke-s73 process ()
+  "Scenario 73 (`smoke-scenario-late`), round 40 milestone 2: a battle in Jak 2's Haven City (war
+   zone 1) from the title menu, the Krimzon Guard's red guard: the zone's 17 points, its city level
+   and the units' levels borrowed into it, the player at the palace base, units of both sides
+   brought in; the points' places (live: a nav mesh within 8 m); the whole map on L3."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start BF_ZONE_JAK2 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (format 0 "SMOKE zone ~D ~S: ~D points; " (-> *bf* zone) (bf-zone-name (-> *bf* zone)) (-> *bf* point-count))
+  (format 0 "bf-havenj2 ~A, ctypesa ~A, ctypesc ~A, ctywide ~A~%"
+          (level-status? *level* 'bf-havenj2 #f) (level-status? *level* 'ctypesa #f)
+          (level-status? *level* 'ctypesc #f) (level-status? *level* 'ctywide #f))
+  (smoke-check "a battle in Jak 2's city: its 17 points" (and (= (-> *bf* zone) BF_ZONE_JAK2) (= (-> *bf* point-count) 17)))
+  (smoke-check "its city level and the units' levels active"
+               (and (= (level-status? *level* 'bf-havenj2 #f) 'active) (= (level-status? *level* 'ctypesa #f) 'active)
+                    (= (level-status? *level* 'ctypesc #f) 'active)))
+  (let ((cont (get-continue-by-name *game-info* "bfh-ctypal-shaft")))
+    (format 0 "SMOKE Jak at ~M ~M ~M, ~M m from the palace base~%" (-> *target* control trans x) (-> *target* control trans y)
+            (-> *target* control trans z) (if cont (vector-vector-distance (-> cont trans) (-> *target* control trans)) -1.0))
+    (smoke-check "the player deployed at the Krimzon Guard's base, the palace"
+                 (and cont (< (vector-vector-distance (-> cont trans) (-> *target* control trans)) (meters 30))))
+    )
+  (smoke-shot "r40-j2-deploy")
+  (smoke-points-line "start")
+  (smoke-step "armies")
+  (smoke-wait 25.0)
+  (smoke-team-line "25 s")
+  (let ((c (new 'stack-no-clear 'array 'int32 4)))
+    (smoke-check "both sides bring units in"
+                 (and (> (bf-transport-team-count BF_TEAM_FF c) 0) (> (bf-transport-team-count BF_TEAM_KG c) 0)))
+    )
+  (smoke-shot "r40-j2-25s")
+  (smoke-wait 20.0)
+  (smoke-team-line "45 s")
+  (smoke-points-line "45 s")
+  (smoke-shot "r40-j2-45s")
+  (smoke-step "map")
+  (smoke-tap (pad-buttons l3) 4)
+  (smoke-wait 1.0)
+  (smoke-shot "r40-j2-map")
+  (smoke-tap (pad-buttons l3) 4)
+  0
+  )
+
 (defbehavior smoke-s58 process ()
   "Scenario 58 (`smoke-scenario-late`), round 32: four pickups queued 15 m up, 8 m in front of the
    player (`bf-spawn-drops`, as a jetpack guard's): dark eco, yellow ammo, red ammo, health. They
@@ -7200,6 +7249,7 @@
   "Scenarios 36 to 40 (rounds 26 and 27), each in a function of its own, out of `smoke-scenario`:
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
+    ((73) (smoke-s73))
     ((72) (smoke-s72))
     ((71) (smoke-s71))
     ((70) (smoke-s70))
