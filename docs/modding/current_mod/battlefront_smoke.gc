@@ -6425,6 +6425,72 @@
   0
   )
 
+(defun smoke-r41-owners ()
+  "Each battle point's holder on one line: 0 the Freedom League, 1 the Krimzon Guard, -1 none."
+  (format 0 "SMOKE owners:")
+  (dotimes (i (-> *bf* point-count))
+    (format 0 " ~D" (-> *bf* points i owner))
+    )
+  (format 0 "~%")
+  0
+  )
+
+(defbehavior smoke-s77 process ()
+  "Scenario 77 (`smoke-scenario-late`), round 41: a battle in Jak 2's Haven City at the default 60
+   units at once, four minutes. Besides its base's, each side keeps two forward ships over neutral
+   control points nearest the front (battlefront-city.gc `bf-city-forward-ships`), which drop a share
+   of its units (bf-transport.gc `bf-transport-drop-point`), and the units head for the points
+   nearest the front (`bf-city-front-score`): up to six ships, drops at control points from both
+   sides' ships, and losses on both sides (the armies met; none in three minutes before)."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start BF_ZONE_JAK2 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (dotimes (i (* 2 BF_POINT_MAX))
+    (set! (-> *bf-drops-at* i) 0)
+    )
+  (let ((most-ships 0)
+        (met-time -1)
+        )
+    (dotimes (k 8)
+      (smoke-wait 30.0)
+      (smoke-team-line "30 s")
+      (smoke-r41-owners)
+      (let ((ships 0))
+        (dotimes (i (-> *bf* point-count))
+          (if (handle->process (-> *bf* points i ship))
+              (+! ships 1)
+              )
+          )
+        (set! most-ships (max most-ships ships))
+        )
+      (if (and (< met-time 0) (> (-> *bf* losses 0) 0) (> (-> *bf* losses 1) 0))
+          (set! met-time (* 30 (+ k 1)))
+          )
+      (if (= k 1)
+          (smoke-shot "r41-forward-60s")
+          )
+      )
+    (smoke-drops-line "4 min")
+    (let ((fwd (new 'stack-no-clear 'array 'int32 2)))
+      (dotimes (team 2)
+        (set! (-> fwd team) 0)
+        (dotimes (i (-> *bf* point-count))
+          (if (not (-> *bf* points i base?))
+              (+! (-> fwd team) (-> *bf-drops-at* (+ (* BF_POINT_MAX team) i)))
+              )
+          )
+        )
+      (format 0 "SMOKE most ships up ~D; forward drops FF ~D KG ~D; met after ~D s~%" most-ships (-> fwd 0) (-> fwd 1) met-time)
+      (smoke-check "more ships than the two bases' at once" (< 2 most-ships))
+      (smoke-check "both sides' forward ships dropped units" (and (> (-> fwd 0) 0) (> (-> fwd 1) 0)))
+      )
+    (smoke-check "the armies met: losses on both sides" (>= met-time 0))
+    )
+  (smoke-shot "r41-forward-4min")
+  0
+  )
+
 (defbehavior smoke-s58 process ()
   "Scenario 58 (`smoke-scenario-late`), round 32: four pickups queued 15 m up, 8 m in front of the
    player (`bf-spawn-drops`, as a jetpack guard's): dark eco, yellow ammo, red ammo, health. They
@@ -7345,6 +7411,7 @@
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
     ((76) (smoke-s76))
+      ((77) (smoke-s77))
     ((75) (smoke-s75))
     ((74) (smoke-s74))
     ((73) (smoke-s73))

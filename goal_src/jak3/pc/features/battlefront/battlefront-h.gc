@@ -175,7 +175,8 @@
    (prog-team  int32)          ;; the side capturing it, BF_TEAM_NONE for none
    (progress   float)          ;; seconds of capture so far, up to BF_CAPTURE_TIME
    (near       int32 2)        ;; units of each side within BF_POINT_RADIUS at the last count
-   (ship       handle)         ;; the troop transport over it now, #f for none (battlefront-city.gc)
+   (ship       handle)         ;; the troop transport over it now, #f for none: its side's at a base, a side's
+                               ;; forward ship at a neutral control point (battlefront-city.gc `bf-city-forward-ships`)
    (old-ship   handle)         ;; the one leaving it after a capture: the new holder's waits for it to go
    (fight      float)          ;; seconds of a fight away from the player since its last losses
    (snapped?   symbol)         ;; moved onto the open ground nearest it once its section loaded

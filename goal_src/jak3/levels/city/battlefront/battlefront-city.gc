@@ -574,6 +574,113 @@
 
 (define *bf-city-spot* (new 'static 'vector))
 
+(defun bf-city-held-dist ((team int) (pos vector))
+  "The distance on the ground from POS to the nearest battle point side TEAM holds (its base
+   included), 0.0 for none."
+  (let ((best -1.0))
+    (dotimes (i (-> *bf* point-count))
+      (when (= (-> *bf* points i owner) team)
+        (let ((d (vector-vector-xz-distance (-> *bf* points i pos) pos)))
+          (if (or (< best 0.0) (< d best))
+              (set! best d)
+              )
+          )
+        )
+      )
+    (fmax 0.0 best)
+    )
+  )
+
+(defun bf-city-front-score ((team int) (i int))
+  "How far battle point I stands from the front of side TEAM, lowest first (round 41): its distance
+   to TEAM's nearest point plus its distance to the other side's nearest point (0 for one the other
+   side holds), plus half their difference. The neutral points halfway between the two sides come
+   first, the other side's points nearest TEAM's next; a neutral point gets the same score from
+   both sides, so their units and forward ships head for the same points and meet there. Ranked
+   from the bases alone, each side took the points nearest its own and the armies of 100 met
+   nowhere in three minutes (round 41's tests)."
+  (let* ((pos (-> *bf* points i pos))
+         (mine (bf-city-held-dist team pos))
+         (theirs (if (= (-> *bf* points i owner) (bf-other-team team))
+                     0.0
+                     (bf-city-held-dist (bf-other-team team) pos)
+                     )
+                 )
+         )
+    (+ mine theirs (* 0.5 (fabs (- mine theirs))))
+    )
+  )
+
+(defconstant BF_FORWARD_SHIPS 2) ;; each side's troop transports over neutral control points, besides its base's (round 41)
+
+;; Points where a forward ship could not be sent (no open ground, no free process), a bit a point,
+;; passed over until the battle's next start (`bf-city-ships-down`).
+(define *bf-forward-bad* (new 'static 'array int32 1 0))
+
+(defun bf-city-forward-ships ((parent process))
+  "Twice a second in a fight (`bf-city-transports`): besides its base's, each side keeps
+   BF_FORWARD_SHIPS troop transports over neutral control points of loaded sections, its forward
+   ships, so that its units also come down in districts nobody holds yet (the author's wish, round
+   41: three ships a side, one at its base). A side short of one sends it over the neutral point
+   nearest the front (`bf-city-front-score`) with no ship over it or leaving it; that ship drops a
+   share of its side's units (bf-transport.gc `bf-transport-drop-point`) and leaves once the point
+   is taken (`bf-city-transports`). PARENT: the battle's director, the ships' parent."
+  (dotimes (team 2)
+    (let ((n 0)
+          (best -1)
+          (best-s 0.0)
+          )
+      (dotimes (i (-> *bf* point-count))
+        (let* ((pt (-> *bf* points i))
+               (ship (handle->process (-> pt ship)))
+               )
+          (cond
+            (ship
+             (if (and (not (-> pt base?)) (= (-> (the-as bf-transport ship) team) team))
+                 (+! n 1)
+                 )
+             )
+            ((and (not (-> pt base?))
+                  (= (-> pt owner) BF_TEAM_NONE)
+                  (-> pt snapped?)
+                  (bf-point-live? pt)
+                  (not (handle->process (-> pt old-ship)))
+                  (not (logtest? (-> *bf-forward-bad* 0) (ash 1 i)))
+                  )
+             (let ((s (bf-city-front-score team i)))
+               (when (or (< best 0) (< s best-s))
+                 (set! best i)
+                 (set! best-s s)
+                 )
+               )
+             )
+            )
+          )
+        )
+      (when (and (< n BF_FORWARD_SHIPS) (>= best 0))
+        (let* ((pt (-> *bf* points best))
+               (new-ship (if (bf-transport-spot (-> pt pos) *bf-city-spot*)
+                             (bf-transport-spawn parent *bf-city-spot* team best (bf-city-hatch-dir *bf-city-spot*))
+                             )
+                         )
+               )
+          (cond
+            (new-ship
+             (set! (-> pt ship) (process->handle new-ship))
+             (format 0 "battlefront: side ~D forward ship over point ~D~%" team best)
+             )
+            (else
+              (logior! (-> *bf-forward-bad* 0) (ash 1 best))
+              (format 0 "battlefront: no forward ship over point ~D~%" best)
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-city-transports ()
   "Twice a second, for each battle point in a loaded section (battlefront.gc `bf-point-live?`):
    - not moved yet: onto the open ground nearest it (bf-transport.gc `bf-transport-spot`: ground,
@@ -583,7 +690,9 @@
      (bf-transport.gc: it drops them while the side lacks some, and stays); a control point gets no
      ship: its holder's units appear on the nav meshes around it (`bf-city-spawn-near`);
    - taken by the other side: its ship leaves (`'leave`), and the new holder's comes once it has
-     gone (`old-ship`).
+     gone (`old-ship`);
+   - neutral: a side's forward ship may hover over it (`bf-city-forward-ships`), and leaves once a
+     side takes it.
    A point's ship leaves too when its section unloads. The ships are the director's children."
   (let ((parent (the-as process (handle->process (-> *bf* director)))))
     (when (and parent *target* (bf-fighting?))
@@ -600,7 +709,13 @@
               )
             )
           (cond
-            ((and ship (or (not live?) (!= (-> (the-as bf-transport ship) team) (-> pt owner))))
+            ((and ship (or (not live?)
+                           (if (-> pt base?)
+                               (!= (-> (the-as bf-transport ship) team) (-> pt owner))
+                               (!= (-> pt owner) BF_TEAM_NONE)
+                               )
+                           )
+                  )
              (send-event ship 'leave)
              (set! (-> pt old-ship) (-> pt ship))
              (set! (-> pt ship) (the-as handle #f))
@@ -622,13 +737,16 @@
             )
           )
         )
+      (bf-city-forward-ships parent)
       )
     )
   (none)
   )
 
 (defun bf-city-ships-down ()
-  "Every troop transport of the battle gone at once (the battle's end, a regroup)."
+  "Every troop transport of the battle gone at once (the battle's end, a regroup), the forward ships'
+   failed points forgotten (`*bf-forward-bad*`)."
+  (set! (-> *bf-forward-bad* 0) 0)
   (dotimes (i BF_POINT_MAX)
     (let ((ship (handle->process (-> *bf* points i ship)))
           (old (handle->process (-> *bf* points i old-ship)))
@@ -660,12 +778,12 @@
 
 (defun bf-city-goal-point ((team int) (pick int))
   "A control point side TEAM does not hold, its units' objective (battlefront.gc `bf-update-points`
-   captures it once they hold it): of the BF_GOAL_PICK such points nearest TEAM's base (fewer when
-   fewer are left), number PICK modulo how many, from the nearest. Ranked from the base, not from
-   the unit, a pick holds while the unit walks: ranked from the unit, the second nearest became the
-   nearest on the way, and the unit turned to another. -1 when TEAM holds every one."
-  (let ((base (-> *bf* points team pos))
-        (n 0)
+   captures it once they hold it): of the BF_GOAL_PICK such points nearest TEAM's front
+   (`bf-city-front-score`, round 41; nearest its base before; fewer when fewer are left), number
+   PICK modulo how many, from the nearest. Ranked from the sides' points, not from the unit, a pick
+   holds while the unit walks: ranked from the unit, the second nearest became the nearest on the
+   way, and the unit turned to another. -1 when TEAM holds every one."
+  (let ((n 0)
         (taken 0)
         (best -1)
         )
@@ -681,7 +799,7 @@
           (dotimes (i (-> *bf* point-count))
             (let ((pt (-> *bf* points i)))
               (when (and (not (-> pt base?)) (!= (-> pt owner) team) (not (logtest? taken (ash 1 i))))
-                (let ((d (vector-vector-xz-distance (-> pt pos) base)))
+                (let ((d (bf-city-front-score team i)))
                   (when (or (< best 0) (< d best-d))
                     (set! best i)
                     (set! best-d d)
@@ -837,7 +955,7 @@
    and the other side's units come within BF_THREAT_REACH of it (bf-transport.gc `bf-post-point`:
    one unit in four brought there; with no foe coming, the guards stood around the point already
    taken, the author's play, round 26); else one of the BF_GOAL_PICK points its side does not hold
-   nearest its base (`bf-city-goal-point`), to conquer it, drawn at random by its process id and
+   nearest its front (`bf-city-goal-point`), to conquer it, drawn at random by its process id and
    the points' owners (`bf-city-owners-key`): the units spread over the front (the author's wish,
    round 27: before, all went for the nearest but 3 in 10); kept until its side holds it, or drawn
    again when the unit is stuck (`bf-city-sticky-goal`, round 29); with every control point held,
@@ -3078,7 +3196,8 @@
   (dotimes (team 2)
     (when (>= (current-time) (-> *bf-spawn-time* team))
       (let ((turn (bf-transport-drop-point team)))
-        (when (and (>= turn 0) (not (-> *bf* points turn base?)))
+        ;; a held control point: a base's or a forward ship's drops come from the ship
+        (when (and (>= turn 0) (not (-> *bf* points turn base?)) (= (-> *bf* points turn owner) team))
           (set! (-> *bf-drop-turn* team) -1)
           (cond
             ((> (bf-city-spawn-near team turn) 0)
