@@ -67,7 +67,7 @@
 (defconstant BF_ZAP_TIME (seconds 0.6))     ;; arcs around a shocked foe (`bf-avatar-zap-update`)
 (defconstant BF_ZAP_FINISH (seconds 1.1))   ;; a foe the shock left at 1 point is struck again then
 (defconstant BF_CLIP_DIE 17)                ;; crimson-guard-ag die: a guard class's death (`bf-avatar-dying`)
-(defconstant BF_MELEE_RANGE (meters 4))     ;; reach of the rifle butt
+(defconstant BF_MELEE_RANGE (meters 5))     ;; reach of the close attacks (4 m until round 35)
 (defconstant BF_PUNCH_RANGE (meters 6.5))   ;; reach of the robotguard's punch (it stands 4.8 m tall)
 (defconstant BF_MELEE_MAX (seconds 3))      ;; a close attack's clip is held this long at most
 (defconstant BF_DIVE_SPEED (meters 22))     ;; jetpack dive kick and spider pounce speed
@@ -110,6 +110,13 @@
 ;; walk and run clips play 1.5 times as fast too, so their legs keep pace (`bf-avatar-loop-rate`),
 ;; the spider's by the ground it covers, the jetpacks' hover clips at their own pace
 (defconstant BF_CLASS_PACE 1.5)
+;; The ground the guards' and the robotguard's walk and run clips cover at rate 1 (guard.gc and
+;; roboguard-city.gc init-enemy! dist-walk-anim and dist-run-anim): their legs step at their speed
+;; (`bf-avatar-loop-rate`, round 35).
+(defconstant BF_GUARD_WALK_DIST 12288.0)
+(defconstant BF_GUARD_RUN_DIST 34078.72)
+(defconstant BF_ROBOT_WALK_DIST 16384.0)
+(defconstant BF_ROBOT_RUN_DIST 26624.0)
 
 (deftype bf-class-art (structure)
   "How one class is drawn and fights. Indices are art-group indices of its model."
@@ -1262,15 +1269,16 @@
 
 (defbehavior bf-avatar-swap-mesh! bf-avatar ((name string))
   "Red guard: draw at once its model named NAME (`bf-class-skel-name`), the one with the other
-   weapon, on this same avatar: that skeleton group's lods and mesh, its clips the same (both models
-   are made from one rip; Lisp wiki jak3 4.35). Until round 33 the director drew the class again,
-   a new avatar, which looked like a reload; the blue guard only changes its mesh segments. Returns
-   #t when done, #f when that model is not loaded."
+   weapon, on this same avatar: that skeleton group's lods and mesh (Lisp wiki jak3 4.35). Until
+   round 33 the director drew the class again, a new avatar, which looked like a reload; the blue
+   guard only changes its mesh segments. The draw's art group stays the blue guard's, whose clips
+   the red guard plays (battlefront-h.gc `bf-guard-clips`): round 33 set the red model's own, made
+   at 15 frames a second, and every clip played too fast after a weapon change (the author's play,
+   round 35). Returns #t when done, #f when that model is not loaded."
   (let ((sg (the-as skeleton-group (art-group-get-by-name *level* name (the-as (pointer level) #f)))))
     (when sg
       (let ((ag (art-group-get-by-name *level* (-> sg art-group-name) (the-as (pointer level) #f))))
         (when (and ag (setup-lods! (-> self draw lod-set) sg ag (-> self entity)))
-          (set! (-> self draw art-group) ag)
           ;; lod-set! sets it only when the lod changes: with one lod the old mesh stayed drawn
           (set! (-> self draw mgeo) (-> self draw lod-set lod 0 geo))
           (return #t)
@@ -1944,8 +1952,9 @@
   )
 
 (defbehavior bf-avatar-loop-rate bf-avatar ()
-  "Rate the looping clip plays at: 1; for a guard or the robotguard walking or running,
-   BF_CLASS_PACE, its pace at its speed; for a jetpack, BF_HOVER_RATE, its clips' own pace; for the
+  "Rate the looping clip plays at: 1; for a guard or the robotguard walking or running, the
+   ground it covers over the ground its clip covers (BF_GUARD_WALK_DIST...), from 0.5 to 4, so its
+   legs step at its speed (BF_CLASS_PACE, 1.5, until round 35); for a jetpack, BF_HOVER_RATE, its clips' own pace; for the
    spider walking or running, the ground it covers over the ground its clip covers
    (`BF_SPIDER_WALK`, `BF_SPIDER_RUN`), so its legs step at its speed (Jak's speed times 1.5, or 2
    more while it boosts, played at rate 1, its legs slid over the ground), from 0.5 to 4."
@@ -1962,8 +1971,20 @@
                  ((or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
                   BF_HOVER_RATE
                   )
-                 ((and walking? (or (bf-guard-class? (-> self class)) (= (-> self class) BF_CLASS_ROBOGUARD)))
-                  BF_CLASS_PACE
+                 ((and *target* walking? (or (bf-guard-class? (-> self class)) (= (-> self class) BF_CLASS_ROBOGUARD)))
+                  ;; the ground it covers over the ground its clip covers: since round 35, at the
+                  ;; classes' new speeds BF_CLASS_PACE left their legs sliding
+                  (let* ((v (-> *target* control transv))
+                         (speed (sqrtf (+ (* (-> v x) (-> v x)) (* (-> v z) (-> v z)))))
+                         (run? (= (-> self anim) (-> art run)))
+                         (dist (if (= (-> self class) BF_CLASS_ROBOGUARD)
+                                   (if run? BF_ROBOT_RUN_DIST BF_ROBOT_WALK_DIST)
+                                   (if run? BF_GUARD_RUN_DIST BF_GUARD_WALK_DIST)
+                                   )
+                               )
+                         )
+                    (fmax 0.5 (fmin 4.0 (/ speed dist)))
+                    )
                   )
                  ((= (-> self anim) (-> art idle))
                   (bf-idle-rate (-> self class))
@@ -2037,6 +2058,16 @@
 ;; The battle's camera
 ;; ---------------------------------------------------------------------------------------------
 
+;; The battle camera's distance behind the player, times the class's own (`bf-cam-rig-update`):
+;; 1.0 the closest, the view of rounds 13 to 34; L3 held with the right stick up comes closer, down
+;; goes farther, BF_CAM_ZOOM_MAX at most (round 35, the author's wish). Kept from life to life.
+(defconstant BF_CAM_ZOOM_MAX 1.8)
+(defconstant BF_CAM_ZOOM_RATE 1.0) ;; zoom a second, the stick pushed all the way
+(define *bf-cam-zoom* 1.0)
+;; #t once the right stick zoomed while L3 was held: its release does not toggle the map
+;; (battlefront.gc `bf-l3-tapped?`)
+(define *bf-l3-zoomed?* #f)
+
 ;; The point-of-view camera adds this offset, turned by the rig's bone, to the bone's place: none,
 ;; the rig places the camera itself. Static: the setting keeps its address.
 (define *bf-cam-offset* (new 'static 'vector :w 1.0))
@@ -2079,22 +2110,36 @@
    it looks up, with the PC settings' third-person camera inversions at their defaults (pad.gc
    analog-input-horizontal-third). Those defaults keep the original game's camera, which swings
    around Jak the other way (seen in game: the stock camera turned the view left for the stick
-   pushed right); switching one of them turns the battle camera the other way too. Returns nothing."
+   pushed right); switching one of them turns the battle camera the other way too. L3 held, the
+   stick's up and down zoom instead of tilting (`*bf-cam-zoom*`). Returns nothing."
   (when *target*
     (when (not (paused?))
       (let ((dt (seconds-per-frame)))
         (+! (-> *bf* view-yaw)
             (- (* BF_YAW_RATE dt (analog-input-horizontal-third (the-as int (-> *cpad-list* cpads 0 rightx)) 128.0 32.0 110.0 1.0)))
             )
-        (set! (-> *bf* view-pitch)
-              (fmax BF_PITCH_DOWN
-                    (fmin BF_PITCH_UP
-                          (- (-> *bf* view-pitch)
-                             (* BF_PITCH_RATE dt (analog-input-vertical-third (the-as int (-> *cpad-list* cpads 0 righty)) 128.0 32.0 110.0 1.0))
-                             )
-                          )
-                    )
-              )
+        (cond
+          ((cpad-hold? 0 l3)
+           ;; zoom: up comes closer, down goes farther (the stick's raw up, whatever the inversions)
+           (let ((up (/ (- 128.0 (the float (-> *cpad-list* cpads 0 righty))) 127.0)))
+             (when (< 0.25 (fabs up))
+               (set! *bf-l3-zoomed?* #t)
+               (set! *bf-cam-zoom* (fmax 1.0 (fmin BF_CAM_ZOOM_MAX (- *bf-cam-zoom* (* BF_CAM_ZOOM_RATE dt up)))))
+               )
+             )
+           )
+          (else
+            (set! (-> *bf* view-pitch)
+                  (fmax BF_PITCH_DOWN
+                        (fmin BF_PITCH_UP
+                              (- (-> *bf* view-pitch)
+                                 (* BF_PITCH_RATE dt (analog-input-vertical-third (the-as int (-> *cpad-list* cpads 0 righty)) 128.0 32.0 110.0 1.0))
+                                 )
+                              )
+                        )
+                  )
+            )
+          )
         )
       ;; within one turn
       (cond
@@ -2124,7 +2169,7 @@
           )
       (set-vector! fwd (* (sin yaw) (cos pitch)) (sin pitch) (* (cos yaw) (cos pitch)) 1.0)
       (forward-down->inv-matrix mat fwd (new 'static 'vector :y -1.0 :w 1.0))
-      (vector+float*! want pivot fwd (- (fmax (meters 5.5) (* 1.6 (meters 1) (-> art height)))))
+      (vector+float*! want pivot fwd (- (* *bf-cam-zoom* (fmax (meters 5.5) (* 1.6 (meters 1) (-> art height))))))
       ;; rvec points to the screen's left (`bf-view-right`): the camera goes the other way
       (if (not dying?)
           (vector+float*! want want (-> mat rvec) (* -0.3 (meters 1) (-> art height)))

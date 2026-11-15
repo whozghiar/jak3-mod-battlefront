@@ -151,7 +151,7 @@
 ;; battlefront-city.gc).
 (defconstant BF_POINT_MAX 10)
 (defconstant BF_CONTROL_POINTS 8) ;; two in each district (one before round 27)
-(defconstant BF_POINT_RADIUS (meters 25))      ;; units within it count for its capture (15 m until round 30)
+(defconstant BF_POINT_RADIUS (meters 35))      ;; units within it count for its capture (25 m until round 35, 15 m until round 30)
 (defconstant BF_CAPTURE_TIME 30.0)             ;; seconds a side's majority on it takes to capture it
 
 (deftype bf-point (structure)

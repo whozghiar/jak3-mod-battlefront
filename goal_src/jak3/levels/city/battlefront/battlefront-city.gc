@@ -46,15 +46,17 @@
 (defconstant BF_HATE_LOST (meters 150))    ;; a unit whose foe got this far looks again
 (defconstant BF_HATE_PLAYER (meters 50))   ;; the other side turns onto the player this close
 ;; Every unit of a battle walks and runs faster than the game's (`bf-city-unit-pace`): its walk and
-;; run speeds, and the ground its walk and run clips cover, both times its kind's `*bf-unit-pace*`, so
-;; its legs keep the stock cadence (citizen-travel-anim plays them at its speed over that ground), the
+;; run speeds times its kind's `*bf-unit-pace*`, the ground its walk and run clips cover the stock
+;; one, so its legs step at its speed (round 35, the author's wish: until then that ground was
+;; scaled too, the legs at the stock cadence slid over the ground) (citizen-travel-anim plays them at its speed over that ground), the
 ;; player's guard's (battlefront-player.gc BF_CLASS_PACE). The guards' run speed alone raised to
 ;; 18 m/s played their run clip 1.5 times as fast as the player's; the nav control's speed-scale
 ;; instead left the spiders at 8 m/s and the guards at 16 (round 22's runs).
 ;; Each kind's pace against the stock one, in `bf-unit-kind` order: guard, jetpack, robotguard on
 ;; foot, spider. 1.5 for all until round 33; then the author's wish: guards 1.4 times as fast as
-;; that, robotguards on foot 2 times, spiders 1.6 times (2.1, 3.0 and 2.4 times the stock).
-(define *bf-unit-pace* (new 'static 'array float 4 2.1 1.5 3.0 2.4))
+;; that, robotguards on foot 2 times, spiders 1.6 times (2.1, 3.0 and 2.4 times the stock); round
+;; 35, the guards a little slower, 1.9.
+(define *bf-unit-pace* (new 'static 'array float 4 1.9 1.5 3.0 2.4))
 
 ;; The stock walk speed, run speed, walk clip ground and run clip ground of each kind (`bf-unit-kind`:
 ;; guard.gc, flying-turret.gc, roboguard-city.gc, spydroid.gc init-enemy!), in units.
@@ -82,7 +84,7 @@
 
 (defun bf-city-unit-pace ((proc process))
   "Unit PROC of the battle (a citizen) at its kind's pace (`*bf-unit-pace*`) times its kind's stock
-   walk and run speeds and clip grounds (`*bf-unit-stock-pace*`): written each time, so a unit woken again (its init
+   walk and run speeds, its clip grounds the stock ones (`*bf-unit-stock-pace*`): written each time, so a unit woken again (its init
    sets the stock values back) is paced within half a second. A robotguard not marching gets its
    stock run clip back (a march's roll gives it the ball, `bf-city-roll!`)."
   (let ((k (bf-unit-kind proc))
@@ -94,8 +96,8 @@
             )
         (set! (-> unit speed-walk) (* pace (-> *bf-unit-stock-pace* base)))
         (set! (-> unit speed-run) (* pace (-> *bf-unit-stock-pace* (+ base 1))))
-        (set! (-> unit dist-walk-anim) (* pace (-> *bf-unit-stock-pace* (+ base 2))))
-        (set! (-> unit dist-run-anim) (* pace (-> *bf-unit-stock-pace* (+ base 3))))
+        (set! (-> unit dist-walk-anim) (-> *bf-unit-stock-pace* (+ base 2)))
+        (set! (-> unit dist-run-anim) (-> *bf-unit-stock-pace* (+ base 3)))
         )
       (if (and (= k BF_ROBOT_KIND) (not (bf-marching? unit)))
           (set! (-> unit anim-run) BF_ROBOT_RUN_CLIP)
@@ -2459,6 +2461,29 @@
       )
     (+ (* hidden 1000) all)
     )
+  )
+
+(defun bf-city-guard-pace ((out vector))
+  "For the tests: the first awake guard of the battle's run speed into OUT x and its run clip's
+   ground into y (units; `bf-city-unit-pace`). Returns #t when there is one."
+  (let ((te *traffic-engine*))
+    (when (and te (nonzero? te))
+      (dotimes (ti 2)
+        (let ((tr (-> te tracker-array ti)))
+          (dotimes (i (-> tr active-object-count))
+            (let ((proc (handle->process (-> tr active-object-list i))))
+              (when (and proc (type? proc crimson-guard))
+                (set! (-> out x) (-> (the-as crimson-guard proc) speed-run))
+                (set! (-> out y) (-> (the-as crimson-guard proc) dist-run-anim))
+                (return #t)
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  #f
   )
 
 (defun bf-city-guard-speed ()

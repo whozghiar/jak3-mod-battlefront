@@ -1617,21 +1617,23 @@
 
 (defun bf-l3-tapped? ()
   "Every frame of the director: #t the frame L3 lets go after a press with no SELECT (L3 + SELECT
-   opens the Mods menu, mods-menu.gc), else #f."
+   opens the Mods menu, mods-menu.gc) and no zoom (L3 + the right stick, battlefront-player.gc
+   `*bf-l3-zoomed?*`), else #f."
   (let ((held? (cpad-hold? 0 l3))
         (tap? #f)
         )
     (cond
       (held?
-       (if (not *bf-l3-held?*)
-           (set! *bf-l3-select?* #f)
-           )
+       (when (not *bf-l3-held?*)
+         (set! *bf-l3-select?* #f)
+         (set! *bf-l3-zoomed?* #f)
+         )
        (if (cpad-hold? 0 select)
            (set! *bf-l3-select?* #t)
            )
        )
       (*bf-l3-held?*
-       (set! tap? (not *bf-l3-select?*))
+       (set! tap? (not (or *bf-l3-select?* *bf-l3-zoomed?*)))
        )
       )
     (set! *bf-l3-held?* held?)
@@ -3937,8 +3939,32 @@
   (none)
   )
 
+(define *bf-counters-hidden?* #f)
+
+(defun bf-stock-counters-hide! ((hide? symbol))
+  "HIDE? (during a fight): the game's orb and skull gem counters (hud-classes.gc hud-skullgem and
+   hud-skill, which the stock shows while L3 is held, hud.gc) stay disabled, sent 'disable every
+   frame (a death's reset spawns them again): L3 held zooms the battle camera (round 35) and L3
+   tapped draws the battle's own counters there (`bf-draw-overlay`). Out of a fight: 'enable once."
+  (when (and *target* (or hide? *bf-counters-hidden?*))
+    (let ((gem (process-by-name "hud-skullgem" *target*))
+          (skill (process-by-name "hud-skill" *target*))
+          )
+      (if gem
+          (send-event gem (if hide? 'disable 'enable))
+          )
+      (if skill
+          (send-event skill (if hide? 'disable 'enable))
+          )
+      )
+    (set! *bf-counters-hidden?* hide?)
+    )
+  (none)
+  )
+
 (defbehavior bf-director-update bf-director ()
   "One frame of the battle."
+  (bf-stock-counters-hide! (bf-fighting?))
   ;; requests of the battle's pause page (START), run once that page is closed
   (let ((req *bf-request*))
     (cond
