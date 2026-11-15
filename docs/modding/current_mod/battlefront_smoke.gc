@@ -5519,8 +5519,8 @@
 (defbehavior smoke-s67 process ()
   "Scenario 67 (`smoke-scenario-late`), round 36, the Krimzon Guard's red jetpack: no orb nor crate
    in the battle; L1 fires a rocket, straight, one of 10, bursting with the red gun 3's sphere; a
-   rocket at a Freedom League unit hurts it; R2 no rush, Square no dive kick, L1 no duck; the gun
-   HUD's rocket icon; the AI and the player's guards' speeds."
+   rocket at a Freedom League unit hurts it; R2 the rush (back in round 37), Square no dive kick, L1
+   no duck; the gun HUD's rocket icon; the AI and the player's guards' speeds."
   (smoke-mods-toggle "mods-menu-on")
   (smoke-battle-start 0 BF_TEAM_KG)
   (smoke-deploy 1 "deploy red jetpack")
@@ -5603,13 +5603,13 @@
       )
     (smoke-check "a Freedom League guard to aim at" foe)
     )
-  (smoke-step "no rush, no dive, no duck")
+  (smoke-step "rush, no dive, no duck")
   (move-to-point! (-> *target* control) (-> *bf* points 8 pos))
   (smoke-wait 2.0)
   (smoke-hold (pad-buttons r2))
   (smoke-stick 128 0 128 128)
   (smoke-wait 1.0)
-  (smoke-check "R2: no rush" (not (-> (smoke-av) boost?)))
+  (smoke-check "R2: the rush (round 37)" (-> (smoke-av) boost?))
   (smoke-hold (the-as pad-buttons 0))
   (smoke-stick 128 128 128 128)
   (smoke-wait 0.5)
@@ -5667,6 +5667,106 @@
       )
     ok
     )
+  )
+
+(defbehavior smoke-s68 process ()
+  "Scenario 68 (`smoke-scenario-late`), round 37, the Krimzon Guard's red jetpack: R2's rush back, its
+   gauge spent; Square no dive kick; the purple, smaller rocket icon (screenshot); one fallen
+   jetpack guard in 10 leaves its rockets (the bag in 100 draws, then a unit's death queued), a dark
+   ammo pickup that gives the jetpack 5 rockets."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 1 "deploy red jetpack")
+  (smoke-invulnerable #t)
+  (smoke-wait 4.0)
+  (smoke-step "rush")
+  (move-to-point! (-> *target* control) (-> *bf* points 8 pos))
+  (smoke-wait 2.0)
+  (let ((f0 (-> (smoke-av) fuel))
+        (at (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
+        )
+    (smoke-hold (pad-buttons r2))
+    (smoke-stick 128 0 128 128)
+    (smoke-wait 1.0)
+    (let ((on? (-> (smoke-av) boost?)))
+      (smoke-hold (the-as pad-buttons 0))
+      (smoke-stick 128 128 128 128)
+      (format 0 "SMOKE rush: boost ~A, gauge ~f then ~f, ~M m in 1 s~%" on? f0 (-> (smoke-av) fuel)
+              (vector-vector-xz-distance at (-> *target* control trans)))
+      (smoke-check "R2: the rush, its gauge spent" (and on? (< (-> (smoke-av) fuel) f0)))
+      )
+    )
+  (smoke-wait 0.5)
+  (smoke-step "no dive")
+  (smoke-tap (pad-buttons square) 4)
+  (smoke-wait 0.2)
+  (smoke-check "Square: no dive kick" (< (-> (smoke-av) dive-until) (current-time)))
+  (smoke-step "icon")
+  (smoke-wait 1.0)
+  (smoke-shot "r37-hud")
+  (smoke-check "the gun HUD shows the rockets" (= (bf-gun-hud-weapon) BF_WEAPON_ROCKET))
+  (smoke-step "rocket drops")
+  ;; the bag: exactly 10 rockets in 100 jetpack deaths
+  (let ((n 0))
+    (dotimes (k 2)
+      (set! (-> *bf-rocket-bag* k) 0)
+      )
+    (dotimes (k 100)
+      (if (zero? (bf-bag-draw *bf-rocket-bag* *bf-rocket-bag-full* 2))
+          (+! n 1)
+          )
+      )
+    (format 0 "SMOKE rocket drops in 100 jetpack deaths: ~D~%" n)
+    (smoke-check "one jetpack death in 10 leaves rockets" (= n 10))
+    )
+  ;; a jetpack guard's death queued with the bag's rockets next: a dark ammo pickup
+  (let ((jet (or (smoke-nearest-foe-unit BF_TEAM_FF 'flying-turret) (smoke-nearest-foe-unit BF_TEAM_KG 'flying-turret)))
+        (was (-> *bf-drop-kinds* BF_DROP_ROCKETS))
+        )
+    (when jet
+      (set! (-> *bf-rocket-bag* 0) 1)
+      (set! (-> *bf-rocket-bag* 1) 0)
+      (bf-queue-drop (the-as process jet))
+      (format 0 "SMOKE jetpack death queued: rocket drops ~D then ~D, drops waiting ~D~%" was
+              (-> *bf-drop-kinds* BF_DROP_ROCKETS) (-> *bf* drop-count))
+      )
+    (smoke-check "a fallen jetpack guard's rockets queued"
+                 (and jet (= (-> *bf-drop-kinds* BF_DROP_ROCKETS) (+ was 1))))
+    )
+  (smoke-wait 1.0)
+  ;; a rocket pickup at the player's feet, taken: 3 rockets, then 8
+  (set! (-> *bf* rockets) 3)
+  (let ((at (vector-copy! (new 'stack-no-clear 'vector) (-> *target* control trans)))
+        (i (-> *bf* drop-count))
+        )
+    (vector+float*! at at (-> *target* control c-R-w fvec) (meters 4))
+    (set! (-> *bf* drop-kind i) (the-as int (-> *bf-drop-types* BF_DROP_ROCKETS)))
+    (vector-copy! (-> *bf* drop-pos i) at)
+    (+! (-> *bf* drop-count) 1)
+    (smoke-wait 2.0)
+    (let ((n (smoke-r32-drops-report "rocket" at)))
+      (format 0 "SMOKE rocket pickups near: ~D on the ground~%" n)
+      )
+    (smoke-shot "r37-rocket-pickup")
+    (let ((p (-> *entity-pool* child)))
+      (while p
+        (when (and (type? (-> p 0) collectable)
+                   (= (-> (the-as collectable (-> p 0)) fact pickup-type) (pickup-type ammo-dark))
+                   (< (vector-vector-xz-distance (-> (the-as collectable (-> p 0)) root trans) at) (meters 2))
+                   )
+          (move-to-point! (-> *target* control) (-> (the-as collectable (-> p 0)) root trans))
+          )
+        (set! p (-> p 0 brother))
+        )
+      )
+    (smoke-wait 1.0)
+    (format 0 "SMOKE rockets after the pickup: ~D (dark ammo ~f)~%" (-> *bf* rockets) (-> *game-info* gun-ammo BF_AMMO_DARK))
+    (smoke-check "the dark ammo pickup gives the jetpack 5 rockets" (= (-> *bf* rockets) 8))
+    )
+  (set! (-> *game-info* gun-ammo BF_AMMO_DARK) 1.0)
+  (smoke-wait 0.2)
+  (smoke-check "dark ammo caps the rockets at 10" (= (-> *bf* rockets) 10))
+  0
   )
 
 (defbehavior smoke-s58 process ()
@@ -6588,6 +6688,7 @@
   "Scenarios 36 to 40 (rounds 26 and 27), each in a function of its own, out of `smoke-scenario`:
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
+    ((68) (smoke-s68))
     ((67) (smoke-s67))
     ((66) (smoke-s66))
     ((65) (smoke-s65))

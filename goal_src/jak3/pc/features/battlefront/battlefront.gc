@@ -904,8 +904,9 @@
 
 (define *bf-gun-text* (new 'global 'string 32 (the-as string #f)))
 
-;; The rocket icon's width on the 512-unit screen, the stock gun icon's.
-(defconstant BF_ROCKET_ICON_DRAW_W 128.0)
+;; The rocket icon's width on the 512-unit screen: a little under the stock gun icon's 128 (the
+;; author's wish, round 37).
+(defconstant BF_ROCKET_ICON_DRAW_W 100.0)
 
 (defun bf-draw-rocket-icon ((buf dma-buffer) (cx float) (cy float))
   "The jetpack guard's rocket icon into BUF (a direct bucket), centered on CX, CY (the 512 x 416
@@ -1101,8 +1102,7 @@
         )
     (cond
       ((not av) -1.0)
-      ;; no boost, so no gauge, since round 36
-      ((or (= class BF_CLASS_BLUE_JETPACK) (= class BF_CLASS_RED_JETPACK)) -1.0)
+      ((or (= class BF_CLASS_BLUE_JETPACK) (= class BF_CLASS_RED_JETPACK)) (-> av fuel))
       ((= class BF_CLASS_SPYDROID) (-> av boost))
       ((= class BF_CLASS_ROBOGUARD)
        (let ((since (the float (- (-> av clock frame-counter) (-> av shield-time)))))
@@ -1835,9 +1835,11 @@
   "Loadout of a deployment (the first class page, a class change, a respawn, a restart): a full
    rifle magazine (BF_MAG_RIFLE) and its reserve (BF_RESERVE_RIFLE, Jak's yellow ammo), and the
    grenades (BF_GRENADES, his red ammo). The tazer needs none; Jak's blue ammo goes, so a blue
-   pickup alone recharges it (battlefront-player.gc `bf-avatar-moves`)."
+   pickup alone recharges it, and his dark ammo, so a dark pickup alone gives a jetpack rockets
+   (battlefront-player.gc `bf-avatar-moves`)."
   (set! (-> *game-info* gun-ammo BF_AMMO_YELLOW) BF_RESERVE_RIFLE)
   (set! (-> *game-info* gun-ammo BF_AMMO_BLUE) 0.0)
+  (set! (-> *game-info* gun-ammo BF_AMMO_DARK) 0.0)
   (set! (-> *game-info* gun-ammo BF_AMMO_RED) BF_GRENADES)
   (bf-refill-mags)
   (none)
@@ -2741,9 +2743,11 @@
 
 (defun verify-pickup-type ((arg0 pickup-type))
   "The pickup a type turns into (collectables.gc): red, blue and dark ammo become yellow when the
-   player lacks that gun. During a battle red and blue ammo stay what they are: the grenades and
-   the tazer's recharge (`bf-queue-drop`), whatever guns the save has."
-  (if (and (bf-active?) (or (= arg0 (pickup-type ammo-red)) (= arg0 (pickup-type ammo-blue))))
+   player lacks that gun. During a battle red, blue and dark ammo stay what they are: the grenades,
+   the tazer's recharge and a jetpack's rockets (`bf-queue-drop`), whatever guns the save has."
+  (if (and (bf-active?)
+           (or (= arg0 (pickup-type ammo-red)) (= arg0 (pickup-type ammo-blue)) (= arg0 (pickup-type ammo-dark)))
+           )
       arg0
       (*bf-stock-verify-pickup-type* arg0)
       )

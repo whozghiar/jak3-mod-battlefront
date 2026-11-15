@@ -243,7 +243,7 @@
    (reload?     symbol)         ;; guard: the rifle reloads when it can (its magazine empty, or Triangle)
    (dive-until  time-frame)     ;; jetpack dive kick flying until then
    (dive-foe    handle)         ;; what the dive aims at
-   (fuel        float)          ;; jetpack boost gauge, 0 to 1 (refilled by dark eco only; no boost since round 36)
+   (fuel        float)          ;; jetpack boost gauge, 0 to 1 (refilled by dark eco only)
    (rocket-time time-frame)     ;; jetpack: its last rocket (BF_ROCKET_DELAY before the next)
    (boost       float)          ;; spider blue eco, 0 to 1
    (was-ground? symbol)
@@ -887,6 +887,7 @@
 ;; ---------------------------------------------------------------------------------------------
 
 (defconstant BF_ROCKETS 10)                  ;; rockets a jetpack guard carries each life
+(defconstant BF_ROCKET_PICKUP 5)             ;; rockets in a fallen jetpack guard's dark ammo pickup
 (defconstant BF_ROCKET_SPEED (meters 60))    ;; its flight, straight from the jetpack to the crosshair
 (defconstant BF_ROCKET_LIFE (seconds 3))     ;; it bursts where it is after this long (180 m)
 (defconstant BF_ROCKET_RADIUS (meters 10))   ;; its blast's reach (the red gun 3 grenade's: 20 m)
@@ -1814,10 +1815,23 @@
             )
            )
          )
-       ;; no boost since round 36 (the author's wish: R2's rush off for the jetpack guards); L1
-       ;; pressed: a rocket while any is left (`bf-avatar-rocket`), its L1 read before Jak's pad
-       ;; loses it (battlefront.gc `bf-pad-lock!`)
-       (set! (-> self boost?) #f)
+       (set! (-> self boost?) (and (cpad-hold? 0 r2) (< 0.0 (-> self fuel))))
+       ;; R2 held while the boost gauge lasts (BF_JET_BOOST_TIME for a full one, refilled by dark
+       ;; eco only): BF_JET_BOOST_SPEED toward where the left stick points, or ahead
+       (when (and (cpad-hold? 0 r2) (< 0.0 (-> self fuel)))
+         (let ((dir (bf-stick-dir (new 'stack-no-clear 'vector))))
+           (if (< (vector-length dir) 0.1)
+               (bf-view-forward dir)
+               )
+           (vector-normalize! dir BF_JET_BOOST_SPEED)
+           (set! (-> *target* control transv x) (-> dir x))
+           (set! (-> *target* control transv z) (-> dir z))
+           )
+         (set! speed (* speed 2.0))
+         (set! (-> self fuel) (fmax 0.0 (- (-> self fuel) (/ dt BF_JET_BOOST_TIME))))
+         )
+       ;; L1 pressed: a rocket while any is left (`bf-avatar-rocket`, round 36), its L1 read before
+       ;; Jak's pad loses it (battlefront.gc `bf-pad-lock!`)
        (when (and *bf-jet-l1* (not *bf-jet-l1-was*)
                   (> (-> *bf* rockets) 0)
                   (time-elapsed? (-> self rocket-time) BF_ROCKET_DELAY)
@@ -1873,6 +1887,14 @@
     (when (< 0.0 (-> *game-info* gun-ammo BF_AMMO_BLUE))
       (set! (-> *game-info* gun-ammo BF_AMMO_BLUE) 0.0)
       (set! (-> *bf* tazer-time) 0)
+      )
+    ;; dark ammo (a fallen jetpack guard's rockets, battlefront-h.gc `bf-queue-drop`) gives a
+    ;; jetpack BF_ROCKET_PICKUP rockets, BF_ROCKETS at most (other classes waste it)
+    (when (< 0.0 (-> *game-info* gun-ammo BF_AMMO_DARK))
+      (set! (-> *game-info* gun-ammo BF_AMMO_DARK) 0.0)
+      (if (or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
+          (set! (-> *bf* rockets) (min BF_ROCKETS (+ (-> *bf* rockets) BF_ROCKET_PICKUP)))
+          )
       )
     ;; the class's health cap: a health pickup adds to Jak's own, whose maximum is a full 24 points
     ;; (`bf-class-health`)

@@ -80,12 +80,13 @@
 (defconstant BF_WEAPON_ROCKET 3)   ;; the jetpack guards' rockets (L1, round 36), for the gun HUD
 
 ;; Indices of `*game-info*` gun-ammo. The class weapons spend Jak's own ammo, so the stock ammo
-;; pickups refill them: yellow the rifles and guns, red the grenades, blue the tazer. The battle
-;; saves Jak's ammo at its start and gives it back at its end.
+;; pickups refill them: yellow the rifles and guns, red the grenades, blue the tazer, dark the
+;; jetpack's rockets. The battle saves Jak's ammo at its start and gives it back at its end.
 (defconstant BF_AMMO_NONE -1)
 (defconstant BF_AMMO_YELLOW 0)
 (defconstant BF_AMMO_RED 1)
 (defconstant BF_AMMO_BLUE 2)
+(defconstant BF_AMMO_DARK 3)
 
 (defconstant BF_CEILING (meters 30))  ;; force-field ceiling of the jetpacks, above the higher spawn
 (defconstant BF_DROP_MAX 8)           ;; pickups of dead units waiting for the director
@@ -1359,14 +1360,22 @@
   )
 
 ;; The pickups left by the fallen units since the battle began, by kind, for the tests
-;; (docs/modding/current_mod/battlefront_smoke.gc): dark eco, yellow ammo, red ammo, blue ammo, health.
-(define *bf-drop-kinds* (new 'static 'array int32 5))
+;; (docs/modding/current_mod/battlefront_smoke.gc): dark eco, yellow ammo, red ammo, blue ammo, health,
+;; and a jetpack's rockets (dark ammo, `bf-queue-drop`).
+(define *bf-drop-kinds* (new 'static 'array int32 6))
 
-(define *bf-drop-types* (new 'static 'array uint32 5
+(define *bf-drop-types* (new 'static 'array uint32 6
                            (pickup-type eco-pill-dark) (pickup-type ammo-yellow) (pickup-type ammo-red)
-                           (pickup-type ammo-blue) (pickup-type health)
+                           (pickup-type ammo-blue) (pickup-type health) (pickup-type ammo-dark)
                            )
         )
+
+(defconstant BF_DROP_ROCKETS 5) ;; index of a jetpack's rockets in `*bf-drop-types*`
+
+;; The jetpack guards' rockets bag (`bf-queue-drop`): of every 10 jetpack guards fallen, one leaves
+;; its rockets (the author's 10 %), what is left of it and its full load: rockets, nothing.
+(define *bf-rocket-bag* (new 'static 'array int32 2))
+(define *bf-rocket-bag-full* (new 'static 'array int32 2 1 9))
 
 (deftype bf-drop-bags (structure)
   "What is left in the pickups' two bags (`bf-drop-roll`): KIND, of 10 pickups (dark eco, ammo,
@@ -1425,7 +1434,22 @@
    (the jetpack's boost) 30 %, ammo 40 % (of it yellow, the rifle's reserve, 60 %, red, grenades,
    30 %, blue, which recharges the tazer at once, 10 %), health 30 % (the author's shares). Each one
    goes 10 s after it appears (`bf-spawn-drops`). Queued for the director, which spawns it in its
-   own process: this runs on the traffic manager's small stack."
+   own process: this runs on the traffic manager's small stack.
+   A jetpack guard (a flying-turret) also leaves its rockets, one in 10 (`*bf-rocket-bag*`, the
+   author's 10 %, round 37): the stock dark ammo pickup, purple as the rocket icon, which a
+   jetpack player takes as rockets (battlefront-player.gc BF_ROCKET_PICKUP)."
+  (when (and (type? proc process-drawable)
+             (= (-> proc type symbol) 'flying-turret)
+             (< (-> *bf* drop-count) BF_DROP_MAX)
+             (zero? (bf-bag-draw *bf-rocket-bag* *bf-rocket-bag-full* 2))
+             )
+    (let ((i (-> *bf* drop-count)))
+      (set! (-> *bf* drop-kind i) (the-as int (-> *bf-drop-types* BF_DROP_ROCKETS)))
+      (+! (-> *bf-drop-kinds* BF_DROP_ROCKETS) 1)
+      (vector-copy! (-> *bf* drop-pos i) (-> (the-as process-drawable proc) root trans))
+      (+! (-> *bf* drop-count) 1)
+      )
+    )
   (when (and (type? proc process-drawable) (< (-> *bf* drop-count) BF_DROP_MAX))
     (when (<= (-> *bf* bag-deaths) 0)
       (set! (-> *bf* bag-deaths) 10)
