@@ -78,6 +78,7 @@
 (defconstant BF_WEAPON_TAZER 1)
 (defconstant BF_WEAPON_GRENADE 2)
 (defconstant BF_WEAPON_ROCKET 3)   ;; the jetpack guards' rockets (L1, round 36), for the gun HUD
+(defconstant BF_WEAPON_BOT_GRENADE 4) ;; the robotguard's grenades (L1, round 38), for the gun HUD
 
 ;; Indices of `*game-info*` gun-ammo. The class weapons spend Jak's own ammo, so the stock ammo
 ;; pickups refill them: yellow the rifles and guns, red the grenades, blue the tazer, dark the
@@ -218,7 +219,8 @@
    (spectate      handle)         ;; the unit the camera follows while the player waits to respawn
    (weapon        int32)          ;; BF_WEAPON_* in the hands of a guard class
    (mag           int32 3)        ;; shots left in each guard weapon's magazine, by BF_WEAPON_*
-   (rockets       int32)          ;; a jetpack guard's rockets left this life (battlefront-player.gc BF_ROCKETS)
+   (rockets       int32)          ;; a jetpack guard's rockets, or a robotguard's grenades, left this life (battlefront-player.gc BF_ROCKETS)
+   (nova-kills    int32)          ;; foes the spider's last blast struck (`bf-avatar-nova`), for the tests
    (redraw?       symbol)         ;; the class model must be drawn again (red guard weapon change)
    (shield?       symbol)         ;; the robotguard's shield is up (battlefront.gc target-attacked)
    (ceiling       float)          ;; highest y a jetpack may reach (force field)
@@ -466,6 +468,7 @@
 (define *bf-jetpack-help*
   (new 'static 'boxed-array :type string
     "<PAD_X> Climb    <PAD_CIRCLE> Come down"
+    "<PAD_R2> + <PAD_ANALOG_ANY> Boost (dark eco refills it)"
     "<PAD_R1> Two shots    <PAD_L1> Rocket (10 a life)"
     )
   )
@@ -473,6 +476,7 @@
 (define *bf-jetpack-help-fr*
   (new 'static 'boxed-array :type string
     "<PAD_X> Monter    <PAD_CIRCLE> Descendre"
+    "<PAD_R2> + <PAD_ANALOG_ANY> Accélérer (l'éco noire recharge)"
     "<PAD_R1> Deux tirs    <PAD_L1> Roquette (10 par vie)"
     )
   )
@@ -494,25 +498,27 @@
                  "<PAD_R1> Two shots    <PAD_SQUARE> Punch"
                  "<PAD_CIRCLE> Shield for 5 s, firing behind it"
                  "<PAD_R2> Roll as a ball / stand up"
+                 "<PAD_L1> Grenade, each fist in turn (10 a life)"
                  )
          :name-fr "Robotgarde"
          :desc-fr (new 'static 'boxed-array :type string
                     "<PAD_R1> Deux tirs    <PAD_SQUARE> Poing"
                     "<PAD_CIRCLE> Bouclier 5 s, tir possible derrière"
                     "<PAD_R2> Boule / se relever"
+                    "<PAD_L1> Grenade, d'un poing puis de l'autre (10 par vie)"
                     )
          )
     (new 'static 'bf-class-info :name "Spider Robot" :team BF_TEAM_KG
          :desc (new 'static 'boxed-array :type string
                  "<PAD_X> 11 m leap"
-                 "<PAD_SQUARE> Headbutt: shocks as the tazer"
-                 "<PAD_R2> Blue eco sprint"
+                 "<PAD_SQUARE> Headbutt: a shock that jumps to 2 foes"
+                 "<PAD_R2> Blue eco sprint    <PAD_L1> Blow itself up"
                  )
          :name-fr "Araignée robot"
          :desc-fr (new 'static 'boxed-array :type string
                     "<PAD_X> Bond de 11 m"
-                    "<PAD_SQUARE> Coup de tête : choc du tazer"
-                    "<PAD_R2> Sprint à l'éco bleue"
+                    "<PAD_SQUARE> Coup de tête : un choc qui touche 2 ennemis de plus"
+                    "<PAD_R2> Sprint à l'éco bleue    <PAD_L1> S'autodétruire"
                     )
          )
     )
@@ -1005,6 +1011,7 @@
 (defconstant BF_DMG_BITE 12.0)        ;; a spider robot's bite
 (defconstant BF_DMG_ROBOT_SHOT 4.0)   ;; a robotguard's shot
 (defconstant BF_DMG_JET_SHOT 6.0)     ;; a jetpack guard's shot
+(defconstant BF_DMG_NOVA 24.0)        ;; the player spider's blast (L1, round 38): a whole unit, as the Super Nova kills
 
 ;; Full health of each class, indexed by BF_CLASS_*: guards and robotguard 24, jetpacks 18, spider 12.
 (define *bf-class-hp* (new 'static 'array float 8 24.0 18.0 24.0 24.0 24.0 18.0 24.0 12.0))
@@ -1066,7 +1073,8 @@
       ((= sym 'flying-turret-shot) BF_DMG_JET_SHOT)
       ((or (= sym 'explosion) (= sym 'vehicle-grenade) (= sym 'vehicle-grenade-deflect)) BF_DMG_GRENADE)
       ;; a jetpack guard's rocket, its hit and its blast (battlefront-player.gc `bf-rocket`)
-      ((= sym 'bf-rocket) BF_DMG_GRENADE)
+      ;; and a robotguard's grenade (round 38, `bf-grenade`)
+      ((or (= sym 'bf-rocket) (= sym 'bf-grenade)) BF_DMG_GRENADE)
       ((= sym 'spydroid) BF_DMG_BITE)
       ((or (= sym 'crimson-guard) (= sym 'roboguard-city) (= sym 'flying-turret)) BF_DMG_MELEE)
       (else -1.0)
@@ -1106,14 +1114,25 @@
         (if (= owner *target*)
             (set! dmg (* BF_PLAYER_DAMAGE dmg))
             )
-        (let ((max-hp (-> this enemy-info default-hit-points)))
+        (let ((max-hp (-> this enemy-info default-hit-points))
+              (was-fated? (nonzero? (-> this fated-time)))
+              )
           (set! (-> this hit-points) (fmin (-> this hit-points) max-hp))
           (let ((taken (apply-incoming-hitpoint-mods this (* max-hp (/ dmg full)))))
             (set! (-> this hit-points) (- (-> this hit-points) taken))
             (if (not (logtest? (-> this enemy-flags) (enemy-flag auto-reset-penetrate)))
                 (set! (-> this root penetrated-by) (get-penetrated-by this))
                 )
-            (if (and (< 0.0 taken) (>= 0.0 (-> this hit-points)) (= owner *target*))
+            ;; the player's kill: the hit that empties the unit, or the one that fates it. A lethal
+            ;; blue shot (the tazer, the spider's shock) leaves 1 point and sets `fated-time`
+            ;; (apply-incoming-hitpoint-mods), and the knocked state then kills the unit by itself
+            ;; (enemy-states.gc, hit points set to 0), with no hit to count: counted here, once
+            ;; (round 38: the spider's shocked foes died, none counted, seen in game)
+            (if (and (< 0.0 taken)
+                     (= owner *target*)
+                     (not was-fated?)
+                     (or (>= 0.0 (-> this hit-points)) (nonzero? (-> this fated-time)))
+                     )
                 (+! (-> *bf* kills) 1)
                 )
             taken
@@ -1370,11 +1389,13 @@
                            )
         )
 
-(defconstant BF_DROP_ROCKETS 5) ;; index of a jetpack's rockets in `*bf-drop-types*`
+(defconstant BF_DROP_ROCKETS 5) ;; index of the dark ammo (a jetpack's rockets, a robotguard's grenades) in `*bf-drop-types*`
 
 ;; The jetpack guards' rockets bag (`bf-queue-drop`): of every 10 jetpack guards fallen, one leaves
-;; its rockets (the author's 10 %), what is left of it and its full load: rockets, nothing.
+;; its rockets (the author's 10 %), what is left of it and its full load: rockets, nothing. The
+;; robotguards' grenades have a bag of their own, the same 10 % (round 38).
 (define *bf-rocket-bag* (new 'static 'array int32 2))
+(define *bf-grenade-bag* (new 'static 'array int32 2))
 (define *bf-rocket-bag-full* (new 'static 'array int32 2 1 9))
 
 (deftype bf-drop-bags (structure)
@@ -1436,18 +1457,27 @@
    goes 10 s after it appears (`bf-spawn-drops`). Queued for the director, which spawns it in its
    own process: this runs on the traffic manager's small stack.
    A jetpack guard (a flying-turret) also leaves its rockets, one in 10 (`*bf-rocket-bag*`, the
-   author's 10 %, round 37): the stock dark ammo pickup, purple as the rocket icon, which a
-   jetpack player takes as rockets (battlefront-player.gc BF_ROCKET_PICKUP)."
-  (when (and (type? proc process-drawable)
-             (= (-> proc type symbol) 'flying-turret)
-             (< (-> *bf* drop-count) BF_DROP_MAX)
-             (zero? (bf-bag-draw *bf-rocket-bag* *bf-rocket-bag-full* 2))
+   author's 10 %, round 37), and a robotguard its grenades, one in 10 too (`*bf-grenade-bag*`,
+   round 38): the stock dark ammo pickup, purple as their icons, which a jetpack player takes as
+   rockets and a robotguard player as grenades (battlefront-player.gc BF_ROCKET_PICKUP)."
+  (let ((bag (case (-> proc type symbol)
+               (('flying-turret) *bf-rocket-bag*)
+               (('roboguard-city) *bf-grenade-bag*)
+               (else (the-as (pointer int32) #f))
+               )
              )
-    (let ((i (-> *bf* drop-count)))
-      (set! (-> *bf* drop-kind i) (the-as int (-> *bf-drop-types* BF_DROP_ROCKETS)))
-      (+! (-> *bf-drop-kinds* BF_DROP_ROCKETS) 1)
-      (vector-copy! (-> *bf* drop-pos i) (-> (the-as process-drawable proc) root trans))
-      (+! (-> *bf* drop-count) 1)
+        )
+    (when (and bag
+               (type? proc process-drawable)
+               (< (-> *bf* drop-count) BF_DROP_MAX)
+               (zero? (bf-bag-draw bag *bf-rocket-bag-full* 2))
+               )
+      (let ((i (-> *bf* drop-count)))
+        (set! (-> *bf* drop-kind i) (the-as int (-> *bf-drop-types* BF_DROP_ROCKETS)))
+        (+! (-> *bf-drop-kinds* BF_DROP_ROCKETS) 1)
+        (vector-copy! (-> *bf* drop-pos i) (-> (the-as process-drawable proc) root trans))
+        (+! (-> *bf* drop-count) 1)
+        )
       )
     )
   (when (and (type? proc process-drawable) (< (-> *bf* drop-count) BF_DROP_MAX))

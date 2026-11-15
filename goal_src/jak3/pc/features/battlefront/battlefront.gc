@@ -856,18 +856,20 @@
 (define-extern bf-director-ensure! (function none))
 
 ;; Indexed by BF_WEAPON_*: the gun (pickup-type) whose icon the stock gun HUD shows for a guard's
-;; weapon: the rifle yellow 1, the tazer blue 2, the grenade launcher red 3; for the rockets the red 3,
-;; whose icon the HUD hides and draws the rocket's over (`bf-draw-rocket-icon`).
-(define *bf-hud-weapons* (new 'static 'array int32 4 29 33 28 28))
+;; weapon: the rifle yellow 1, the tazer blue 2, the grenade launcher red 3; for the rockets and the
+;; robotguard's grenades the red 3, whose icon the HUD hides and draws theirs over
+;; (`bf-draw-pixel-icon`).
+(define *bf-hud-weapons* (new 'static 'array int32 5 29 33 28 28 28))
 
 (defun bf-gun-hud-weapon ()
   "BF_WEAPON_* the gun HUD shows, during a fight with the class model up: a guard's weapon in hand, a
-   jetpack guard's rockets (BF_WEAPON_ROCKET, round 36); -1 otherwise (the robotguard's and the
-   spider's guns need no ammo: no gun HUD)."
+   jetpack guard's rockets (BF_WEAPON_ROCKET, round 36), a robotguard's grenades
+   (BF_WEAPON_BOT_GRENADE, round 38); -1 otherwise (the spider has no ammo: no gun HUD)."
   (cond
     ((not (and (bf-fighting?) (bf-avatar-alive?))) -1)
     ((bf-guard-class? (-> *bf* class)) (-> *bf* weapon))
     ((or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK)) BF_WEAPON_ROCKET)
+    ((= (-> *bf* class) BF_CLASS_ROBOGUARD) BF_WEAPON_BOT_GRENADE)
     (else -1)
     )
   )
@@ -904,42 +906,49 @@
 
 (define *bf-gun-text* (new 'global 'string 32 (the-as string #f)))
 
-;; The rocket icon's width on the 512-unit screen: a little under the stock gun icon's 128 (the
-;; author's wish, round 37).
-(defconstant BF_ROCKET_ICON_DRAW_W 100.0)
 
-(defun bf-draw-rocket-icon ((buf dma-buffer) (cx float) (cy float))
-  "The jetpack guard's rocket icon into BUF (a direct bucket), centered on CX, CY (the 512 x 416
-   screen of the HUD's sprites), BF_ROCKET_ICON_DRAW_W across, its art pixels square on the display
-   (`bf-x-squeeze`): the author's pixel-art rocket (battlefront-rocket-icon.gc, made by
-   scripts/battlefront/make_rocket_icon.py) as one flat sprite per run of one color, all in one GIF
+;; The icons' widths on the 512-unit screen: the rocket a little under the stock gun icon's 128 (the
+;; author's wish, round 37), the robotguard's grenade, a shorter drawing, narrower (round 38).
+(defconstant BF_ROCKET_ICON_DRAW_W 100.0)
+(defconstant BF_GRENADE_ICON_DRAW_W 64.0)
+
+(defun bf-draw-pixel-icon ((buf dma-buffer) (cx float) (cy float) (grenade? symbol))
+  "One of the gun HUD's pixel-art icons into BUF (a direct bucket), centered on CX, CY (the 512 x 416
+   screen of the HUD's sprites), its art pixels square on the display (`bf-x-squeeze`): the jetpack's
+   rocket, BF_ROCKET_ICON_DRAW_W across, or with GRENADE? the robotguard's grenade,
+   BF_GRENADE_ICON_DRAW_W across. Each is one of the author's drawings (battlefront-icons.gc, made by
+   scripts/battlefront/make_hud_icons.py) as one flat sprite per run of one color, all in one GIF
    packet (draw-sprite2d-xy's, display.gc, looped). A texture uploaded as the L3 map's never
    showed in a fight, whatever its bucket."
-  (let* ((px (/ BF_ROCKET_ICON_DRAW_W (the float BF_ROCKET_ICON_W)))
+  (let* ((colors (if grenade? *bf-grenade-icon-colors* *bf-rocket-icon-colors*))
+         (runs (if grenade? *bf-grenade-icon-runs* *bf-rocket-icon-runs*))
+         (count (if grenade? BF_GRENADE_ICON_RUNS BF_ROCKET_ICON_RUNS))
+         (draw-w (if grenade? BF_GRENADE_ICON_DRAW_W BF_ROCKET_ICON_DRAW_W))
+         (px (/ draw-w (the float (if grenade? BF_GRENADE_ICON_W BF_ROCKET_ICON_W))))
          (py (/ px (bf-x-squeeze)))
-         (x0 (- cx (* 0.5 BF_ROCKET_ICON_DRAW_W)))
-         (y0 (- cy (* 0.5 py (the float BF_ROCKET_ICON_H))))
+         (x0 (- cx (* 0.5 draw-w)))
+         (y0 (- cy (* 0.5 py (the float (if grenade? BF_GRENADE_ICON_H BF_ROCKET_ICON_H)))))
          (pkt (the-as dma-packet (-> buf base)))
          )
     ;; the DMA tag and the VIF direct count the GIF tag and 2 quadwords a run
-    (set! (-> pkt dma) (new 'static 'dma-tag :id (dma-tag-id cnt) :qwc (+ 1 (* 2 BF_ROCKET_ICON_RUNS))))
+    (set! (-> pkt dma) (new 'static 'dma-tag :id (dma-tag-id cnt) :qwc (+ 1 (* 2 count))))
     (set! (-> pkt vif0) (new 'static 'vif-tag))
-    (set! (-> pkt vif1) (new 'static 'vif-tag :cmd (vif-cmd direct) :msk #x1 :imm (+ 1 (* 2 BF_ROCKET_ICON_RUNS))))
+    (set! (-> pkt vif1) (new 'static 'vif-tag :cmd (vif-cmd direct) :msk #x1 :imm (+ 1 (* 2 count))))
     (&+! (-> buf base) 16)
     (let ((tag (the-as gs-gif-tag (-> buf base))))
-      (set! (-> tag tag) (new 'static 'gif-tag64 :nloop BF_ROCKET_ICON_RUNS :eop #x1 :flg (gif-flag reg-list) :nreg #x4))
+      (set! (-> tag tag) (new 'static 'gif-tag64 :nloop count :eop #x1 :flg (gif-flag reg-list) :nreg #x4))
       (set! (-> tag regs) (new 'static 'gif-tag-regs :regs1 (gif-reg-id rgbaq) :regs2 (gif-reg-id xyzf2) :regs3 (gif-reg-id xyzf2)))
       )
     (&+! (-> buf base) 16)
-    (dotimes (i BF_ROCKET_ICON_RUNS)
-      (let* ((run (-> *bf-rocket-icon-runs* i))
+    (dotimes (i count)
+      (let* ((run (-> runs i))
              (d (-> buf base))
              (rx (+ x0 (* px (the float (logand run #xff)))))
              (ry (+ y0 (* py (the float (logand (shr run 8) #xff)))))
              (rw (* px (the float (logand (shr run 16) #xff))))
              )
         (set! (-> (the-as (pointer gs-prim) d) 0) (new 'static 'gs-prim :prim (gs-prim-type sprite) :abe #x1))
-        (set! (-> (the-as (pointer gs-rgbaq) d) 1) (the-as gs-rgbaq (-> *bf-rocket-icon-colors* (shr run 24))))
+        (set! (-> (the-as (pointer gs-rgbaq) d) 1) (the-as gs-rgbaq (-> colors (shr run 24))))
         (set! (-> (the-as (pointer gs-xyzf) d) 2)
               (new 'static 'gs-xyzf :x (the int (* 16.0 (+ 1792.0 rx))) :y (the int (* 16.0 (+ 1840.0 ry))) :z #x3fffff)
               )
@@ -954,16 +963,20 @@
   )
 
 (defun bf-draw-rocket-hud ((buf dma-buffer))
-  "The director's HUD, each frame of a fight: into BUF, a jetpack guard's rocket icon where the gun
-   HUD shows a weapon's (`bf-draw-rocket-icon`), while that HUD is up (not hidden), placed from its
-   sprite 0 (the stock reticle at the icon's right end: the icon's middle 52 units left of it, 9
-   below its top, where the stock icon was measured), which moves as the HUD slides in. Its count
-   and shells are the gun HUD's (`bf-draw-gun-ammo`)."
-  (when (and *target* (= (bf-gun-hud-weapon) BF_WEAPON_ROCKET))
-    (let ((hg (the-as hud-gun (process-by-name "hud-gun" *target*))))
-      (if (and hg (not (hidden? hg)))
-          (bf-draw-rocket-icon buf (+ -52.0 (the float (-> hg sprites 0 pos x))) (+ 9.0 (the float (-> hg sprites 0 pos y))))
-          )
+  "The director's HUD, each frame of a fight: into BUF, a jetpack guard's rocket icon or a
+   robotguard's grenade icon (round 38) where the gun HUD shows a weapon's (`bf-draw-pixel-icon`),
+   while that HUD is up (not hidden), placed from its sprite 0 (the stock reticle at the icon's right
+   end: the icon's middle 52 units left of it, 9 below its top, where the stock icon was measured),
+   which moves as the HUD slides in. Its count and shells are the gun HUD's (`bf-draw-gun-ammo`)."
+  (let ((weapon (bf-gun-hud-weapon)))
+    (when (and *target* (or (= weapon BF_WEAPON_ROCKET) (= weapon BF_WEAPON_BOT_GRENADE)))
+      (let ((hg (the-as hud-gun (process-by-name "hud-gun" *target*))))
+        (if (and hg (not (hidden? hg)))
+            (bf-draw-pixel-icon buf (+ -52.0 (the float (-> hg sprites 0 pos x))) (+ 9.0 (the float (-> hg sprites 0 pos y)))
+                                (= weapon BF_WEAPON_BOT_GRENADE)
+                                )
+            )
+        )
       )
     )
   (none)
@@ -976,7 +989,8 @@
    stock draw places its own (hud-classes.gc hud-gun draw: the shells from the icon's position, 5
    units apart upward; the text at the spot it gave its string)."
   (let* ((rifle? (= weapon BF_WEAPON_RIFLE))
-         (rocket? (= weapon BF_WEAPON_ROCKET))
+         ;; the rockets and the robotguard's grenades (round 38) count from `*bf*` rockets
+         (rocket? (or (= weapon BF_WEAPON_ROCKET) (= weapon BF_WEAPON_BOT_GRENADE)))
          (slots (cond
                   (rifle? BF_MAG_RIFLE)
                   ((= weapon BF_WEAPON_GRENADE) (the int BF_GRENADES))
@@ -1010,6 +1024,8 @@
                 (the-as texture-id (cond
                                      ((>= i full) (get-texture hud-gun-empty-shell-01 level-default-minimap))
                                      (rifle? (get-texture hud-gun-yellow-shell-01 level-default-minimap))
+                                     ;; the robotguard's grenades, the dark ammo they come from (round 38)
+                                     ((= weapon BF_WEAPON_BOT_GRENADE) (get-texture hud-gun-purple-shell-01 level-default-minimap))
                                      (else (get-texture hud-gun-red-shell-01 level-default-minimap))
                                      )
                         )
@@ -1066,10 +1082,10 @@
               )
           (set! (-> this strings 0 scale) 0.0)
           (set! (-> this sprites 14 scale-y) 0.0)
-          ;; the rockets: the stock icon see-through (sprites 0 and 1, whose scales the stock draw sets
+          ;; the rockets and the robotguard's grenades: the stock icon see-through (sprites 0 and 1, whose scales the stock draw sets
           ;; itself) and its reticle (sprite 15, whose color it sets) shrunk to nothing; the director
           ;; draws the rocket's in its place (`bf-draw-rocket-hud`)
-          (when (= weapon BF_WEAPON_ROCKET)
+          (when (or (= weapon BF_WEAPON_ROCKET) (= weapon BF_WEAPON_BOT_GRENADE))
             (set! (-> this sprites 0 color w) 0)
             (set! (-> this sprites 1 color w) 0)
             (set! (-> this sprites 15 scale-x) 0.0)
@@ -1077,7 +1093,7 @@
           (*bf-stock-gun-draw* this)
           (set! (-> this strings 0 scale) text-scale)
           (set! (-> this sprites 14 scale-y) shell-y)
-          (when (= weapon BF_WEAPON_ROCKET)
+          (when (or (= weapon BF_WEAPON_ROCKET) (= weapon BF_WEAPON_BOT_GRENADE))
             (set! (-> this sprites 0 color w) 128)
             (set! (-> this sprites 1 color w) 128)
             (set! (-> this sprites 15 scale-x) 1.0)
@@ -2624,9 +2640,12 @@
              *target*
              (not (focus-test? *target* dead))
              )
-    ;; a jetpack guard's L1 fires a rocket (battlefront-player.gc `*bf-jet-l1*`): read here, then
-    ;; taken from Jak, who would duck or roll on it (round 36)
-    (when (or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK))
+    ;; a jetpack guard's L1 fires a rocket (battlefront-player.gc `*bf-jet-l1*`), a robotguard's a
+    ;; grenade (round 38), a spider's blows it up (round 38): read here, then taken from Jak, who
+    ;; would duck or roll on it (round 36)
+    (when (or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK)
+              (= (-> *bf* class) BF_CLASS_ROBOGUARD) (= (-> *bf* class) BF_CLASS_SPYDROID)
+              )
       (set! *bf-jet-l1* (logtest? (-> pad button0) (pad-buttons l1)))
       (set! (-> pad button0) (logclear (-> pad button0) (pad-buttons l1)))
       )

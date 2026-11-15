@@ -13,13 +13,13 @@
   Jak's position and facing every frame, picks the class's own clips from Jak's motion, and turns
   Jak's buttons into the class's moves:
 
-    class            model (art level)            moves                          R1             Square      Circle
-    Blue Guard       crimson-guard (ctypesa)      D-pad: weapon, L2/R2: dodge    weapon         rifle butt
-    Blue Jetpack     bf-hover-blue (ctypesc)      X: up, Circle: down (fuel)     2-shot salvo   dive kick
-    Red Guard        bf-red-guard (ctypesa)       D-pad: weapon, L2/R2: dodge    weapon         rifle butt
-    Red Jetpack      bf-hover-red (ctypesc)       X: up, Circle: down (fuel)     2-shot salvo   dive kick
-    Robotguard       roboguard-city (ctypesc)     slower, R2: rolling ball       2-shot salvo   punch       shield
-    Spider Robot     spydroid (ctypesc)           x2.25, higher jumps, R2: x2                               bite
+    class            model (art level)            moves                          R1             Square      Circle   L1
+    Blue Guard       crimson-guard (ctypesa)      D-pad: weapon, L2/R2: dodge    weapon         rifle butt           crouch
+    Blue Jetpack     bf-hover-blue (ctypesc)      X: up, Circle: down, R2: boost 2-shot salvo                        rocket
+    Red Guard        bf-red-guard (ctypesa)       D-pad: weapon, L2/R2: dodge    weapon         rifle butt           crouch
+    Red Jetpack      bf-hover-red (ctypesc)       X: up, Circle: down, R2: boost 2-shot salvo                        rocket
+    Robotguard       roboguard-city (ctypesc)     slower, R2: rolling ball       2-shot salvo   punch       shield   grenade
+    Spider Robot     spydroid (ctypesc)           x2.25, higher jumps, R2: x2                   chain bite           blast
 
   Neither the Spargus Citizen (class 2) nor Jak himself (class 3) is playable any more.
 
@@ -66,6 +66,13 @@
 (defconstant BF_SPIDER_AIR (seconds 0.3))   ;; the spider airborne this long before its jump clip (a sprint's bumps leave the ground)
 (defconstant BF_ZAP_TIME (seconds 0.6))     ;; arcs around a shocked foe (`bf-avatar-zap-update`)
 (defconstant BF_ZAP_FINISH (seconds 1.1))   ;; a foe the shock left at 1 point is struck again then
+(defconstant BF_CHAIN_MAX 2)                ;; spider: foes its headbutt's shock jumps to besides the one struck (round 38)
+(defconstant BF_CHAIN_RANGE (meters 10))    ;; how near the one struck they stand (the Peace Maker's blast, gun-dark-shot.gc)
+(defconstant BF_CHAIN_GAP (seconds 0.1))    ;; between two foes shocked, as the Peace Maker's chain
+(defconstant BF_NOVA_RADIUS (meters 15))    ;; spider's L1 blast: foes within this die (the Super Nova's reach is 300 m)
+(defconstant BF_NOVA_SCALE 0.3)             ;; its dark sphere's size, of the Super Nova's (half of it, 5 m up,
+                                            ;; held the camera inside it: the screen washed out, seen in game)
+(defconstant BF_NOVA_LIFE (seconds 3))      ;; its sphere grows, then fades, this long (the Super Nova's 10 s)
 (defconstant BF_CLIP_DIE 17)                ;; crimson-guard-ag die: a guard class's death (`bf-avatar-dying`)
 (defconstant BF_MELEE_RANGE (meters 5))     ;; reach of the close attacks (4 m until round 35)
 (defconstant BF_PUNCH_RANGE (meters 6.5))   ;; reach of the robotguard's punch (it stands 4.8 m tall)
@@ -244,7 +251,8 @@
    (dive-until  time-frame)     ;; jetpack dive kick flying until then
    (dive-foe    handle)         ;; what the dive aims at
    (fuel        float)          ;; jetpack boost gauge, 0 to 1 (refilled by dark eco only)
-   (rocket-time time-frame)     ;; jetpack: its last rocket (BF_ROCKET_DELAY before the next)
+   (rocket-time time-frame)     ;; jetpack: its last rocket, robotguard: its last grenade (BF_ROCKET_DELAY before the next)
+   (left-hand?  symbol)         ;; robotguard: its next grenade leaves its second fist (gun1), else its first
    (boost       float)          ;; spider blue eco, 0 to 1
    (was-ground? symbol)
    (shield?     symbol)         ;; robotguard: its shield is up
@@ -886,17 +894,27 @@
 ;; The jetpack guards' rockets (L1, round 36, the author's wish)
 ;; ---------------------------------------------------------------------------------------------
 
-(defconstant BF_ROCKETS 10)                  ;; rockets a jetpack guard carries each life
-(defconstant BF_ROCKET_PICKUP 5)             ;; rockets in a fallen jetpack guard's dark ammo pickup
+(defconstant BF_ROCKETS 10)                  ;; rockets a jetpack guard, grenades a robotguard (round 38), carries each life
+(defconstant BF_ROCKET_PICKUP 5)             ;; rockets or grenades in a fallen jetpack guard's or robotguard's dark ammo pickup
 (defconstant BF_ROCKET_SPEED (meters 60))    ;; its flight, straight from the jetpack to the crosshair
 (defconstant BF_ROCKET_LIFE (seconds 3))     ;; it bursts where it is after this long (180 m)
 (defconstant BF_ROCKET_RADIUS (meters 10))   ;; its blast's reach (the red gun 3 grenade's: 20 m)
 (defconstant BF_ROCKET_DELAY (seconds 0.8))  ;; between two rockets
 
-;; pad 0's L1, read for the jetpack guards before `bf-pad-lock!` takes it from Jak (who would duck or
-;; roll on it), and its value the frame before (battlefront.gc)
+;; pad 0's L1, read for the jetpack guards, the robotguard and the spider (round 38) before
+;; `bf-pad-lock!` takes it from Jak (who would duck or roll on it), and its value the frame before
+;; (battlefront.gc)
 (define *bf-jet-l1* #f)
 (define *bf-jet-l1-was* #f)
+
+(defun bf-l1-pressed? ()
+  "#t on the frame L1 goes down (`*bf-jet-l1*` set, not the frame before); called once a frame by
+   the classes that use it, it keeps the frame's value for the next."
+  (let ((on? (and *bf-jet-l1* (not *bf-jet-l1-was*))))
+    (set! *bf-jet-l1-was* *bf-jet-l1*)
+    on?
+    )
+  )
 
 (deftype bf-rocket (guard-shot)
   "A jetpack guard's rocket: a guard-shot's straight flight and collision, the dark gun 3's
@@ -1029,11 +1047,39 @@
   (none)
   )
 
-(defbehavior bf-avatar-rocket bf-avatar ()
-  "A jetpack guard's rocket (L1): one of `*bf*` rockets, from its first gun toward the crosshair's
-   aim point, straight at BF_ROCKET_SPEED (a `bf-rocket`, Jak its owner: its hits are his)."
+;; The robotguard's grenades (L1, round 38, the author's wish)
+
+(deftype bf-grenade (bf-rocket)
+  "A robotguard's grenade: a `bf-rocket` (its straight flight, its burst as the red gun 3's, its
+   damage) wearing the red gun 3's grenade (gun-red-shot.gc skel-gun-red-3-grenade, its glow), whose
+   own flight bounces and falls: this one flies straight (the author's wish)."
+  ()
+  )
+
+(defmethod init-proj-settings! ((this bf-grenade))
+  "The guard-shot's settings (not the rocket's, whose model would be set up too), then the red gun 3
+   grenade's model at its scale and its glow, the rocket's speed and life, the red gun 3's firing
+   sound."
+  ((method-of-type guard-shot init-proj-settings!) this)
+  (initialize-skeleton
+    this
+    (the-as skeleton-group (art-group-get-by-name *level* "skel-gun-red-3-grenade" (the-as (pointer level) #f)))
+    (the-as pair 0)
+    )
+  (set-vector! (-> this root scale) 2.5 2.5 2.5 1.0)
+  (set! (-> this part) (create-launch-control group-gun-red3-shot-glow this))
+  (set! (-> this max-speed) BF_ROCKET_SPEED)
+  (set! (-> this timeout) BF_ROCKET_LIFE)
+  (sound-play "red3-fire")
+  (none)
+  )
+
+(defbehavior bf-avatar-rocket bf-avatar ((grenade? symbol))
+  "L1: a jetpack guard's rocket from its first gun, or with GRENADE? a robotguard's grenade from its
+   fists in turn (`left-hand?`, round 38): one of `*bf*` rockets, toward the crosshair's aim point,
+   straight at BF_ROCKET_SPEED (a `bf-rocket` or a `bf-grenade`, Jak its owner: its hits are his)."
   (let* ((art (bf-class-art-of (-> self class)))
-         (from (bf-joint-pos self (-> art gun0) (new 'stack-no-clear 'vector)))
+         (from (bf-joint-pos self (if (and grenade? (-> self left-hand?)) (-> art gun1) (-> art gun0)) (new 'stack-no-clear 'vector)))
          (dir (vector-! (new 'stack-no-clear 'vector) (-> self aim) from))
          (params (new 'stack-no-clear 'projectile-init-by-other-params))
          )
@@ -1059,8 +1105,14 @@
     (set! (-> params timeout) BF_ROCKET_LIFE)
     (vector-copy! (-> params pos) from)
     (vector-copy! (-> params vel) dir)
-    (spawn-projectile bf-rocket params *target* *default-dead-pool*)
+    (if grenade?
+        (spawn-projectile bf-grenade params *target* *default-dead-pool*)
+        (spawn-projectile bf-rocket params *target* *default-dead-pool*)
+        )
     )
+  (if grenade?
+      (set! (-> self left-hand?) (not (-> self left-hand?)))
+      )
   (+! (-> *bf* rockets) -1)
   (set-time! (-> self rocket-time))
   (set! (-> self shoot-until) (+ (current-time) (seconds 0.4)))
@@ -1207,9 +1259,294 @@
   (none)
   )
 
+(defun bf-chain-shock ((src process-focusable) (foe process-focusable) (delay time-frame))
+  "One foe of the spider's headbutt (`bf-avatar-chain-zap`), as the dark gun 1, the Peace Maker,
+   shocks each enemy of its chain (gun-dark-shot.gc impact): a process under FOE that waits DELAY,
+   strikes it with the tazer's shock (BF_DMG_TAZER, the electrocuted knock, `bf-send-attack-pen`),
+   and for BF_ZAP_TIME draws, every 0.05 s, the Peace Maker's thick bolt from SRC to it
+   (`process-drawable-shock-effect-bullseye`, lightning spec 16, its sparks) and its thin arcs from
+   its body to the walls near it (`process-drawable-shock-effect-replace`, spec 15); at BF_ZAP_FINISH
+   it strikes again a foe the shock left standing at 1 point (as `bf-avatar-zap-update`). It ends
+   with FOE (a child process)."
+  (process-spawn-function
+    process
+    (lambda :behavior process
+      ((src-h handle) (delay time-frame))
+      ;; more stack than a spawned function's 256 bytes kept at each suspend (game-save.gc does the
+      ;; same), before anything else is allocated
+      (stack-size-set! (-> self main-thread) 512)
+      (let ((t0 (current-time))
+            (last (the-as time-frame 0))
+            (struck? #f)
+            (done? #f)
+            )
+        (while (not done?)
+          (let ((foe (as-type (ppointer->process (-> self parent)) process-focusable))
+                (t (- (current-time) t0))
+                )
+            (cond
+              ((not foe)
+               (set! done? #t)
+               )
+              ((< t delay)
+               0
+               )
+              (else
+                (when (not struck?)
+                  (set! struck? #t)
+                  (bf-send-attack-pen foe BF_DMG_TAZER (penetrate generic-attack lunge jak-blue-shot))
+                  )
+                (when (and (< t (+ delay BF_ZAP_TIME)) (time-elapsed? last (seconds 0.05)))
+                  (set-time! last)
+                  (let ((src (as-type (handle->process src-h) process-focusable)))
+                    (if src
+                        (process-drawable-shock-effect-bullseye
+                          src
+                          foe
+                          (-> *lightning-spec-id-table* 16)
+                          lightning-probe-callback
+                          (-> *part-id-table* 665)
+                          (-> *part-id-table* 255)
+                          (-> *part-id-table* 257)
+                          )
+                        )
+                    )
+                  (process-drawable-shock-effect-replace
+                    foe
+                    (-> *lightning-spec-id-table* 15)
+                    lightning-probe-callback
+                    0
+                    0
+                    (meters 10)
+                    )
+                  )
+                ;; the finishing strike, on a foe the shock left standing, then the end (a frame
+                ;; slowed by the effects may come late: no narrow window)
+                (when (>= t (+ delay BF_ZAP_FINISH))
+                  (if (not (focus-test? foe dead inactive))
+                      (bf-send-attack-pen foe BF_DMG_TAZER (penetrate generic-attack lunge jak-blue-shot))
+                      )
+                  (set! done? #t)
+                  )
+                )
+              )
+            )
+          (suspend)
+          )
+        )
+      )
+    (process->handle src)
+    delay
+    :to foe
+    )
+  (none)
+  )
+
+;; The foes the spider's last headbutt shocked, the one struck first, #f for none (for the tests).
+(define *bf-chain-foes* (new 'static 'array handle 3))
+
+(defbehavior bf-avatar-chain-zap bf-avatar ((foe process-focusable))
+  "The spider's headbutt lands on FOE (round 38, the author's wish): the Peace Maker's look and a
+   chain, its flash on FOE (group-jak-peacemaker-shot-hit), then FOE and up to BF_CHAIN_MAX other
+   foes within BF_CHAIN_RANGE of it, nearest first, each shocked BF_CHAIN_GAP after the one before
+   (`bf-chain-shock`): the bolt to FOE from the spider (Jak, whose place it takes), to each other
+   from FOE. `*bf-chain-foes*`: the foes shocked."
+  (let ((near (new 'stack-no-clear 'array 'handle BF_CHAIN_MAX))
+        (dist (new 'stack-no-clear 'array 'float BF_CHAIN_MAX))
+        (shapes (new 'stack-no-clear 'array 'collide-shape 64))
+        (probe (vector-copy! (new 'stack-no-clear 'vector) (-> foe root trans)))
+        )
+    (dotimes (k BF_CHAIN_MAX)
+      (set! (-> near k) (the-as handle #f))
+      (set! (-> dist k) BF_CHAIN_RANGE)
+      )
+    ;; the BF_CHAIN_MAX foes nearest FOE, kept sorted
+    (set! (-> probe w) BF_CHAIN_RANGE)
+    (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 64))
+      (let ((shape (as-type (-> shapes i) collide-shape)))
+        (when shape
+          (let ((proc (-> shape process)))
+            (when (and (!= proc foe) (bf-foe? proc (-> *bf* team)))
+              (let ((d (vector-vector-distance (-> (the-as process-focusable proc) root trans) (-> foe root trans)))
+                    (h (process->handle proc))
+                    )
+                (dotimes (k BF_CHAIN_MAX)
+                  (when (< d (-> dist k))
+                    ;; it takes slot k, the one there moves down
+                    (let ((d2 (-> dist k))
+                          (h2 (-> near k))
+                          )
+                      (set! (-> dist k) d)
+                      (set! (-> near k) h)
+                      (set! d d2)
+                      (set! h h2)
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    (vector-copy! (-> *launch-matrix* trans) (get-trans foe 3))
+    (part-tracker-spawn part-tracker :to *entity-pool* :group group-jak-peacemaker-shot-hit)
+    (sound-play "guard-zap")
+    (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 153 (seconds 0.2))
+    (set! (-> self zap-foe) (process->handle foe))
+    (bf-chain-shock *target* foe 0)
+    (set! (-> *bf-chain-foes* 0) (process->handle foe))
+    (let ((n 1))
+      (dotimes (k BF_CHAIN_MAX)
+        (set! (-> *bf-chain-foes* (+ k 1)) (the-as handle #f))
+        (let ((other (as-type (handle->process (-> near k)) process-focusable)))
+          (when other
+            (bf-chain-shock foe other (* n BF_CHAIN_GAP))
+            (set! (-> *bf-chain-foes* n) (process->handle other))
+            (+! n 1)
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-avatar-nova bf-avatar ()
+  "Spider, L1 (round 38, the author's wish): it blows itself up as a small Super Nova, the dark gun
+   3's blast (gun-dark-shot.gc gun-dark-3-nuke impact-small and impact) without its white screen
+   and blur: a process at the spider's feet plays its explosion sound (pg3wxplo, streamed, queued at
+   once and played once ready, else the stock fallback), its shock rings, smoke and debris
+   (group-gun-dark3-ring: the wall blast's group-gun-dark3-small and the stalk's 17 to 30 m glows
+   washed the screen out from the spider's camera, seen in game), the
+   camera's shake and the pad's buzz, kills every foe within BF_NOVA_RADIUS (never its own side)
+   with its scorch mark and the Super Nova's attack (`bf-send-attack-pen`, penetrate explode
+   jak-dark-nuke, so each dies as under it; `*bf*` nova-kills counts them), then kills the player (a
+   deadly attack from the blast); its dark sphere (gun-dark-3-sphere, BF_NOVA_SCALE of the Super
+   Nova's size) grows and rises from 2 m up, then fades, over BF_NOVA_LIFE."
+  (process-spawn-function
+    process
+    (lambda :behavior process
+      ((pos vector))
+      ;; its locals (the actor list above all) outgrow a spawned function's 256 bytes kept at each
+      ;; suspend ("suspend called without enough stack", seen in game): 1 KB, set before anything
+      ;; else is allocated (game-save.gc does the same)
+      (stack-size-set! (-> self main-thread) 1024)
+      (let ((at (vector-copy! (new 'stack-no-clear 'vector) pos))
+            (top (vector-copy! (new 'stack-no-clear 'vector) pos))
+            (t0 (current-time))
+            (snd (add-process *gui-control* self (gui-channel gun) (gui-action queue) "pg3wxplo" -99.0 0))
+            (played? #f)
+            (sphere (the-as handle #f))
+            )
+        (sound-params-set! *gui-control* snd #t 50 150 11 -1.0)
+        (+! (-> top y) (meters 2))
+        ;; the burst, the shake, the buzz
+        (vector-copy! (-> *launch-matrix* trans) at)
+        (part-tracker-spawn part-tracker :to *entity-pool* :group group-gun-dark3-ring)
+        (activate! *camera-smush-control* 1228.8 45 1275 1.0 0.9 (-> *display* camera-clock))
+        (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 255 (seconds 1))
+        (let ((params (new 'stack-no-clear 'gun-dark-3-sphere-init-params)))
+          (vector-copy! (-> params pos) top)
+          (set! (-> params size-x) 1.0)
+          (set! (-> params size-y) 1.0)
+          (set! (-> params alpha-val) 1.0)
+          (set! sphere (ppointer->handle (process-spawn gun-dark-3-sphere params :name "gun-dark-3-sphere" :to self)))
+          )
+        ;; the foes within BF_NOVA_RADIUS: the Super Nova's scorch mark and attack
+        (let ((probe (vector-copy! (new 'stack-no-clear 'vector) at))
+              (shapes (new 'stack-no-clear 'array 'collide-shape 64))
+              (n 0)
+              )
+          (set! (-> probe w) BF_NOVA_RADIUS)
+          (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 64))
+            (let ((shape (as-type (-> shapes i) collide-shape)))
+              (when shape
+                (let ((proc (-> shape process)))
+                  (when (and (bf-foe? proc (-> *bf* team))
+                             (< (vector-vector-distance (-> (the-as process-focusable proc) root trans) at) BF_NOVA_RADIUS)
+                             )
+                    (let ((mark (get-trans (the-as process-focusable proc) 1)))
+                      (+! (-> mark y) 409.6)
+                      (vector-copy! (-> *launch-matrix* trans) mark)
+                      (part-tracker-spawn part-tracker :to *entity-pool* :group group-gun3-dark-scorched-earth)
+                      )
+                    (bf-send-attack-pen proc BF_DMG_NOVA (penetrate explode jak-dark-nuke))
+                    (+! n 1)
+                    )
+                  )
+                )
+              )
+            )
+          (set! (-> *bf* nova-kills) n)
+          )
+        ;; the spider dies in its blast
+        (when *target*
+          (let ((msg (new 'stack-no-clear 'event-message-block)))
+            (set! (-> msg from) (process->ppointer self))
+            (set! (-> msg num-params) 2)
+            (set! (-> msg message) 'attack)
+            (set! (-> msg param 0) (the-as uint #f))
+            (set! (-> msg param 1)
+                  (the-as uint (static-attack-info :mask (vehicle-impulse-factor) ((id (new-attack-id))
+                                                                                   (damage 100.0)
+                                                                                   (vehicle-damage-factor 1.0)
+                                                                                   (vehicle-impulse-factor 1.0)
+                                                                                   (mode 'generic)
+                                                                                   )
+                                                  )
+                           )
+                  )
+            (send-event-function *target* msg)
+            )
+          )
+        ;; the sound once streamed in; the sphere grows, rises and fades
+        (while (not (time-elapsed? t0 BF_NOVA_LIFE))
+          (when (not played?)
+            (cond
+              ((= (get-status *gui-control* snd) (gui-status ready))
+               (set-action! *gui-control* (gui-action play) snd (gui-channel none) (gui-action none)
+                            (the-as string #f) (the-as (function gui-connection symbol) #f) (the-as process #f)
+                            )
+               (set! played? #t)
+               )
+              ((time-elapsed? t0 (seconds 0.3))
+               (set-action! *gui-control* (gui-action stop) snd (gui-channel none) (gui-action none)
+                            (the-as string #f) (the-as (function gui-connection symbol) #f) (the-as process #f)
+                            )
+               (sound-play "explosion" :pitch 2.5)
+               (set! played? #t)
+               )
+              )
+            )
+          (+! (-> top y) (* 8192.0 (seconds-per-frame)))
+          (let* ((f (/ (the float (- (current-time) t0)) (the float BF_NOVA_LIFE)))
+                 (fade (fmax 0.0 (* 2.0 (- f 0.5))))
+                 (params (new 'stack-no-clear 'gun-dark-3-sphere-init-params))
+                 )
+            ;; the Super Nova's size curves (gun-part.gc): 8 to 12 m across, 4 to 5 m up
+            (vector-copy! (-> params pos) top)
+            (set! (-> params size-x) (* BF_NOVA_SCALE (lerp (meters 8) (meters 12) (fmin 1.0 (* 2.0 f)))))
+            (set! (-> params size-y) (* BF_NOVA_SCALE (lerp (meters 4) (meters 5) (fmin 1.0 (* 2.0 f)))))
+            (set! (-> params alpha-val) (square (- 1.0 fade)))
+            (send-event (handle->process sphere) 'set-pos-and-size params)
+            )
+          (suspend)
+          )
+        )
+      )
+    (-> *target* control trans)
+    :to *entity-pool*
+    )
+  (set-time! (-> self melee-time))
+  (bf-combat!)
+  (none)
+  )
+
 (defbehavior bf-avatar-bite bf-avatar ()
   "Spider, Square: jump at the nearest foe ahead and headbutt what is in reach (BF_LUNGE_RANGE): the
-   tazer's shock (`bf-avatar-zap`), its points, its electrocuted knock and arcs."
+   tazer's shock, its points, its electrocuted knock, since round 38 with the Peace Maker's look and
+   its chain to up to two foes near the one struck (`bf-avatar-chain-zap`)."
   (let* ((aim (new 'stack-no-clear 'vector))
          (foe (bf-avatar-aim (-> *target* root trans) (-> *bf* team) BF_FIRE_RANGE aim))
          (dir (vector-! (new 'stack-no-clear 'vector) aim (-> *target* root trans)))
@@ -1220,7 +1557,7 @@
     (set! (-> *target* control transv z) (-> dir z))
     (set! (-> *target* control transv y) (meters 6))
     (if (and foe (< (vector-vector-distance (-> foe root trans) (-> *target* root trans)) BF_LUNGE_RANGE))
-        (bf-avatar-zap foe)
+        (bf-avatar-chain-zap (the-as process-focusable foe))
         )
     )
   (set-time! (-> self melee-time))
@@ -1832,15 +2169,18 @@
          )
        ;; L1 pressed: a rocket while any is left (`bf-avatar-rocket`, round 36), its L1 read before
        ;; Jak's pad loses it (battlefront.gc `bf-pad-lock!`)
-       (when (and *bf-jet-l1* (not *bf-jet-l1-was*)
+       (when (and (bf-l1-pressed?)
                   (> (-> *bf* rockets) 0)
                   (time-elapsed? (-> self rocket-time) BF_ROCKET_DELAY)
                   )
-         (bf-avatar-rocket)
+         (bf-avatar-rocket #f)
          )
-       (set! *bf-jet-l1-was* *bf-jet-l1*)
        )
       ((BF_CLASS_SPYDROID)
+       ;; L1 pressed: it blows itself up (`bf-avatar-nova`, round 38)
+       (if (and (bf-l1-pressed?) (not (-> self dying?)))
+           (bf-avatar-nova)
+           )
        ;; X from the ground: a leap BF_SPIDER_LEAP_HEIGHT high, a jump of Jak's own with his speed
        ;; across ('launch, target-handler.gc); pushing his rise by hand gave no more than 3.5 m
        (when (and ground? (cpad-pressed? 0 x))
@@ -1870,6 +2210,15 @@
        ;; Circle: the shield for BF_SHIELD_TIME, BF_SHIELD_RECHARGE after it (`bf-avatar-shield`);
        ;; the robot moves behind it
        (bf-avatar-shield (cpad-pressed? 0 circle))
+       ;; L1 pressed: a grenade from each fist in turn while any is left (`bf-avatar-rocket`, round
+       ;; 38), not while it rolls
+       (when (and (bf-l1-pressed?)
+                  (> (-> *bf* rockets) 0)
+                  (time-elapsed? (-> self rocket-time) BF_ROCKET_DELAY)
+                  (not (-> self rolling?))
+                  )
+         (bf-avatar-rocket #t)
+         )
        )
       )
     ;; dark eco: the battle keeps Jak's at 0 (saved and given back by the director) and turns what
@@ -1888,11 +2237,14 @@
       (set! (-> *game-info* gun-ammo BF_AMMO_BLUE) 0.0)
       (set! (-> *bf* tazer-time) 0)
       )
-    ;; dark ammo (a fallen jetpack guard's rockets, battlefront-h.gc `bf-queue-drop`) gives a
-    ;; jetpack BF_ROCKET_PICKUP rockets, BF_ROCKETS at most (other classes waste it)
+    ;; dark ammo (a fallen jetpack guard's rockets or robotguard's grenades, battlefront-h.gc
+    ;; `bf-queue-drop`) gives a jetpack BF_ROCKET_PICKUP rockets, a robotguard as many grenades,
+    ;; BF_ROCKETS at most (other classes waste it)
     (when (< 0.0 (-> *game-info* gun-ammo BF_AMMO_DARK))
       (set! (-> *game-info* gun-ammo BF_AMMO_DARK) 0.0)
-      (if (or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
+      (if (or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK)
+              (= (-> self class) BF_CLASS_ROBOGUARD)
+              )
           (set! (-> *bf* rockets) (min BF_ROCKETS (+ (-> *bf* rockets) BF_ROCKET_PICKUP)))
           )
       )
@@ -3014,6 +3366,7 @@
   (set! (-> self dive-foe) (the-as handle #f))
   (set! (-> self fuel) 1.0)
   (set! (-> self rocket-time) 0)
+  (set! (-> self left-hand?) #f)
   ;; a jetpack guard's rockets, a full load each life
   (set! (-> *bf* rockets) BF_ROCKETS)
   (set! (-> self boost) 1.0)

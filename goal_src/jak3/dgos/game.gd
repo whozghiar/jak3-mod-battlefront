@@ -495,6 +495,6 @@
   "battlefront-player.o"
   "battlefront-minimaps.o"
   "battlefront-portraits.o"
-  "battlefront-rocket-icon.o"
+  "battlefront-icons.o"
   "battlefront.o"
  ))
