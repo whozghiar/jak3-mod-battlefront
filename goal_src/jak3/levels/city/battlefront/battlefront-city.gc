@@ -942,7 +942,7 @@
 ;; none; a citizen at a lane's dead end jumps to any lane 20 to 120 m behind it (citizen-method-208).
 ;; The lanes alone kept the units 140 to 290 m from a point next door. The meshes join the sections:
 ;; a nav-enemy standing on a mesh's link poly moves onto the next mesh (nav-enemy-method-188).
-(defconstant BF_MARCH_MAX 192)          ;; units marching at once, at most (63 a side since round 40)
+(defconstant BF_MARCH_MAX 256)          ;; units marching at once, at most (100 a side since round 41)
 (defconstant BF_MARCH_NEAR (meters 12)) ;; a unit this close to its point walks the lanes around it
 (defconstant BF_WAY_MESHES 768)         ;; nav meshes of the active levels the ways know, at most
 
@@ -1000,7 +1000,7 @@
 (defconstant BF_DECK_RISE (meters 8))
 (defconstant BF_DECK_SHARE 3)
 (defconstant BF_DECK_DETOUR 1.6)
-(defconstant BF_DECK_DONE_MAX 192) ;; 63 units a side since round 40
+(defconstant BF_DECK_DONE_MAX 256) ;; 100 units a side at most since round 41
 
 (deftype bf-deck-done (structure)
   "The guards that have been on a mesh's upper deck on their way: each one's handle and that mesh."

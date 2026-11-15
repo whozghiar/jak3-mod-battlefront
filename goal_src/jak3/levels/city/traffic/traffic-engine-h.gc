@@ -244,8 +244,11 @@
    (id                       uint8)
    (active-object-count      uint8)
    (inactive-object-count    int8)
-   (active-object-list       handle        126)
-   (active-object-type-list  traffic-type  126)
+   ;; MOD battlefront -- 224 awake objects, not 126: a battle's 100 units a side are walkers, all on
+   ;; one tracker (round 41). The trackers grow by 1760 bytes together: traffic-engine's fields
+   ;; after them moved as much (their stock offsets in the comments)
+   (active-object-list       handle        224)
+   (active-object-type-list  traffic-type  224)
    )
   (:methods
     (traffic-tracker-method-9 (_type_) none)
@@ -286,11 +289,11 @@
    (tracker-array           traffic-tracker           2 :inline)
    (tracker0                traffic-tracker           :inline :overlay-at (-> tracker-array 0))
    (tracker1                traffic-tracker           :inline :overlay-at (-> tracker-array 1))
-   (inactive-object-array   handle                    580     :offset 7456)
+   (inactive-object-array   handle                    580     :offset 9216) ;; MOD battlefront -- stock 7456
    (suppressor              traffic-suppressor        :inline)
-   (danger-sphere-count     int8                              :offset 12656)
+   (danger-sphere-count     int8                              :offset 14416) ;; MOD battlefront -- stock 12656
    (danger-sphere-array     traffic-danger-info       4 :inline)
-   (allow-spawning?         symbol                            :offset 12928)
+   (allow-spawning?         symbol                            :offset 14688) ;; MOD battlefront -- stock 12928
    ;; MOD battlefront -- the street data of more sections, for a battle that loads every section of
    ;; the city at once (`traffic-level-data-ref`: entries 0 and 1 are level-data-array's)
    (level-data-extra        traffic-level-data        6 :inline)

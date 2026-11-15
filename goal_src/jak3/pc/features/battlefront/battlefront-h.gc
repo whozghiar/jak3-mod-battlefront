@@ -97,35 +97,35 @@
 (defconstant BF_UNIT_RESPAWN (seconds 5)) ;; a fallen unit's place in its side's army waits this long
 (defconstant BF_RESPAWN_TIME (seconds 2)) ;; a dead player watches the battle at least this long before he chooses (4 s, then the respawn page, until round 27)
 
-;; Army caps: at most 63 units per side on the street at once (40 until round 39; the author asked for
-;; up to 70, round 40). The four kinds are walkers of the traffic, which wakes them on one tracker
-;; listing 126 units at most (traffic-engine-h.gc active-object-list): 63 a side. Waking the turrets,
-;; robotguards and spiders on the vehicles' tracker instead, unused in a battle, left them asleep (one
-;; of each awake in three minutes, the armies stalled: round 40's tests). Freedom League: 45 blue
-;; guards and 18 blue jetpack guards. Krimzon Guard: 13 red riflemen, 12 red grenadiers, 13 red
-;; jetpack guards, 12 robotguards and 13 spider robots. The traffic pools are capped to these sums
-;; (`bf-want-count`), and each new guard or jetpack guard takes the look furthest below its share
-;; (`*bf-look-share*`). A traffic pool keeps its sleeping units in 20 slots (traffic-engine.gc
+;; Army caps: units per side on the street at once, the battle setup's choice (30 to 100, 60 by
+;; default; round 41, the author's wish: 40 until round 39, 63 in round 40). `bf-caps-set!` splits it:
+;; Freedom League, 72 % blue guards, the rest blue jetpack guards; Krimzon Guard, a fifth each of red
+;; riflemen, red grenadiers, red jetpack guards, robotguards and spider robots. The traffic pools are
+;; capped to their sums (`*bf-pool-caps*`, `bf-want-count`), and each new guard or jetpack guard takes
+;; the look furthest below its share (`*bf-look-share*`). The four kinds are walkers of the traffic:
+;; it wakes them on one tracker, which lists 224 awake objects since round 41 (traffic-engine-h.gc;
+;; 126 stock, 63 a side). A traffic pool keeps its sleeping units in 20 slots (traffic-engine.gc
 ;; reset-and-init-from-manager): the guard pool and the flying turrets' get `*bf-guard-pool-slots*`
 ;; and `*bf-turret-pool-slots*` instead.
-(defconstant BF_CAP_GUARDS 70)
-(defconstant BF_CAP_TURRETS 31)
-(defconstant BF_CAP_ROBOGUARDS 12)
-(defconstant BF_CAP_SPYDROIDS 13)
+(defconstant BF_AT_ONCE_MIN 30)
+(defconstant BF_AT_ONCE_MAX 100)
 
 ;; The guard pool's sleeping units (traffic-engine.gc reset-and-init-from-manager points guard-a's
-;; slots here): BF_CAP_GUARDS and room to spare, where the stock 20 slots would run into the next
-;; types' (guard-b, the Metal Heads).
-(define *bf-guard-pool-slots* (new 'static 'array uint64 96))
-;; The same for the flying turrets: BF_CAP_TURRETS and room to spare (round 40).
-(define *bf-turret-pool-slots* (new 'static 'array uint64 48))
+;; slots here): the most guards a battle has (72 + 40) and room to spare, where the stock 20 slots
+;; would run into the next types' (guard-b, the Metal Heads).
+(define *bf-guard-pool-slots* (new 'static 'array uint64 128))
+;; The same for the flying turrets: the most a battle has (28 + 20) and room to spare (round 40).
+(define *bf-turret-pool-slots* (new 'static 'array uint64 64))
 
 ;; The battle's unit kinds (traffic types: guard-a, flying-turret, roboguard, spydroid) and each
 ;; side's share of the caps above, Freedom League then Krimzon Guard, in that order: what its troop
 ;; transports bring it (levels/city/battlefront/bf-transport.gc).
 (defconstant BF_KIND_COUNT 4)
 (define *bf-kinds* (new 'static 'array int32 4 6 16 14 15))
-(define *bf-team-caps* (new 'static 'array int32 8 45 18 0 0 25 13 12 13))
+(define *bf-team-caps* (new 'static 'array int32 8 43 17 0 0 24 12 12 12))
+
+;; The traffic pools' caps, from `*bf-team-caps*`: guards, flying turrets, robotguards, spider robots.
+(define *bf-pool-caps* (new 'static 'array int32 4 67 29 12 12))
 
 ;; ---------------------------------------------------------------------------------------------
 ;; Types
@@ -318,7 +318,7 @@
 
 ;; The units awake, for the maps (battlefront.gc `bf-draw-city-map`): their places, headings and
 ;; sides, written every frame of a fight by the Haven City side (battlefront-city.gc `bf-city-dots`).
-(defconstant BF_DOT_MAX 192) ;; 126 units at most (63 a side) and the player
+(defconstant BF_DOT_MAX 256) ;; 200 units at most (100 a side) and the player
 
 (deftype bf-unit-dots (structure)
   ((count  int32)
@@ -1377,8 +1377,41 @@
   (none)
   )
 
-;; Share of each look in its pool (army caps above): 45 + 13 + 12 = BF_CAP_GUARDS, 18 + 13 = BF_CAP_TURRETS.
-(define *bf-look-share* (new 'static 'array int32 5 45 13 12 18 13))
+;; Share of each look in its pool (`bf-caps-set!`): blue guards, red riflemen, red grenadiers, blue
+;; jetpack guards, red jetpack guards.
+(define *bf-look-share* (new 'static 'array int32 5 43 12 12 17 12))
+
+(defun bf-caps-set! ((n int))
+  "Each side's army cap from N units at once (the battle setup's, BF_AT_ONCE_MIN to BF_AT_ONCE_MAX):
+   the Freedom League 72 % blue guards and the rest blue jetpack guards, the Krimzon Guard a fifth each
+   of red riflemen, red grenadiers, red jetpack guards and robotguards, the rest spider robots; into
+   `*bf-team-caps*`, `*bf-look-share*` and the pools' `*bf-pool-caps*`."
+  (let* ((n (max BF_AT_ONCE_MIN (min BF_AT_ONCE_MAX n)))
+         (ff-guards (/ (+ (* n 72) 50) 100))
+         (ff-jets (- n ff-guards))
+         (k (/ n 5))
+         (spiders (- n (* 4 k)))
+         )
+    (set! (-> *bf-team-caps* 0) ff-guards)
+    (set! (-> *bf-team-caps* 1) ff-jets)
+    (set! (-> *bf-team-caps* 2) 0)
+    (set! (-> *bf-team-caps* 3) 0)
+    (set! (-> *bf-team-caps* 4) (* 2 k))
+    (set! (-> *bf-team-caps* 5) k)
+    (set! (-> *bf-team-caps* 6) k)
+    (set! (-> *bf-team-caps* 7) spiders)
+    (set! (-> *bf-look-share* 0) ff-guards)
+    (set! (-> *bf-look-share* 1) k)
+    (set! (-> *bf-look-share* 2) k)
+    (set! (-> *bf-look-share* 3) ff-jets)
+    (set! (-> *bf-look-share* 4) k)
+    (set! (-> *bf-pool-caps* 0) (+ ff-guards (* 2 k)))
+    (set! (-> *bf-pool-caps* 1) (+ ff-jets k))
+    (set! (-> *bf-pool-caps* 2) k)
+    (set! (-> *bf-pool-caps* 3) spiders)
+    )
+  (none)
+  )
 
 (defun bf-take-look ((look int))
   "Count one more unit of LOOK (it is being spawned) and return LOOK."
@@ -1446,10 +1479,10 @@
      at the Port it allowed 7 guards, 1 flying turret and no roboguard, and the battle starved."
   (if (bf-active?)
       (case (the-as traffic-type kind)
-        (((traffic-type guard-a)) BF_CAP_GUARDS)
-        (((traffic-type flying-turret)) BF_CAP_TURRETS)
-        (((traffic-type roboguard)) BF_CAP_ROBOGUARDS)
-        (((traffic-type spydroid)) BF_CAP_SPYDROIDS)
+        (((traffic-type guard-a)) (-> *bf-pool-caps* 0))
+        (((traffic-type flying-turret)) (-> *bf-pool-caps* 1))
+        (((traffic-type roboguard)) (-> *bf-pool-caps* 2))
+        (((traffic-type spydroid)) (-> *bf-pool-caps* 3))
         ;; no citizen on a battlefield: walkers, pilots, and their bikes and cars (the faction
         ;; commands leave some civilians to the faction manager's levels)
         (((traffic-type civilian-male)

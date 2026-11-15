@@ -118,15 +118,17 @@
 (deftype bf-config (structure)
   ((minutes  int32)   ;; time limit, 0 for none (`*bf-time-choices*`)
    (units    int32)   ;; units per side, 50 to 1000 by 50
+   (at-once  int32)   ;; units per side on the street at once, 30 to 100 by 10 (`bf-caps-set!`, round 41)
    (victory  int32)   ;; BF_WIN_POINTS or BF_WIN_UNITS
    (team-a   int32)   ;; the player's side, the top panel
    (team-b   int32)   ;; the other side, the bottom panel: never the same
    )
   )
 
-(define *bf-config* (new 'static 'bf-config :minutes 0 :units 500 :victory 0 :team-a 1 :team-b 0))
+(define *bf-config* (new 'static 'bf-config :minutes 0 :units 500 :at-once 60 :victory 0 :team-a 1 :team-b 0))
 (define *bf-time-choices* (new 'static 'array int32 6 0 5 10 15 20 30))
-(defconstant BF_CONFIG_COUNT 7) ;; the configuration page's rows: 4 settings, 2 sides, Next
+(defconstant BF_CONFIG_COUNT 8) ;; the configuration page's rows: 5 settings, 2 sides, Next
+(defconstant BF_CONFIG_SETTINGS 5)
 ;; Set once the debug boot opened the title page (`cpad-get-data`).
 (define *bf-boot-menu?* #f)
 ;; Set to let the next START through to the game's own menu (the pause page's last entry).
@@ -1928,6 +1930,8 @@
       (else
         (set! (-> *bf* zone) zone)
         (bf-zone-select! zone)
+        ;; the armies' caps from the setup's units at once (round 41)
+        (bf-caps-set! (-> *bf-config* at-once))
         (set! (-> *bf* team) team)
         (set! (-> *bf* class) class)
         (set! (-> *bf* weapon) BF_WEAPON_RIFLE)
@@ -3247,9 +3251,9 @@
 
 (defun bf-config-change ((row int) (step int))
   "Left (STEP -1) or Right (1) on row ROW of the configuration page (`*bf-config*`): the time limit
-   through `*bf-time-choices*`, the units per side by 50 from 50 to 1000, the victory condition,
-   the special characters (refused: none yet), the player's side or the other, each changing both
-   (two sides never the same)."
+   through `*bf-time-choices*`, the units per side by 50 from 50 to 1000, the units at once per side
+   by 10 from 30 to 100, the victory condition, the special characters (refused: none yet), the
+   player's side or the other, each changing both (two sides never the same)."
   (let ((c *bf-config*))
     (case row
       ((0)
@@ -3266,13 +3270,16 @@
        (set! (-> c units) (max 50 (min 1000 (+ (-> c units) (* 50 step)))))
        )
       ((2)
-       (set! (-> c victory) (- 1 (-> c victory)))
+       (set! (-> c at-once) (max BF_AT_ONCE_MIN (min BF_AT_ONCE_MAX (+ (-> c at-once) (* 10 step)))))
        )
       ((3)
+       (set! (-> c victory) (- 1 (-> c victory)))
+       )
+      ((4)
        (sound-play "menu-back")
        (return #f)
        )
-      ((4 5)
+      ((5 6)
        (set! (-> c team-a) (- 1 (-> c team-a)))
        (set! (-> c team-b) (- 1 (-> c team-a)))
        )
@@ -3297,9 +3304,10 @@
            )
        )
       ((1) (format *bf-text* "~D" (-> c units)))
-      ((2) (format *bf-text* (if (= (-> c victory) BF_WIN_POINTS) (bf-tr "Control points" "Contrôle des points") (bf-tr "Units wiped out" "Unités anéanties"))))
-      ((3) (format *bf-text* (bf-tr "No" "Non")))
-      ((4) (format *bf-text* "~S" (bf-team-name (-> c team-a))))
+      ((2) (format *bf-text* "~D" (-> c at-once)))
+      ((3) (format *bf-text* (if (= (-> c victory) BF_WIN_POINTS) (bf-tr "Control points" "Contrôle des points") (bf-tr "Units wiped out" "Unités anéanties"))))
+      ((4) (format *bf-text* (bf-tr "No" "Non")))
+      ((5) (format *bf-text* "~S" (bf-team-name (-> c team-a))))
       (else (format *bf-text* "~S" (bf-team-name (-> c team-b))))
       )
     *bf-text*
@@ -3431,7 +3439,7 @@
          (rh (fmin 50.0 (* 0.2 (-> *bf-frame* h))))
          )
     (bf-pheader buf (bf-tr "Battle setup" "Configuration de la bataille"))
-    (dotimes (i 4)
+    (dotimes (i BF_CONFIG_SETTINGS)
       (let ((y (+ (bf-fy 0.02) (* rh (the float i)))))
         (if (= i cur)
             (bf-pbox buf lx (+ y -2.0) lw (+ rh -6.0) (static-rgba 128 128 64 64))
@@ -3440,7 +3448,8 @@
                   (case i
                     ((0) (bf-tr "Time limit" "Limite de temps"))
                     ((1) (bf-tr "Units per side" "Unités par équipe"))
-                    ((2) (bf-tr "Victory" "Condition de victoire"))
+                    ((2) (bf-tr "Units at once per side" "Unités simultanées par équipe"))
+                    ((3) (bf-tr "Victory" "Condition de victoire"))
                     (else (bf-tr "Special characters" "Personnages spéciaux"))
                     )
                   (+ lx 4.0) y 0.36 (font-color font-color-32) #f (+ lw -8.0)
@@ -3449,7 +3458,7 @@
         (bf-draw-arrow buf (+ lx 4.0) (+ y 23.0) -1.0 (= i cur))
         (bf-ptext buf *bf-text* (+ lx (* 0.5 lw)) (+ y 17.0) 0.4
                   (cond
-                    ((= i 3) (font-color menu-invalid))
+                    ((= i 4) (font-color menu-invalid))
                     ((= i cur) (font-color font-color-33))
                     (else (font-color font-color-32))
                     )
@@ -3458,13 +3467,13 @@
         (bf-draw-arrow buf (+ lx lw -4.0) (+ y 23.0) 1.0 (= i cur))
         )
       )
-    (bf-ptext buf (bf-tr "Yes: coming soon" "Oui : à venir") (+ lx (* 0.5 lw)) (+ (bf-fy 0.02) (* 3.0 rh) 31.0) 0.3
+    (bf-ptext buf (bf-tr "Yes: coming soon" "Oui : à venir") (+ lx (* 0.5 lw)) (+ (bf-fy 0.02) (* 4.0 rh) 31.0) 0.3
               (font-color menu-invalid) #t lw
               )
     ;; the sides
     (dotimes (k 2)
       (let ((y (+ (bf-fy 0.04) (* 54.0 (the float k))))
-            (row (+ 4 k))
+            (row (+ BF_CONFIG_SETTINGS k))
             )
         (if (= row cur)
             (bf-pbox buf rx (+ y -2.0) rw 42.0 (static-rgba 128 128 64 64))
