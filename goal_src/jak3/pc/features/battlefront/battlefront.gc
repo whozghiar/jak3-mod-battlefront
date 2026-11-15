@@ -2523,19 +2523,37 @@
    After a battle, START for the title screen (`bf-title-press!`). Returns PAD."
   (bf-title-press! pad)
   ;; a guard jumps once, no second jump in the air; the robotguard does not jump (the author's
-  ;; wish, round 29): X off then. Not while a page or a menu is up (X picks there), nor dead
+  ;; wish, round 29): X off then. Not while a page or a menu is up (X picks there), nor dead. Since
+  ;; round 34 a guard's X held stays on in the air, so the jump rises as long as it is held: in the
+  ;; air X passes only when it was down the frame before (the pad's button0-abs 0, not yet updated
+  ;; here), a press with no edge; a new press in the air stays off (Jak's second jump)
   (when (and (zero? (-> pad number))
              (bf-fighting?)
              (not *popup-menu-open*)
              *target*
              (not (focus-test? *target* dead))
-             (or (= (-> *bf* class) BF_CLASS_ROBOGUARD)
-                 (and (bf-guard-class? (-> *bf* class))
-                      (or (not (logtest? (-> *target* control status) (collide-status on-surface))) (bf-target-airborne?))
-                      )
-                 )
              )
-    (set! (-> pad button0) (logclear (-> pad button0) (pad-buttons x)))
+    (let ((x? (logtest? (-> pad button0) (pad-buttons x))))
+      (cond
+        ((= (-> *bf* class) BF_CLASS_ROBOGUARD)
+         (set! (-> pad button0) (logclear (-> pad button0) (pad-buttons x)))
+         )
+        ((not (bf-guard-class? (-> *bf* class)))
+         0
+         )
+        ((not (or (not (logtest? (-> *target* control status) (collide-status on-surface))) (bf-target-airborne?)))
+         ;; on the ground: X as it is
+         0
+         )
+        ((and x? (logtest? (-> pad button0-abs 0) (pad-buttons x)))
+         ;; held since the frame before: the jump's rise goes on
+         0
+         )
+        (else
+          (set! (-> pad button0) (logclear (-> pad button0) (pad-buttons x)))
+          )
+        )
+      )
     )
   (when (and (zero? (-> pad number))
              (or (-> *bf* dropping?) (< (-> *display* game-clock frame-counter) (-> *bf* still-until)))

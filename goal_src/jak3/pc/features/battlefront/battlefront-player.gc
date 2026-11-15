@@ -54,7 +54,7 @@
 (defconstant BF_BOOST_TIME 10.0)            ;; seconds of spider sprint in a full blue eco gauge
 (defconstant BF_BOOST_SPEED 2.0)            ;; spider speed multiplier while it sprints
 (defconstant BF_SPIDER_LEAP_HEIGHT (meters 11)) ;; height of the spider robot's leap (X)
-(defconstant BF_ROLL_SPEED 3.6)             ;; robotguard speed multiplier as a ball (2.4 before round 25, 1.6 before round 22)
+(defconstant BF_ROLL_SPEED 5.4)             ;; robotguard speed multiplier as a ball (3.6 before round 34, 2.4 before round 25, 1.6 before round 22)
 (defconstant BF_FLAME_BOOST 1.8)            ;; the jetpack's flames this much longer while R2 boosts
 (defconstant BF_LAND_TIME (seconds 0.7))    ;; the class model's landing clip after a fall from the sky
 (defconstant BF_SALVO_GAP (seconds 0.12))   ;; between the two shots of a jetpack or robotguard salvo
@@ -136,10 +136,13 @@
 ;; Indexed by BF_CLASS_*. Jak (3) has no avatar; his entry draws his class page preview.
 (define *bf-class-art*
   (new 'static 'inline-array bf-class-art 8
+    ;; Speeds since round 34 (the author's wish: the player's classes as the units of round 33): the
+    ;; guards 1.4 times 1.425, the robotguard 2 times 1.05 on foot, the spider 1.6 times 2.25; the
+    ;; jetpacks kept.
     ;; blue guard: crimson-guard-ag idle 4, walk 5, run 6, jump-high 38, gun-attack 26; blast joint 14
     (new 'static 'bf-class-art :skel "skel-crimson-guard" :level 'ctypesa
          :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
-         :ammo BF_AMMO_YELLOW :speed 1.425 :height 3.8 :fire-delay (seconds 0.5))
+         :ammo BF_AMMO_YELLOW :speed 1.995 :height 3.8 :fire-delay (seconds 0.5))
     ;; blue jetpack: bf-hover-blue (battlefront-h.gc order); gun tips 9 and 11
     (new 'static 'bf-class-art :skel "skel-bf-hover-blue" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
@@ -156,7 +159,7 @@
     ;; red guard: same clip indices as the blue guard (custom_assets/jak3/models/models.jsonc)
     (new 'static 'bf-class-art :skel "skel-bf-red-guard" :level 'ctypesa
          :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
-         :ammo BF_AMMO_YELLOW :speed 1.425 :height 3.8 :fire-delay (seconds 0.5))
+         :ammo BF_AMMO_YELLOW :speed 1.995 :height 3.8 :fire-delay (seconds 0.5))
     ;; red jetpack
     (new 'static 'bf-class-art :skel "skel-bf-hover-red" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
@@ -165,11 +168,11 @@
     ;; punch-close-go 20; fists 11, 15
     (new 'static 'bf-class-art :skel "skel-roboguard-city" :level 'ctypesc
          :idle 3 :walk 10 :run 11 :jump 3 :shoot 5 :special 13 :melee 20 :gun0 11 :gun1 15
-         :ammo BF_AMMO_NONE :speed 1.05 :height 4.8 :fire-delay (seconds 0.9))
+         :ammo BF_AMMO_NONE :speed 2.1 :height 4.8 :fire-delay (seconds 0.9))
     ;; spider: spydroid-ag idle 3, walk 4, run 5, attack-jump 6 (its bite)
     (new 'static 'bf-class-art :skel "skel-spydroid" :level 'ctypesc
          :idle 3 :walk 4 :run 5 :jump 6 :shoot 6 :special 6 :melee 6 :gun0 -1 :gun1 -1
-         :ammo BF_AMMO_NONE :speed 2.25 :height 2.0 :fire-delay (seconds 0.8))
+         :ammo BF_AMMO_NONE :speed 3.6 :height 2.0 :fire-delay (seconds 0.8))
     )
   )
 
@@ -1443,21 +1446,39 @@
     )
   )
 
-;; Jak's jump, which a guard class jumps with (round 33, the author's wish: a little higher): the
-;; stock heights (target-util.gc *TARGET-bank*: 1.01 m tapped, 3.5 m held) times BF_JUMP_SCALE. A
-;; guard's X is off once Jak leaves the ground (battlefront.gc `bf-pad-lock!`: one jump, no second
-;; one), which also ends a held jump's rise: it always jumps the tapped height, 1.31 m now.
-(defconstant BF_JUMP_SCALE 1.3)
+;; Jak's jump, which a guard class jumps with: at least Jak's whole jump (the author's wish, round 34;
+;; round 33's 1.3 times his tapped hop, 1.31 m, was too low): a tap BF_JUMP_MIN, the stock held
+;; jump's height (target-util.gc *TARGET-bank*: 1.01 m tapped, 3.5 m held), X held up to
+;; BF_JUMP_MAX. X held keeps its rise; a new press in the air is off (battlefront.gc
+;; `bf-pad-lock!`: one jump, no second one).
+(defconstant BF_JUMP_MIN (meters 3.5))
+(defconstant BF_JUMP_MAX (meters 4.55))
 (defconstant BF_JUMP_MIN_STOCK (meters 1.01))
 (defconstant BF_JUMP_MAX_STOCK (meters 3.5))
 
 (defun bf-jump-set! ((higher? symbol))
   "Jak's jump heights (*TARGET-bank* jump-height-min and jump-height-max, which his jump reads as
-   it starts): HIGHER?, BF_JUMP_SCALE times the stock ones; else the stock ones. Side effect: the
-   game's target bank."
-  (let ((k (if higher? BF_JUMP_SCALE 1.0)))
-    (set! (-> *TARGET-bank* jump-height-min) (* k BF_JUMP_MIN_STOCK))
-    (set! (-> *TARGET-bank* jump-height-max) (* k BF_JUMP_MAX_STOCK))
+   it starts): HIGHER?, BF_JUMP_MIN and BF_JUMP_MAX; else the stock ones. Side effect: the game's
+   target bank."
+  (set! (-> *TARGET-bank* jump-height-min) (if higher? BF_JUMP_MIN BF_JUMP_MIN_STOCK))
+  (set! (-> *TARGET-bank* jump-height-max) (if higher? BF_JUMP_MAX BF_JUMP_MAX_STOCK))
+  (none)
+  )
+
+(defbehavior bf-avatar-mirror! bf-avatar ((on? symbol))
+  "ON?: the class model drawn mirrored left to right, as the stock draws half its enemies
+   (enemy.gc setup-enemy!: node 2's joint callback cspace<-parented-matrix-joint-flip-z!); else as
+   built. A guard's strafe to the left plays the strafe to the right mirrored (round 34, the
+   author's wish: jump-left, the clip of the stock guard's roll to its left, looked like a roll)."
+  (when (< 2 (-> self node-list length))
+    (let ((c (-> self node-list data 2)))
+      (set! (-> c param0) (the-as (function cspace transformq none)
+                                  (if on? cspace<-parented-matrix-joint-flip-z! cspace<-parented-matrix-joint!)
+                                  )
+            )
+      (set! (-> c param1) (the-as basic (if on? #f self)))
+      (set! (-> c param2) #f)
+      )
     )
   (none)
   )
@@ -1477,6 +1498,8 @@
    kneeling clip and aims steadier (`bf-avatar-spread`). GROUND? is Jak standing. Side effects:
    Jak's velocity, the avatar's dodge fields, the upper body's clip stopped."
   (let ((now (current-time)))
+    ;; a strafe to the left: the strafe to the right's clip, mirrored, while it lasts
+    (bf-avatar-mirror! (and (< now (-> self dodge-until)) (not (-> self roll?)) (= (-> self dodge-clip) BF_CLIP_DODGE_LEFT)))
     (set! (-> self crouch?) (and ground? (cpad-hold? 0 l1) (>= now (-> self dodge-until)) (>= now (-> self melee-until))))
     (cond
       ((< now (-> self dodge-until))
@@ -2251,8 +2274,13 @@
        (-> art special)
        )
       ((< (current-time) (-> self dodge-until))
-       ;; a guard's roll, tucked, or its dodge, its jump to that side (`bf-avatar-dodge`)
-       (if (-> self roll?) BF_CLIP_ROLL (-> self dodge-clip))
+       ;; a guard's roll, tucked, or its strafe, its jump to the right (to the left: the same clip,
+       ;; the model mirrored, `bf-avatar-dodge`)
+       (cond
+         ((-> self roll?) BF_CLIP_ROLL)
+         ((= (-> self dodge-clip) BF_CLIP_DODGE_LEFT) BF_CLIP_DODGE_RIGHT)
+         (else (-> self dodge-clip))
+         )
        )
       ((> (-> self throw-step) 0)
        ;; a guard's grenade throw: the stock guard's, on the whole body (`bf-avatar-throw-update`)
