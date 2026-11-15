@@ -1201,7 +1201,16 @@
    for a dark bomb), the spider's blue eco and the robotguard's roll in the light eco gauge (sprite
    1, the left half) in blue and in red. The battle keeps Jak's own light and dark eco at 0. Drawn
    before the ring, as the stock gauges, the ring's windows shape them; a sprite drawn after the
-   ring was hidden behind it (seen in game)."
+   ring was hidden behind it (seen in game). The spider's blast charge (`bf-nova-charge`, round 39)
+   fills its dark eco gauge in orange."
+  (let ((av (the-as bf-avatar (handle->process (-> *bf* avatar)))))
+    (when (and av (bf-fighting?) (= (-> *bf* class) BF_CLASS_SPYDROID))
+      (let ((pulse (+ 0.75 (* 0.25 (sin (degrees (the float (mod (-> *display* game-clock frame-counter) 360))))))))
+        (set! (-> hud sprites 2 scale-y) (* -9.7 (bf-nova-charge av)))
+        (set-vector! (-> hud sprites 2 color) (the int (* 128.0 pulse)) (the int (* 56.0 pulse)) (the int (* 8.0 pulse)) 128)
+        )
+      )
+    )
   (let ((level (if (bf-fighting?) (bf-class-gauge) -1.0)))
     (when (<= 0.0 level)
       (let ((dark? (or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK)))

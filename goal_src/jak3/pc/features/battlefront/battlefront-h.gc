@@ -512,13 +512,15 @@
          :desc (new 'static 'boxed-array :type string
                  "<PAD_X> 11 m leap"
                  "<PAD_SQUARE> Headbutt: a shock that jumps to 2 foes"
-                 "<PAD_R2> Blue eco sprint    <PAD_L1> Blow itself up"
+                 "<PAD_R2> Blue eco sprint"
+                 "<PAD_L1> Blow itself up (charged in 30 s, orange gauge)"
                  )
          :name-fr "Araignée robot"
          :desc-fr (new 'static 'boxed-array :type string
                     "<PAD_X> Bond de 11 m"
                     "<PAD_SQUARE> Coup de tête : un choc qui touche 2 ennemis de plus"
-                    "<PAD_R2> Sprint à l'éco bleue    <PAD_L1> S'autodétruire"
+                    "<PAD_R2> Sprint à l'éco bleue"
+                    "<PAD_L1> S'autodétruire (chargé en 30 s, jauge orange)"
                     )
          )
     )

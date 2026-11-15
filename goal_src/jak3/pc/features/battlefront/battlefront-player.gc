@@ -62,17 +62,21 @@
 (defconstant BF_SHIELD_RECHARGE (seconds 25)) ;; then it needs this long to come back
 (defconstant BF_SHIELD_SIZE 3.0)            ;; its radius in meters, centered 2.2 m above Jak's feet
 (defconstant BF_SHIELD_STRENGTH 1000)       ;; damage it takes before it breaks: never, it lasts its time
-(defconstant BF_LUNGE_RANGE (meters 7))     ;; spider lunge reach
+(defconstant BF_LUNGE_RANGE (meters 12))    ;; spider lunge reach (7 m until round 38; the author's wish, round 39)
 (defconstant BF_SPIDER_AIR (seconds 0.3))   ;; the spider airborne this long before its jump clip (a sprint's bumps leave the ground)
 (defconstant BF_ZAP_TIME (seconds 0.6))     ;; arcs around a shocked foe (`bf-avatar-zap-update`)
 (defconstant BF_ZAP_FINISH (seconds 1.1))   ;; a foe the shock left at 1 point is struck again then
 (defconstant BF_CHAIN_MAX 2)                ;; spider: foes its headbutt's shock jumps to besides the one struck (round 38)
 (defconstant BF_CHAIN_RANGE (meters 10))    ;; how near the one struck they stand (the Peace Maker's blast, gun-dark-shot.gc)
 (defconstant BF_CHAIN_GAP (seconds 0.1))    ;; between two foes shocked, as the Peace Maker's chain
-(defconstant BF_NOVA_RADIUS (meters 15))    ;; spider's L1 blast: foes within this die (the Super Nova's reach is 300 m)
-(defconstant BF_NOVA_SCALE 0.3)             ;; its dark sphere's size, of the Super Nova's (half of it, 5 m up,
-                                            ;; held the camera inside it: the screen washed out, seen in game)
-(defconstant BF_NOVA_LIFE (seconds 3))      ;; its sphere grows, then fades, this long (the Super Nova's 10 s)
+(defconstant BF_NOVA_RADIUS (meters 40))    ;; spider's L1 blast: foes within this die (15 m in round 38; the Super Nova's 300 m)
+(defconstant BF_NOVA_LIFE (seconds 6))      ;; its mushroom cloud grows, then fades, this long (the Super Nova's 10 s)
+(defconstant BF_NOVA_CHARGE (seconds 30))   ;; the blast is ready this long after the spider appears (round 39)
+(defconstant BF_NOVA_VIEW (seconds 5))      ;; the camera shows the blast from afar this long, the spider gone
+(defconstant BF_NOVA_CAM_DIST (meters 60))  ;; how far back it goes (the spider's camera: 5.5 m)
+(defconstant BF_NOVA_CAM_PITCH (degrees -50)) ;; looking down at the cloud this steeply (-30 went into the
+                                              ;; Industrial Zone's structures, seen in game)
+(defconstant BF_NOVA_CAM_TIME (seconds 0.6)) ;; it pulls back in this long
 (defconstant BF_CLIP_DIE 17)                ;; crimson-guard-ag die: a guard class's death (`bf-avatar-dying`)
 (defconstant BF_MELEE_RANGE (meters 5))     ;; reach of the close attacks (4 m until round 35)
 (defconstant BF_PUNCH_RANGE (meters 6.5))   ;; reach of the robotguard's punch (it stands 4.8 m tall)
@@ -253,6 +257,9 @@
    (fuel        float)          ;; jetpack boost gauge, 0 to 1 (refilled by dark eco only)
    (rocket-time time-frame)     ;; jetpack: its last rocket, robotguard: its last grenade (BF_ROCKET_DELAY before the next)
    (left-hand?  symbol)         ;; robotguard: its next grenade leaves its second fist (gun1), else its first
+   (nova-from   time-frame)     ;; spider: when its blast began to charge, on its clock (BF_NOVA_CHARGE); once blown up, when
+   (nova?       symbol)         ;; spider: it died in its own blast (the far camera, `bf-cam-rig-update`)
+   (nova-pos    vector :inline) ;; where
    (boost       float)          ;; spider blue eco, 0 to 1
    (was-ground? symbol)
    (shield?     symbol)         ;; robotguard: its shield is up
@@ -1412,36 +1419,82 @@
   (none)
   )
 
+(defun bf-nova-charge ((av bf-avatar))
+  "The spider's blast charge, 0 to 1: full BF_NOVA_CHARGE after it appeared (round 39, the author's
+   wish), on its clock (the HUD's runs on another one)."
+  (fmin 1.0 (/ (the float (- (-> av clock frame-counter) (-> av nova-from))) (the float BF_NOVA_CHARGE)))
+  )
+
+(defun bf-nova-strike ((at vector))
+  "The spider's blast at AT: every foe within BF_NOVA_RADIUS (never its own side) gets the Super
+   Nova's scorch mark and attack (`bf-send-attack-pen`, penetrate explode jak-dark-nuke, so each dies
+   as under it). Its own function, so that the actor list leaves the blast process's stack before
+   it suspends. Returns how many it struck."
+  (let ((probe (vector-copy! (new 'stack-no-clear 'vector) at))
+        (shapes (new 'stack-no-clear 'array 'collide-shape 128))
+        (n 0)
+        )
+    (set! (-> probe w) BF_NOVA_RADIUS)
+    (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 128))
+      (let ((shape (as-type (-> shapes i) collide-shape)))
+        (when shape
+          (let ((proc (-> shape process)))
+            (when (and (bf-foe? proc (-> *bf* team))
+                       (< (vector-vector-distance (-> (the-as process-focusable proc) root trans) at) BF_NOVA_RADIUS)
+                       )
+              (let ((mark (get-trans (the-as process-focusable proc) 1)))
+                (+! (-> mark y) 409.6)
+                (vector-copy! (-> *launch-matrix* trans) mark)
+                (part-tracker-spawn part-tracker :to *entity-pool* :group group-gun3-dark-scorched-earth)
+                )
+              (bf-send-attack-pen proc BF_DMG_NOVA (penetrate explode jak-dark-nuke))
+              (+! n 1)
+              )
+            )
+          )
+        )
+      )
+    n
+    )
+  )
+
 (defbehavior bf-avatar-nova bf-avatar ()
-  "Spider, L1 (round 38, the author's wish): it blows itself up as a small Super Nova, the dark gun
-   3's blast (gun-dark-shot.gc gun-dark-3-nuke impact-small and impact) without its white screen
-   and blur: a process at the spider's feet plays its explosion sound (pg3wxplo, streamed, queued at
-   once and played once ready, else the stock fallback), its shock rings, smoke and debris
-   (group-gun-dark3-ring: the wall blast's group-gun-dark3-small and the stalk's 17 to 30 m glows
-   washed the screen out from the spider's camera, seen in game), the
-   camera's shake and the pad's buzz, kills every foe within BF_NOVA_RADIUS (never its own side)
-   with its scorch mark and the Super Nova's attack (`bf-send-attack-pen`, penetrate explode
-   jak-dark-nuke, so each dies as under it; `*bf*` nova-kills counts them), then kills the player (a
-   deadly attack from the blast); its dark sphere (gun-dark-3-sphere, BF_NOVA_SCALE of the Super
-   Nova's size) grows and rises from 2 m up, then fades, over BF_NOVA_LIFE."
+  "Spider, L1 once charged (`bf-nova-charge`; round 38, the author's wish): it blows itself up as the
+   dark gun 3's Super Nova (gun-dark-shot.gc gun-dark-3-nuke impact) without its white screen and
+   blur, BF_NOVA_RADIUS across: a process at the spider's feet plays its explosion sound (pg3nxplo,
+   streamed, queued at once and played once ready, else the stock fallback), its mushroom cloud
+   (round 39: the stalk's column of smoke and glows, group-gun-dark3-stalk, under its dome,
+   gun-dark-3-sphere growing to the Super Nova's size from 5 m up, rising, then fading over
+   BF_NOVA_LIFE), its shock rings, smoke and debris (group-gun-dark3-ring), the camera's shake and
+   the pad's buzz; strikes every foe within reach (`bf-nova-strike`, `*bf*` nova-kills); then kills
+   the player (a deadly attack from the blast). The spider marks itself `nova?`: its model stays
+   hidden BF_NOVA_VIEW and the camera pulls back to show the cloud (`bf-cam-rig-update`). Up close,
+   the stalk's glows and the dome washed the screen out (round 38, seen in game): the camera is
+   far by then."
+  (set! (-> self nova?) #t)
+  (set-time! (-> self nova-from))
+  (vector-copy! (-> self nova-pos) (-> *target* control trans))
   (process-spawn-function
     process
     (lambda :behavior process
       ((pos vector))
-      ;; its locals (the actor list above all) outgrow a spawned function's 256 bytes kept at each
-      ;; suspend ("suspend called without enough stack", seen in game): 1 KB, set before anything
-      ;; else is allocated (game-save.gc does the same)
+      ;; more than a spawned function's 256 bytes kept at each suspend ("suspend called without
+      ;; enough stack", seen in game), set before anything else is allocated (game-save.gc does the
+      ;; same)
       (stack-size-set! (-> self main-thread) 1024)
       (let ((at (vector-copy! (new 'stack-no-clear 'vector) pos))
             (top (vector-copy! (new 'stack-no-clear 'vector) pos))
             (t0 (current-time))
-            (snd (add-process *gui-control* self (gui-channel gun) (gui-action queue) "pg3wxplo" -99.0 0))
+            (snd (add-process *gui-control* self (gui-channel gun) (gui-action queue) "pg3nxplo" -99.0 0))
             (played? #f)
             (sphere (the-as handle #f))
             )
         (sound-params-set! *gui-control* snd #t 50 150 11 -1.0)
-        (+! (-> top y) (meters 2))
-        ;; the burst, the shake, the buzz
+        ;; the dome starts 5 m up, as the Super Nova's mushroom top
+        (+! (-> top y) (meters 5))
+        ;; the cloud's column, the rings, the shake, the buzz
+        (vector-copy! (-> *launch-matrix* trans) at)
+        (part-tracker-spawn part-tracker :to *entity-pool* :group group-gun-dark3-stalk)
         (vector-copy! (-> *launch-matrix* trans) at)
         (part-tracker-spawn part-tracker :to *entity-pool* :group group-gun-dark3-ring)
         (activate! *camera-smush-control* 1228.8 45 1275 1.0 0.9 (-> *display* camera-clock))
@@ -1453,33 +1506,7 @@
           (set! (-> params alpha-val) 1.0)
           (set! sphere (ppointer->handle (process-spawn gun-dark-3-sphere params :name "gun-dark-3-sphere" :to self)))
           )
-        ;; the foes within BF_NOVA_RADIUS: the Super Nova's scorch mark and attack
-        (let ((probe (vector-copy! (new 'stack-no-clear 'vector) at))
-              (shapes (new 'stack-no-clear 'array 'collide-shape 64))
-              (n 0)
-              )
-          (set! (-> probe w) BF_NOVA_RADIUS)
-          (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 64))
-            (let ((shape (as-type (-> shapes i) collide-shape)))
-              (when shape
-                (let ((proc (-> shape process)))
-                  (when (and (bf-foe? proc (-> *bf* team))
-                             (< (vector-vector-distance (-> (the-as process-focusable proc) root trans) at) BF_NOVA_RADIUS)
-                             )
-                    (let ((mark (get-trans (the-as process-focusable proc) 1)))
-                      (+! (-> mark y) 409.6)
-                      (vector-copy! (-> *launch-matrix* trans) mark)
-                      (part-tracker-spawn part-tracker :to *entity-pool* :group group-gun3-dark-scorched-earth)
-                      )
-                    (bf-send-attack-pen proc BF_DMG_NOVA (penetrate explode jak-dark-nuke))
-                    (+! n 1)
-                    )
-                  )
-                )
-              )
-            )
-          (set! (-> *bf* nova-kills) n)
-          )
+        (set! (-> *bf* nova-kills) (bf-nova-strike at))
         ;; the spider dies in its blast
         (when *target*
           (let ((msg (new 'stack-no-clear 'event-message-block)))
@@ -1500,7 +1527,7 @@
             (send-event-function *target* msg)
             )
           )
-        ;; the sound once streamed in; the sphere grows, rises and fades
+        ;; the sound once streamed in; the dome grows, rises and fades
         (while (not (time-elapsed? t0 BF_NOVA_LIFE))
           (when (not played?)
             (cond
@@ -1519,15 +1546,18 @@
                )
               )
             )
+          ;; the Super Nova's mushroom top rises 2 m a second (gun-part.gc *gun-dark-3-mushroom-speed*)
           (+! (-> top y) (* 8192.0 (seconds-per-frame)))
           (let* ((f (/ (the float (- (current-time) t0)) (the float BF_NOVA_LIFE)))
                  (fade (fmax 0.0 (* 2.0 (- f 0.5))))
                  (params (new 'stack-no-clear 'gun-dark-3-sphere-init-params))
                  )
-            ;; the Super Nova's size curves (gun-part.gc): 8 to 12 m across, 4 to 5 m up
+            ;; the Super Nova's size (gun-part.gc: 8 to 12 m across, 4 to 5 m up), reached over the
+            ;; first 40 %, from small: at its stock size at once it held the camera, still close,
+            ;; inside it (the screen dark, seen in game); then it fades
             (vector-copy! (-> params pos) top)
-            (set! (-> params size-x) (* BF_NOVA_SCALE (lerp (meters 8) (meters 12) (fmin 1.0 (* 2.0 f)))))
-            (set! (-> params size-y) (* BF_NOVA_SCALE (lerp (meters 4) (meters 5) (fmin 1.0 (* 2.0 f)))))
+            (set! (-> params size-x) (lerp (meters 0.5) (meters 12) (fmin 1.0 (* 2.5 f))))
+            (set! (-> params size-y) (lerp (meters 0.3) (meters 5) (fmin 1.0 (* 2.5 f))))
             (set! (-> params alpha-val) (square (- 1.0 fade)))
             (send-event (handle->process sphere) 'set-pos-and-size params)
             )
@@ -2177,8 +2207,8 @@
          )
        )
       ((BF_CLASS_SPYDROID)
-       ;; L1 pressed: it blows itself up (`bf-avatar-nova`, round 38)
-       (if (and (bf-l1-pressed?) (not (-> self dying?)))
+       ;; L1 pressed: it blows itself up (`bf-avatar-nova`, round 38), once charged (round 39)
+       (if (and (bf-l1-pressed?) (not (-> self dying?)) (<= 1.0 (bf-nova-charge self)))
            (bf-avatar-nova)
            )
        ;; X from the ground: a leap BF_SPIDER_LEAP_HEIGHT high, a jump of Jak's own with his speed
@@ -2483,13 +2513,17 @@
          )
        )
       (else
-        ;; the robotguard, the spider
+        ;; the robotguard, the spider; a spider gone in its own blast (`bf-avatar-nova`) is only
+        ;; hidden, and stays BF_NOVA_VIEW for the far camera on the blast (`bf-cam-rig-update`)
         (case (-> self die-step)
           ((0)
            (cond
              ((= class BF_CLASS_ROBOGUARD)
               (sound-play "robo-explode")
               (bf-avatar-boom #t)
+              )
+             ((-> self nova?)
+              (logior! (-> self draw status) (draw-control-status no-draw))
               )
              (else
                (sound-play "spydroid-die")
@@ -2499,7 +2533,7 @@
            (set! (-> self die-step) 1)
            )
           (else
-            (if (< (seconds 1.2) t)
+            (if (< (if (-> self nova?) BF_NOVA_VIEW (seconds 1.2)) t)
                 (deactivate self)
                 )
             )
@@ -2665,7 +2699,8 @@
    rotation looks along the view (yaw, pitch), its place is behind the pivot (`bf-cam-pivot`) by
    1.6 times the class's height (5.5 m at least: the spider robot is low and wide), to its right
    by 0.3 times (over its right shoulder), and 0.8 m above, pulled in front of any wall or ground
-   between the pivot and there (a 0.4 m sphere probe). The stick aims as in a shooter: pushed right the view turns right, pushed up
+   between the pivot and there (a 0.4 m sphere probe). After the spider's blast it pulls back and up,
+   looking down at the cloud (round 39), short of any scenery on the way. The stick aims as in a shooter: pushed right the view turns right, pushed up
    it looks up, with the PC settings' third-person camera inversions at their defaults (pad.gc
    analog-input-horizontal-third). Those defaults keep the original game's camera, which swings
    around Jak the other way (seen in game: the stock camera turned the view left for the stick
@@ -2713,22 +2748,47 @@
     (let* ((art (bf-class-art-of (-> *bf* class)))
            (av (the-as bf-avatar (handle->process (-> *bf* avatar))))
            (dying? (and av (-> av dying?)))
+           ;; the spider's blast (round 39, the author's wish): from its press, the camera pulls back
+           ;; to BF_NOVA_CAM_DIST in BF_NOVA_CAM_TIME, looking down at the cloud (k 0 to 1)
+           (nova? (and av (-> av nova?)))
+           (k (if nova?
+                  (let ((u (fmin 1.0 (/ (the float (- (-> av clock frame-counter) (-> av nova-from))) (the float BF_NOVA_CAM_TIME)))))
+                    ;; from a stop to a stop
+                    (* u u (- 3.0 (* 2.0 u)))
+                    )
+                  0.0
+                  )
+              )
            (yaw (-> *bf* view-yaw))
            ;; the class model dying: the camera looks down at it, centered (round 28: kept over the
            ;; shoulder and level, it framed the body at the bottom left, under the HUD)
-           (pitch (if dying? BF_DEATH_PITCH (-> *bf* view-pitch)))
+           (pitch (cond
+                    (nova? (lerp (-> *bf* view-pitch) BF_NOVA_CAM_PITCH k))
+                    (dying? BF_DEATH_PITCH)
+                    (else (-> *bf* view-pitch))
+                    )
+                  )
            (mat (-> self cam-bone transform))
            (fwd (new 'stack-no-clear 'vector))
            (pivot (bf-cam-pivot (new 'stack-no-clear 'vector)))
            (want (new 'stack-no-clear 'vector))
            (cq (new 'stack-no-clear 'collide-query))
            )
-      (if dying?
-          (set! (-> pivot y) (+ (-> *target* control trans y) (meters 0.6)))
-          )
+      (cond
+        (nova?
+         ;; the cloud's middle, 10 m over the blast at the end
+         (vector-copy! pivot (-> av nova-pos))
+         (+! (-> pivot y) (lerp (meters 1.6) (meters 10) k))
+         )
+        (dying?
+         (set! (-> pivot y) (+ (-> *target* control trans y) (meters 0.6)))
+         )
+        )
       (set-vector! fwd (* (sin yaw) (cos pitch)) (sin pitch) (* (cos yaw) (cos pitch)) 1.0)
       (forward-down->inv-matrix mat fwd (new 'static 'vector :y -1.0 :w 1.0))
-      (vector+float*! want pivot fwd (- (* *bf-cam-zoom* (fmax (meters 5.5) (* 1.6 (meters 1) (-> art height))))))
+      (let ((dist (* *bf-cam-zoom* (fmax (meters 5.5) (* 1.6 (meters 1) (-> art height))))))
+        (vector+float*! want pivot fwd (- (lerp dist BF_NOVA_CAM_DIST k)))
+        )
       ;; rvec points to the screen's left (`bf-view-right`): the camera goes the other way
       (if (not dying?)
           (vector+float*! want want (-> mat rvec) (* -0.3 (meters 1) (-> art height)))
@@ -2742,6 +2802,7 @@
       (set! (-> cq action-mask) (collide-action solid))
       (vector-copy! (-> cq start-pos) pivot)
       (vector-! (-> cq move-dist) want pivot)
+      ;; the blast's far view too: without the probe it went into the scenery (seen in game)
       (let ((t (fill-and-probe-using-line-sphere *collide-cache* cq)))
         (if (>= t 0.0)
             (vector+float*! want pivot (-> cq move-dist) t)
@@ -3367,6 +3428,8 @@
   (set! (-> self fuel) 1.0)
   (set! (-> self rocket-time) 0)
   (set! (-> self left-hand?) #f)
+  (set! (-> self nova-from) (-> self clock frame-counter))
+  (set! (-> self nova?) #f)
   ;; a jetpack guard's rockets, a full load each life
   (set! (-> *bf* rockets) BF_ROCKETS)
   (set! (-> self boost) 1.0)
