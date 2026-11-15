@@ -305,13 +305,10 @@
 ;; (docs/modding/current_mod/battlefront_smoke.gc reads and clears it).
 (define *bf-drops-at* (new 'static 'array int32 34)) ;; 2 BF_POINT_MAX
 
-(defconstant BF_DEFEND_REACH (meters 60))  ;; foes this close to a held point attack it (battlefront-city.gc BF_ZONE_REACH)
-(defconstant BF_DEFEND_SHARE 0.5)          ;; share of a side's units brought to its points under attack
-
 (defun bf-transport-point-ok? ((team int) (i int))
-  "#t when side TEAM's units can come down at point I: its base with its ship over it, or a control
-   point it holds in a loaded section (battlefront.gc `bf-point-live?`), where they appear on the
-   nav meshes around it (battlefront-city.gc `bf-city-spawn-near`)."
+  "#t when side TEAM's units can come down at point I: one of its headquarters with its ship over
+   it, or a control point it holds in a loaded section (battlefront.gc `bf-point-live?`), where they
+   appear on the nav meshes around it (battlefront-city.gc `bf-city-spawn-near`)."
   (let ((pt (-> *bf* points i)))
     (and (= (-> pt owner) team)
          (if (-> pt base?)
@@ -322,132 +319,49 @@
     )
   )
 
-(defun bf-transport-forward-ok? ((team int) (i int))
-  "#t when side TEAM's forward ship hovers over point I, a neutral control point in a loaded section,
-   come down with its hatch open (battlefront-city.gc `bf-city-forward-ships`): its units come down
-   there from that ship."
-  (let* ((pt (-> *bf* points i))
-         (ship (handle->process (-> pt ship)))
-         )
-    (and ship
-         (not (-> pt base?))
-         (= (-> pt owner) BF_TEAM_NONE)
-         (bf-point-live? pt)
-         (= (-> (the-as bf-transport ship) team) team)
-         (let ((st (-> ship next-state)))
-           (and st (= (-> st name) 'idle))
-           )
-         )
-    )
-  )
-
-(defun bf-transport-forward-point ((team int) (k int))
-  "The point under side TEAM's forward ship number K (0 or 1, in point order) ready to drop its units
-   (`bf-transport-forward-ok?`), -1 for none."
-  (let ((found -1)
-        (n 0)
-        )
-    (dotimes (i (-> *bf* point-count))
-      (when (and (< found 0) (bf-transport-forward-ok? team i))
-        (if (= n k)
-            (set! found i)
-            )
-        (+! n 1)
-        )
-      )
-    found
-    )
-  )
-
-;; Each side's place in the cycle of its drops (`bf-transport-drop-point`): 0 the point drawn
-;; (`bf-transport-draw`), 1 and 2 its forward ships, so that its three ships share its units (round 41).
-(define *bf-drop-cycle* (new 'static 'array int32 2 0 0))
-
 (defun bf-transport-draw ((team int))
-  "The point where side TEAM's next units come down (`bf-transport-point-ok?`), -1 for none. A point
-   under attack (a foe within BF_DEFEND_REACH: a unit, `*bf-unit-dots*`, or the player) gets
-   BF_DEFEND_SHARE of the units, the one with the most foes; the rest come down at its most advanced
-   control point, the nearest the other side's base, its base while it holds none. The point in
-   `*bf-drop-skip*` is passed over while another one is there."
-  (let ((dots *bf-unit-dots*)
-        (foe? (and *target* (!= (-> *bf* team) team) (not (focus-test? *target* dead))))
-        (their-base (-> *bf* points (bf-other-team team) pos))
-        (ahead -1)
-        (ahead-d 0.0)
-        (base -1)
-        (attacked -1)
-        (attackers 0)
-        (skip (-> *bf-drop-skip* team))
+  "The point where side TEAM's next units come down (`bf-transport-point-ok?`), drawn at random
+   among all those it can use: its headquarters, under their ships, and the control points it holds
+   (round 42, the author's wish: every unit came down at the most advanced point, or at an attacked
+   one half the time). The point in `*bf-drop-skip*` is passed over while another one is there. -1
+   for none."
+  (let ((skip (-> *bf-drop-skip* team))
+        (n 0)
+        (others 0)
+        (pick -1)
         )
     (set! (-> *bf-drop-skip* team) -1)
-    (dotimes (pass 2)
-      (when (and (< ahead 0) (< base 0))
+    (dotimes (i (-> *bf* point-count))
+      (when (bf-transport-point-ok? team i)
+        (+! n 1)
+        (if (!= i skip)
+            (+! others 1)
+            )
+        )
+      )
+    (when (> n 0)
+      (let ((k (rand-vu-int-count (if (> others 0) others n))))
         (dotimes (i (-> *bf* point-count))
-          (when (and (bf-transport-point-ok? team i) (or (= pass 1) (!= i skip)))
-            (let ((pos (-> *bf* points i pos))
-                  (n 0)
-                  )
-              (dotimes (d (-> dots count))
-                (if (and (!= (-> dots team d) team) (< (vector-vector-xz-distance (-> dots pos d) pos) BF_DEFEND_REACH))
-                    (+! n 1)
-                    )
+          (when (and (< pick 0) (bf-transport-point-ok? team i) (or (zero? others) (!= i skip)))
+            (if (zero? k)
+                (set! pick i)
                 )
-              (if (and foe? (< (vector-vector-xz-distance (-> *target* control trans) pos) BF_DEFEND_REACH))
-                  (+! n 1)
-                  )
-              (when (< attackers n)
-                (set! attacked i)
-                (set! attackers n)
-                )
-              (cond
-                ((-> *bf* points i base?)
-                 (set! base i)
-                 )
-                (else
-                  (let ((d (vector-vector-xz-distance pos their-base)))
-                    (when (or (< ahead 0) (< d ahead-d))
-                      (set! ahead i)
-                      (set! ahead-d d)
-                      )
-                    )
-                  )
-                )
-              )
+            (+! k -1)
             )
           )
         )
       )
-    (cond
-      ((and (>= attacked 0) (< (rand-vu) BF_DEFEND_SHARE))
-       attacked
-       )
-      ((>= ahead 0)
-       ahead
-       )
-      (else
-        base
-        )
-      )
+    pick
     )
   )
 
 (defun bf-transport-drop-point ((team int))
-  "The point side TEAM's next units come down at (`*bf-drop-turn*`), chosen again when there is none
-   or it no longer serves (`bf-transport-point-ok?`, `bf-transport-forward-ok?`): in turn
-   (`*bf-drop-cycle*`) the point drawn (`bf-transport-draw`), its first forward ship's and its
-   second's, the draw when that ship is not there. -1 for none."
+  "The point side TEAM's next units come down at (`*bf-drop-turn*`), drawn again
+   (`bf-transport-draw`) when there is none or it no longer serves (`bf-transport-point-ok?`). -1
+   for none."
   (let ((turn (-> *bf-drop-turn* team)))
-    (when (or (< turn 0)
-              (>= turn (-> *bf* point-count))
-              (not (or (bf-transport-point-ok? team turn) (bf-transport-forward-ok? team turn)))
-              )
-      (let ((cycle (mod (+ (-> *bf-drop-cycle* team) 1) 3)))
-        (set! (-> *bf-drop-cycle* team) cycle)
-        (set! turn (if (> cycle 0) (bf-transport-forward-point team (+ cycle -1)) -1))
-        )
-      (if (< turn 0)
-          (set! turn (bf-transport-draw team))
-          )
+    (when (or (< turn 0) (>= turn (-> *bf* point-count)) (not (bf-transport-point-ok? team turn)))
+      (set! turn (bf-transport-draw team))
       (set! (-> *bf-drop-turn* team) turn)
       )
     turn
@@ -455,8 +369,8 @@
   )
 
 (defun bf-transport-my-turn? ((this bf-transport))
-  "#t when ship THIS (over its side's base, or its forward ship over a neutral control point) is
-   where its side's next units come down (`bf-transport-drop-point`)."
+  "#t when ship THIS (over one of its side's headquarters) is where its side's next units come down
+   (`bf-transport-drop-point`)."
   (= (bf-transport-drop-point (-> this team)) (-> this point))
   )
 

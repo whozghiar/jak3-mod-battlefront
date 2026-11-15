@@ -1,7 +1,7 @@
 """Make the Battlefront gun HUD's pixel-art icons (goal_src/jak3/pc/features/battlefront/battlefront-icons.gc).
 
 Each source is one of the mod author's pixel-art drawings on black (ICONS). Its art pixels are CELL
-picture pixels wide: each is sampled at its middle, the colors are reduced to COLORS, the black
+picture pixels wide, on a grid found in the picture (`grid_phase`): each is sampled at its middle, the colors are reduced to COLORS, the black
 around the drawing (dark art pixels reached from its border) is left out, the icon is cropped to
 the drawing, and each row is cut into runs of one color. An icon with a tint has its colors tinted (TINT), each keeping its brightness
 against the most used one. The gun HUD draws each run as a flat rectangle (battlefront.gc
@@ -12,6 +12,7 @@ Usage: python scripts/battlefront/make_hud_icons.py
 
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,8 +26,8 @@ TINT = (125, 102, 150)  # the dark gun's HUD icon (the game's hud-gunpurple-03a 
 
 # name in the GOAL file, source picture, tint (None: its own colors)
 ICONS = [
-    ("rocket", HERE / "rocket-icon.png", TINT),    # the jetpack's rockets (round 36, purple since 37)
-    ("grenade", HERE / "grenade-icon.png", None),  # the robotguard's grenades (round 38)
+    ("rocket", HERE / "rocket-icon.png", None),    # the jetpack's rockets (round 36, purple since 37; the author's purple drawing since 42)
+    ("grenade", HERE / "grenade-icon.png", None),  # the robotguard's grenades (round 38; the author's new drawing since 42)
 ]
 
 
@@ -50,16 +51,39 @@ def background(art):
     return seen
 
 
+def grid_phase(src):
+    """Where the drawing's art pixels start (x, y offsets, 0 to CELL - 1): the offsets whose cells
+    hold the most even colors. A drawing whose grid is off the picture's corner sampled its
+    one-pixel outline on its edges, which then vanished (round 42's rocket)."""
+    a = np.asarray(src, dtype=np.float32)
+
+    def spread(offset, axis):
+        # the colors' change between neighbours inside the cells, along one axis
+        d = np.abs(np.diff(a, axis=axis)).sum(axis=2)
+        n = d.shape[axis]
+        inside = [(i - offset) % CELL != CELL - 1 for i in range(n)]
+        return d.take(np.nonzero(inside)[0], axis=axis).sum()
+
+    return (min(range(CELL), key=lambda o: spread(o, 1)), min(range(CELL), key=lambda o: spread(o, 0)))
+
+
 def runs_of(src):
     """The icon's size in art pixels, its colors (r, g, b) and its runs (x, y, length, color)."""
-    w, h = round(src.width / CELL), round(src.height / CELL)
+    ox, oy = grid_phase(src)
+    w, h = (src.width - ox) // CELL, (src.height - oy) // CELL
     art = Image.new("RGB", (w, h))
     for y in range(h):
         for x in range(w):
-            sx = min(src.width - 1, int((x + 0.5) * src.width / w))
-            sy = min(src.height - 1, int((y + 0.5) * src.height / h))
+            sx = min(src.width - 1, ox + x * CELL + CELL // 2)
+            sy = min(src.height - 1, oy + y * CELL + CELL // 2)
             art.putpixel((x, y), src.getpixel((sx, sy)))
     back = background(art)
+    # the dark art pixels pure black: the near-blacks of a smoothed picture took the palette's
+    # colors, the drawing's own tones one (round 42's rocket lost its outline)
+    for y in range(h):
+        for x in range(w):
+            if max(art.getpixel((x, y))) <= BLACK:
+                art.putpixel((x, y), (0, 0, 0))
     q = art.quantize(colors=COLORS + 1, method=Image.Quantize.MEDIANCUT)
     pal, idx = q.getpalette(), q.load()
     used, runs = {}, []

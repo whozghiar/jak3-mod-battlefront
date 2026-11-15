@@ -118,7 +118,7 @@
 (deftype bf-config (structure)
   ((minutes  int32)   ;; time limit, 0 for none (`*bf-time-choices*`)
    (units    int32)   ;; units per side, 50 to 1000 by 50
-   (at-once  int32)   ;; units per side on the street at once, 30 to 100 by 10 (`bf-caps-set!`, round 41)
+   (at-once  int32)   ;; units per side on the street at once, 30 to 100 by 10 (`bf-caps-set!`, round 41), 60 by default (100 crashed in long fights, round 42)
    (victory  int32)   ;; BF_WIN_POINTS or BF_WIN_UNITS
    (team-a   int32)   ;; the player's side, the top panel
    (team-b   int32)   ;; the other side, the bottom panel: never the same
@@ -549,8 +549,8 @@
   (cond
     ((= page BF_PAGE_PAUSE) BF_PAUSE_COUNT)
     ((= page BF_PAGE_CONFIG) BF_CONFIG_COUNT)
-    ;; the war zones, then Spargus, to come (grey, refused); Triangle goes back
-    ((= page BF_PAGE_ZONE) (+ BF_ZONE_COUNT 1))
+    ;; the war zones from BF_ZONE_FIRST, then Spargus, to come (grey, refused); Triangle goes back
+    ((= page BF_PAGE_ZONE) (+ (- BF_ZONE_COUNT BF_ZONE_FIRST) 1))
     ((= page BF_PAGE_TEAM) BF_TEAM_COUNT)
     ;; the Freedom League's third and fourth classes, the Spargus Citizen and Jak, are no longer
     ;; playable
@@ -560,12 +560,18 @@
     )
   )
 
+(defun bf-row-zone ((row int))
+  "The war zone on row ROW of the war zone page: the zones from BF_ZONE_FIRST (Jak 3's city no
+   longer offered, round 42), then BF_ZONE_COUNT for Spargus, to come."
+  (+ row BF_ZONE_FIRST)
+  )
+
 (defun bf-page-label ((page int) (team int) (i int))
-  "Label of choice I of PAGE (TEAM picks the classes)."
+  "Label of choice I of PAGE (TEAM picks the classes; a war zone page's row, `bf-row-zone`)."
   (cond
     ((= page BF_PAGE_ZONE)
      (cond
-       ((< i BF_ZONE_COUNT) (bf-zone-name i))
+       ((< (bf-row-zone i) BF_ZONE_COUNT) (bf-zone-name (bf-row-zone i)))
        (else (bf-tr "Spargus (coming soon)" "Spargus (à venir)"))
        )
      )
@@ -577,7 +583,10 @@
   )
 
 (defun bf-page-desc ((page int) (team int) (i int))
-  "Description of choice I of PAGE."
+  "Description of choice I of PAGE (a war zone page's row, `bf-row-zone`)."
+  (if (= page BF_PAGE_ZONE)
+      (set! i (bf-row-zone i))
+      )
   (cond
     ((and (= page BF_PAGE_ZONE) (< i BF_ZONE_COUNT) (not (bf-zone-open? i)))
      (bf-tr "Made from your own Jak 2: install Jak 2 in the OpenGOAL Launcher, then reinstall this mod."
@@ -995,27 +1004,27 @@
 (define *bf-gun-text* (new 'global 'string 32 (the-as string #f)))
 
 
-;; The icons' widths on the 512-unit screen: the rocket a little under the stock gun icon's 128 (the
-;; author's wish, round 37), the robotguard's grenade, a shorter drawing, narrower (round 38).
-(defconstant BF_ROCKET_ICON_DRAW_W 100.0)
-(defconstant BF_GRENADE_ICON_DRAW_W 64.0)
+(defconstant BF_GUN_ICON_STRETCH 1.22) ;; the stock gun icon's width on screen over hud.gc's for its sprite (measured, round 42)
 
-(defun bf-draw-pixel-icon ((buf dma-buffer) (cx float) (cy float) (grenade? symbol))
-  "One of the gun HUD's pixel-art icons into BUF (a direct bucket), centered on CX, CY (the 512 x 416
-   screen of the HUD's sprites), its art pixels square on the display (`bf-x-squeeze`): the jetpack's
-   rocket, BF_ROCKET_ICON_DRAW_W across, or with GRENADE? the robotguard's grenade,
-   BF_GRENADE_ICON_DRAW_W across. Each is one of the author's drawings (battlefront-icons.gc, made by
-   scripts/battlefront/make_hud_icons.py) as one flat sprite per run of one color, all in one GIF
-   packet (draw-sprite2d-xy's, display.gc, looped). A texture uploaded as the L3 map's never
-   showed in a fight, whatever its bucket."
+(defun bf-draw-pixel-icon ((buf dma-buffer) (bx float) (by float) (bw float) (bh float) (grenade? symbol))
+  "One of the gun HUD's pixel-art icons into BUF (a direct bucket): the jetpack's rocket, or with
+   GRENADE? the robotguard's grenade, as large as it fits in the box from BX, BY (its top left, on
+   the 512 x 416 screen of the HUD's sprites), BW across and BH down, and centered in it, its art
+   pixels square on the display (`bf-x-squeeze`). Each is one of the author's drawings
+   (battlefront-icons.gc, made by scripts/battlefront/make_hud_icons.py) as one flat sprite per run
+   of one color, all in one GIF packet (draw-sprite2d-xy's, display.gc, looped). A texture uploaded
+   as the L3 map's never showed in a fight, whatever its bucket."
   (let* ((colors (if grenade? *bf-grenade-icon-colors* *bf-rocket-icon-colors*))
          (runs (if grenade? *bf-grenade-icon-runs* *bf-rocket-icon-runs*))
          (count (if grenade? BF_GRENADE_ICON_RUNS BF_ROCKET_ICON_RUNS))
-         (draw-w (if grenade? BF_GRENADE_ICON_DRAW_W BF_ROCKET_ICON_DRAW_W))
-         (px (/ draw-w (the float (if grenade? BF_GRENADE_ICON_W BF_ROCKET_ICON_W))))
-         (py (/ px (bf-x-squeeze)))
-         (x0 (- cx (* 0.5 draw-w)))
-         (y0 (- cy (* 0.5 py (the float (if grenade? BF_GRENADE_ICON_H BF_ROCKET_ICON_H)))))
+         (aw (the float (if grenade? BF_GRENADE_ICON_W BF_ROCKET_ICON_W)))
+         (ah (the float (if grenade? BF_GRENADE_ICON_H BF_ROCKET_ICON_H)))
+         (sq (bf-x-squeeze))
+         ;; an art pixel PX units across and PX / SQ down: the largest that fits in the box
+         (px (fmin (/ bw aw) (/ (* sq bh) ah)))
+         (py (/ px sq))
+         (x0 (+ bx (* 0.5 (- bw (* px aw)))))
+         (y0 (+ by (* 0.5 (- bh (* py ah)))))
          (pkt (the-as dma-packet (-> buf base)))
          )
     ;; the DMA tag and the VIF direct count the GIF tag and 2 quadwords a run
@@ -1052,18 +1061,33 @@
 
 (defun bf-draw-rocket-hud ((buf dma-buffer))
   "The director's HUD, each frame of a fight: into BUF, a jetpack guard's rocket icon or a
-   robotguard's grenade icon (round 38) where the gun HUD shows a weapon's (`bf-draw-pixel-icon`),
-   while that HUD is up (not hidden), placed from its sprite 0 (the stock reticle at the icon's right
-   end: the icon's middle 52 units left of it, 9 below its top, where the stock icon was measured),
-   which moves as the HUD slides in. Its count and shells are the gun HUD's (`bf-draw-gun-ammo`)."
+   robotguard's grenade icon (round 38) in the box of the stock weapon icon the gun HUD shows and
+   hides for them (`*bf-hud-weapons*`: its sprite 1, the red gun's), as the screen shows that icon
+   (round 42, the author's wish: placed and sized from its reticle before, they stood higher and
+   drawn larger than the weapons'): from its sprite 1's top down its texture's height times its
+   scale, and across BF_GUN_ICON_STRETCH times its texture's width times its scale and
+   relative-x-scale, ending at its sprite 0's position. Measured on screenshots of the stock icon
+   in two screen shapes (relative-x-scale 1 and 0.53, round 42's tests): its right end at sprite
+   0's position, 1.22 times as wide as hud.gc's hud-sprite draw gives sprite 1 (the cause is not
+   found). While that HUD is up (not hidden), moving with it as it slides in
+   (`bf-draw-pixel-icon`). Its count and shells are the gun HUD's (`bf-draw-gun-ammo`)."
   (let ((weapon (bf-gun-hud-weapon)))
     (when (and *target* (or (= weapon BF_WEAPON_ROCKET) (= weapon BF_WEAPON_BOT_GRENADE)))
       (let ((hg (the-as hud-gun (process-by-name "hud-gun" *target*))))
-        (if (and hg (not (hidden? hg)))
-            (bf-draw-pixel-icon buf (+ -52.0 (the float (-> hg sprites 0 pos x))) (+ 9.0 (the float (-> hg sprites 0 pos y)))
-                                (= weapon BF_WEAPON_BOT_GRENADE)
-                                )
+        (when (and hg (not (hidden? hg)))
+          (let* ((spr (-> hg sprites 1))
+                 (tex (-> spr tex))
+                 )
+            (when (and tex (nonzero? tex))
+              (let ((w (* BF_GUN_ICON_STRETCH (the float (-> tex w)) (-> spr scale-x) (-> *video-params* relative-x-scale))))
+                (bf-draw-pixel-icon buf (- (the float (-> hg sprites 0 pos x)) w) (the float (-> spr pos y))
+                                    w (* (the float (-> tex h)) (-> spr scale-y))
+                                    (= weapon BF_WEAPON_BOT_GRENADE)
+                                    )
+                )
+              )
             )
+          )
         )
       )
     )
@@ -1112,8 +1136,11 @@
                 (the-as texture-id (cond
                                      ((>= i full) (get-texture hud-gun-empty-shell-01 level-default-minimap))
                                      (rifle? (get-texture hud-gun-yellow-shell-01 level-default-minimap))
-                                     ;; the robotguard's grenades, the dark ammo they come from (round 38)
-                                     ((= weapon BF_WEAPON_BOT_GRENADE) (get-texture hud-gun-purple-shell-01 level-default-minimap))
+                                     ;; the robotguard's grenades (round 38) and the jetpack's rockets (round 42, the
+                                     ;; author's wish: red until then), the dark ammo they come from
+                                     ((or (= weapon BF_WEAPON_BOT_GRENADE) (= weapon BF_WEAPON_ROCKET))
+                                      (get-texture hud-gun-purple-shell-01 level-default-minimap)
+                                      )
                                      (else (get-texture hud-gun-red-shell-01 level-default-minimap))
                                      )
                         )
@@ -1457,18 +1484,21 @@
   )
 
 (defun bf-points-setup ()
-  "The battle's points as its fight starts: the two bases at the sides' spawns (`*bf*` spawn, point
-   0 the Freedom League's, 1 the Krimzon Guard's), then a control point in each district, neutral,
-   where `*bf-point-defs*` puts it."
+  "The battle's points as its fight starts: the bases (`*bf-base-count*`, an even point the Freedom
+   League's, an odd one the Krimzon Guard's) on their continue points (`*bf-point-defs*`; a missing
+   one at its side's spawn, `*bf*` spawn), then a control point in each district, neutral, where
+   `*bf-point-defs*` puts it."
   (set! (-> *bf* point-count) (-> *bf-point-defs* length))
   (set! (-> *bf* respawn-pick) -1)
   (set! (-> *bf* point-time) 0)
   (dotimes (i (-> *bf* point-count))
     (let ((pt (-> *bf* points i)))
       (cond
-        ((< i 2)
-         (vector-copy! (-> pt pos) (-> *bf* spawn i))
-         (set! (-> pt owner) i)
+        ((< i *bf-base-count*)
+         (let ((cont (get-continue-by-name *game-info* (-> *bf-point-defs* i continue))))
+           (vector-copy! (-> pt pos) (if cont (-> cont trans) (-> *bf* spawn (logand i 1))))
+           )
+         (set! (-> pt owner) (logand i 1))
          (set! (-> pt base?) #t)
          )
         (else
@@ -1658,10 +1688,24 @@
   (none)
   )
 
+(defun bf-capture-speed ((pt bf-point))
+  "How many times faster than BF_CAPTURE_TIME a side's majority captures point PT (round 42, the
+   author's wish): a neutral point 1 time plus BF_CAPTURE_STEP for each unit of the majority past
+   the first (its units within BF_POINT_RADIUS less the other side's, `*bf*` near), at most
+   BF_CAPTURE_TIME / BF_CAPTURE_MIN_TIME (10 s: a majority of 9); a point the other side holds 1."
+  (if (= (-> pt owner) BF_TEAM_NONE)
+      (fmin (/ BF_CAPTURE_TIME BF_CAPTURE_MIN_TIME)
+            (+ 1.0 (* BF_CAPTURE_STEP (the float (max 0 (+ (abs (- (-> pt near BF_TEAM_FF) (-> pt near BF_TEAM_KG))) -1)))))
+            )
+      1.0
+      )
+  )
+
 (defun bf-update-points ()
   "Four times a second during a fight: each control point's capture. In a loaded section
    (`bf-point-live?`) the side with more units within BF_POINT_RADIUS (`bf-point-count`) captures
-   it: its progress grows by the time gone by, and at BF_CAPTURE_TIME seconds the point is its.
+   it: its progress grows by the time gone by, faster on a neutral point the larger the majority
+   (`bf-capture-speed`), and at BF_CAPTURE_TIME seconds the point is its.
    Another side's capture under way is first taken back down to zero; a tie, or no one, holds it;
    the holder's majority takes a capture back down. Away from the player, `bf-point-away`."
   (when (or (zero? (-> *bf* point-time)) (time-elapsed? (-> *bf* point-time) (seconds 0.25)))
@@ -1706,7 +1750,7 @@
                  )
                 (else
                   (set! (-> pt prog-team) major)
-                  (+! (-> pt progress) dt)
+                  (+! (-> pt progress) (* dt (bf-capture-speed pt)))
                   (when (>= (-> pt progress) BF_CAPTURE_TIME)
                     (set! (-> pt owner) major)
                     (set! (-> pt progress) 0.0)
@@ -1866,7 +1910,7 @@
     (bf-draw-box buf 352 96 150 120)
     (bf-draw-text buf (bf-tr "RESPAWN" "RÉAPPARITION") 427.0 104.0 0.5 (font-color menu-parent) #t)
     (clear *bf-text*)
-    (format *bf-text* "~S" (if (< pick 2) (bf-tr "Base" "Base") (bf-point-name pick)))
+    (format *bf-text* "~S" (bf-point-name pick))
     (bf-draw-text buf *bf-text* 427.0 132.0 0.45 (bf-team-color (-> *bf* team)) #t)
     (bf-draw-text buf (bf-class-name (-> *bf* class)) 427.0 152.0 0.42 (font-color default) #t)
     (when (>= (current-time) (-> *bf* respawn-time))
@@ -1888,7 +1932,7 @@
     (bf-draw-zone-minimap (-> *bf* zone))
     )
   (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
-    ;; a jetpack guard's rocket icon in the gun HUD
+    ;; a jetpack guard's rocket icon or a robotguard's grenade in the gun HUD
     (bf-draw-rocket-hud buf)
     (bf-draw-reserves buf)
     (bf-draw-points-hud buf)
@@ -3153,9 +3197,10 @@
 
 (defbehavior bf-menu-confirm bf-director ()
   "X on the open page."
-  (let ((page (-> self page))
-        (i (-> self cursor))
-        )
+  (let* ((page (-> self page))
+         ;; a war zone page's row: its zone (`bf-row-zone`)
+         (i (if (= page BF_PAGE_ZONE) (bf-row-zone (-> self cursor)) (-> self cursor)))
+         )
     (cond
       ((and (= page BF_PAGE_ZONE) (not (bf-zone-open? i)))
        ;; Spargus, to come, and Jak 2's city without Jak 2: refused
@@ -3288,11 +3333,11 @@
        )
       ((= page BF_PAGE_CONFIG)
        (bf-open-page BF_PAGE_ZONE)
-       (set! (-> self cursor) (-> self pick-zone))
+       (set! (-> self cursor) (- (-> self pick-zone) BF_ZONE_FIRST))
        )
       ((= page BF_PAGE_TEAM)
        (bf-open-page BF_PAGE_ZONE)
-       (set! (-> self cursor) (-> self pick-zone))
+       (set! (-> self cursor) (- (-> self pick-zone) BF_ZONE_FIRST))
        )
       ((= page BF_PAGE_PAUSE)
        (bf-close-page)
@@ -3419,9 +3464,9 @@
         )
       )
     (dotimes (i (-> *bf-point-defs* length))
-      (let ((base? (< i 2))
+      (let ((base? (< i *bf-base-count*))
             (owner (cond
-                     ((< i 2) i)
+                     ((< i *bf-base-count*) (logand i 1))
                      (active? (-> *bf* points i owner))
                      (else BF_TEAM_NONE)
                      )
@@ -3430,7 +3475,7 @@
         (if active?
             (vector-copy! at (-> *bf* points i pos))
             (let ((def (-> *bf-point-defs* i))
-                  (cont (if (< i 2) (bf-zone-continue zone i) (the-as continue-point #f)))
+                  (cont (if (< i *bf-base-count*) (get-continue-by-name *game-info* (-> *bf-point-defs* i continue)) (the-as continue-point #f)))
                   )
               (if cont
                   (vector-copy! at (-> cont trans))
@@ -3473,15 +3518,15 @@
         )
       (dotimes (i (bf-page-count page))
         (bf-prow buf (bf-page-label page (-> self pick-team) i) x (+ (bf-fy 0.03) (* 21.0 (the float i))) w (= i cur)
-                 (not (and (= page BF_PAGE_ZONE) (not (bf-zone-open? i))))
+                 (not (and (= page BF_PAGE_ZONE) (not (bf-zone-open? (bf-row-zone i)))))
                  sc
                  )
         )
       )
     (bf-pwrap buf (bf-page-desc page (-> self pick-team) cur) x (bf-fy 0.4) 0.34 w 127)
-    (if (and (= page BF_PAGE_ZONE) (not (bf-zone-open? cur)))
-        (bf-ptext buf (if (>= cur BF_ZONE_COUNT) (bf-tr "Coming soon" "À venir") (bf-tr "Needs Jak 2" "Jak 2 requis")) (bf-fx 0.76) (bf-fy 0.42) 0.6 (font-color menu-invalid) #t (* 0.45 (-> *bf-frame* w)))
-        (bf-draw-map-marks buf (if (= page BF_PAGE_ZONE) cur (-> self pick-zone)) -1)
+    (if (and (= page BF_PAGE_ZONE) (not (bf-zone-open? (bf-row-zone cur))))
+        (bf-ptext buf (if (>= (bf-row-zone cur) BF_ZONE_COUNT) (bf-tr "Coming soon" "À venir") (bf-tr "Needs Jak 2" "Jak 2 requis")) (bf-fx 0.76) (bf-fy 0.42) 0.6 (font-color menu-invalid) #t (* 0.45 (-> *bf-frame* w)))
+        (bf-draw-map-marks buf (if (= page BF_PAGE_ZONE) (bf-row-zone cur) (-> self pick-zone)) -1)
         )
     (bf-pkeys buf (bf-tr "<PAD_X> Select    <PAD_TRIANGLE> Back" "<PAD_X> Choisir    <PAD_TRIANGLE> Retour"))
     )
@@ -3634,7 +3679,7 @@
           )
       (bf-ptext buf (bf-tr "Respawn point" "Point de réapparition") (+ lx 6.0) y 0.3 (font-color font-color-32) #f (+ lw -12.0))
       (clear *bf-text*)
-      (format *bf-text* "~S" (if (< (-> self pick-point) 2) (bf-tr "Base" "Base") (bf-point-name (-> self pick-point))))
+      (format *bf-text* "~S" (bf-point-name (-> self pick-point)))
       (bf-draw-arrow buf (+ lx 8.0) (+ y 18.0) -1.0 (= cur n))
       (bf-ptext buf *bf-text* (+ lx (* 0.5 lw)) (+ y 12.0) 0.36
                 (if (= cur n) (font-color font-color-33) (bf-team-color team))
@@ -3782,7 +3827,7 @@
        (bf-zmap-set! (bf-fx 0.76) (bf-fy 0.45) (* 0.42 h) (* 0.21 w))
        (cond
          ((= page BF_PAGE_TEAM) (-> self pick-zone))
-         ((bf-zone-open? (-> self cursor)) (-> self cursor))
+         ((bf-zone-open? (bf-row-zone (-> self cursor))) (bf-row-zone (-> self cursor)))
          (else -1)
          )
        )
@@ -4486,7 +4531,7 @@
   (process-mask-clear! (-> self mask) menu pause progress)
   (set! (-> self page) BF_PAGE_NONE)
   (set! (-> self cursor) 0)
-  (set! (-> self pick-zone) 0)
+  (set! (-> self pick-zone) BF_ZONE_FIRST)
   (set! (-> self pick-team) BF_TEAM_FF)
   (set! (-> self want-avatar?) #f)
   (set! (-> self prepared?) #f)
