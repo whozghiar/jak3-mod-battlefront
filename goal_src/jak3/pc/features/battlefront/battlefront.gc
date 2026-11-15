@@ -856,16 +856,20 @@
 (define-extern bf-director-ensure! (function none))
 
 ;; Indexed by BF_WEAPON_*: the gun (pickup-type) whose icon the stock gun HUD shows for a guard's
-;; weapon: the rifle yellow 1, the tazer blue 2, the grenade launcher red 3.
-(define *bf-hud-weapons* (new 'static 'array int32 3 29 33 28))
+;; weapon: the rifle yellow 1, the tazer blue 2, the grenade launcher red 3; for the rockets the red 3,
+;; whose icon the HUD hides and draws the rocket's over (`bf-draw-rocket-icon`).
+(define *bf-hud-weapons* (new 'static 'array int32 4 29 33 28 28))
 
 (defun bf-gun-hud-weapon ()
-  "BF_WEAPON_* the gun HUD shows: a guard's weapon in hand, during a fight with the class model up;
-   -1 otherwise (the jetpacks', the robotguard's and the spider's guns need no ammo: no gun HUD)."
-  (if (and (bf-fighting?) (bf-avatar-alive?) (bf-guard-class? (-> *bf* class)))
-      (-> *bf* weapon)
-      -1
-      )
+  "BF_WEAPON_* the gun HUD shows, during a fight with the class model up: a guard's weapon in hand, a
+   jetpack guard's rockets (BF_WEAPON_ROCKET, round 36); -1 otherwise (the robotguard's and the
+   spider's guns need no ammo: no gun HUD)."
+  (cond
+    ((not (and (bf-fighting?) (bf-avatar-alive?))) -1)
+    ((bf-guard-class? (-> *bf* class)) (-> *bf* weapon))
+    ((or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK)) BF_WEAPON_ROCKET)
+    (else -1)
+    )
   )
 
 (define-perm *bf-stock-gun-update* (function hud-gun none)
@@ -900,6 +904,70 @@
 
 (define *bf-gun-text* (new 'global 'string 32 (the-as string #f)))
 
+;; The rocket icon's width on the 512-unit screen, the stock gun icon's.
+(defconstant BF_ROCKET_ICON_DRAW_W 128.0)
+
+(defun bf-draw-rocket-icon ((buf dma-buffer) (cx float) (cy float))
+  "The jetpack guard's rocket icon into BUF (a direct bucket), centered on CX, CY (the 512 x 416
+   screen of the HUD's sprites), BF_ROCKET_ICON_DRAW_W across, its art pixels square on the display
+   (`bf-x-squeeze`): the author's pixel-art rocket (battlefront-rocket-icon.gc, made by
+   scripts/battlefront/make_rocket_icon.py) as one flat sprite per run of one color, all in one GIF
+   packet (draw-sprite2d-xy's, display.gc, looped). A texture uploaded as the L3 map's never
+   showed in a fight, whatever its bucket."
+  (let* ((px (/ BF_ROCKET_ICON_DRAW_W (the float BF_ROCKET_ICON_W)))
+         (py (/ px (bf-x-squeeze)))
+         (x0 (- cx (* 0.5 BF_ROCKET_ICON_DRAW_W)))
+         (y0 (- cy (* 0.5 py (the float BF_ROCKET_ICON_H))))
+         (pkt (the-as dma-packet (-> buf base)))
+         )
+    ;; the DMA tag and the VIF direct count the GIF tag and 2 quadwords a run
+    (set! (-> pkt dma) (new 'static 'dma-tag :id (dma-tag-id cnt) :qwc (+ 1 (* 2 BF_ROCKET_ICON_RUNS))))
+    (set! (-> pkt vif0) (new 'static 'vif-tag))
+    (set! (-> pkt vif1) (new 'static 'vif-tag :cmd (vif-cmd direct) :msk #x1 :imm (+ 1 (* 2 BF_ROCKET_ICON_RUNS))))
+    (&+! (-> buf base) 16)
+    (let ((tag (the-as gs-gif-tag (-> buf base))))
+      (set! (-> tag tag) (new 'static 'gif-tag64 :nloop BF_ROCKET_ICON_RUNS :eop #x1 :flg (gif-flag reg-list) :nreg #x4))
+      (set! (-> tag regs) (new 'static 'gif-tag-regs :regs1 (gif-reg-id rgbaq) :regs2 (gif-reg-id xyzf2) :regs3 (gif-reg-id xyzf2)))
+      )
+    (&+! (-> buf base) 16)
+    (dotimes (i BF_ROCKET_ICON_RUNS)
+      (let* ((run (-> *bf-rocket-icon-runs* i))
+             (d (-> buf base))
+             (rx (+ x0 (* px (the float (logand run #xff)))))
+             (ry (+ y0 (* py (the float (logand (shr run 8) #xff)))))
+             (rw (* px (the float (logand (shr run 16) #xff))))
+             )
+        (set! (-> (the-as (pointer gs-prim) d) 0) (new 'static 'gs-prim :prim (gs-prim-type sprite) :abe #x1))
+        (set! (-> (the-as (pointer gs-rgbaq) d) 1) (the-as gs-rgbaq (-> *bf-rocket-icon-colors* (shr run 24))))
+        (set! (-> (the-as (pointer gs-xyzf) d) 2)
+              (new 'static 'gs-xyzf :x (the int (* 16.0 (+ 1792.0 rx))) :y (the int (* 16.0 (+ 1840.0 ry))) :z #x3fffff)
+              )
+        (set! (-> (the-as (pointer gs-xyzf) d) 3)
+              (new 'static 'gs-xyzf :x (the int (* 16.0 (+ 1792.0 rx rw))) :y (the int (* 16.0 (+ 1840.0 ry py))) :z #x3fffff)
+              )
+        (&+! (-> buf base) 32)
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-draw-rocket-hud ((buf dma-buffer))
+  "The director's HUD, each frame of a fight: into BUF, a jetpack guard's rocket icon where the gun
+   HUD shows a weapon's (`bf-draw-rocket-icon`), while that HUD is up (not hidden), placed from its
+   sprite 0 (the stock reticle at the icon's right end: the icon's middle 52 units left of it, 9
+   below its top, where the stock icon was measured), which moves as the HUD slides in. Its count
+   and shells are the gun HUD's (`bf-draw-gun-ammo`)."
+  (when (and *target* (= (bf-gun-hud-weapon) BF_WEAPON_ROCKET))
+    (let ((hg (the-as hud-gun (process-by-name "hud-gun" *target*))))
+      (if (and hg (not (hidden? hg)))
+          (bf-draw-rocket-icon buf (+ -52.0 (the float (-> hg sprites 0 pos x))) (+ 9.0 (the float (-> hg sprites 0 pos y))))
+          )
+      )
+    )
+  (none)
+  )
+
 (defun bf-draw-gun-ammo ((this hud-gun) (weapon int))
   "Under the guard's weapon icon, in place of the stock count and shells: the rifle's magazine as 20
    shells in two columns of 10, full or empty, and \"magazine/reserve\" (20/100); the grenades as 5 shells and their
@@ -907,15 +975,18 @@
    stock draw places its own (hud-classes.gc hud-gun draw: the shells from the icon's position, 5
    units apart upward; the text at the spot it gave its string)."
   (let* ((rifle? (= weapon BF_WEAPON_RIFLE))
+         (rocket? (= weapon BF_WEAPON_ROCKET))
          (slots (cond
                   (rifle? BF_MAG_RIFLE)
                   ((= weapon BF_WEAPON_GRENADE) (the int BF_GRENADES))
+                  (rocket? BF_ROCKETS)
                   (else 0)
                   )
                 )
          (full (cond
                  (rifle? (-> *bf* mag BF_WEAPON_RIFLE))
                  ((= weapon BF_WEAPON_GRENADE) (the int (-> *game-info* gun-ammo BF_AMMO_RED)))
+                 (rocket? (-> *bf* rockets))
                  (else 0)
                  )
                )
@@ -952,7 +1023,7 @@
         (rifle?
          (format *bf-gun-text* "~D/~D" full (the int (-> *game-info* gun-ammo BF_AMMO_YELLOW)))
          )
-        ((= weapon BF_WEAPON_GRENADE)
+        ((or (= weapon BF_WEAPON_GRENADE) rocket?)
          (format *bf-gun-text* "~D" full)
          )
         ((not (bf-tazer-ready?))
@@ -994,9 +1065,22 @@
               )
           (set! (-> this strings 0 scale) 0.0)
           (set! (-> this sprites 14 scale-y) 0.0)
+          ;; the rockets: the stock icon see-through (sprites 0 and 1, whose scales the stock draw sets
+          ;; itself) and its reticle (sprite 15, whose color it sets) shrunk to nothing; the director
+          ;; draws the rocket's in its place (`bf-draw-rocket-hud`)
+          (when (= weapon BF_WEAPON_ROCKET)
+            (set! (-> this sprites 0 color w) 0)
+            (set! (-> this sprites 1 color w) 0)
+            (set! (-> this sprites 15 scale-x) 0.0)
+            )
           (*bf-stock-gun-draw* this)
           (set! (-> this strings 0 scale) text-scale)
           (set! (-> this sprites 14 scale-y) shell-y)
+          (when (= weapon BF_WEAPON_ROCKET)
+            (set! (-> this sprites 0 color w) 128)
+            (set! (-> this sprites 1 color w) 128)
+            (set! (-> this sprites 15 scale-x) 1.0)
+            )
           )
         (if (not (hidden? this))
             (bf-draw-gun-ammo this weapon)
@@ -1017,7 +1101,8 @@
         )
     (cond
       ((not av) -1.0)
-      ((or (= class BF_CLASS_BLUE_JETPACK) (= class BF_CLASS_RED_JETPACK)) (-> av fuel))
+      ;; no boost, so no gauge, since round 36
+      ((or (= class BF_CLASS_BLUE_JETPACK) (= class BF_CLASS_RED_JETPACK)) -1.0)
       ((= class BF_CLASS_SPYDROID) (-> av boost))
       ((= class BF_CLASS_ROBOGUARD)
        (let ((since (the float (- (-> av clock frame-counter) (-> av shield-time)))))
@@ -1689,6 +1774,8 @@
     (bf-draw-zone-minimap (-> *bf* zone))
     )
   (with-dma-buffer-add-bucket ((buf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf2))
+    ;; a jetpack guard's rocket icon in the gun HUD
+    (bf-draw-rocket-hud buf)
     (bf-draw-reserves buf)
     (bf-draw-points-hud buf)
     ;; L3: the kills, the deaths and the whole map (`bf-draw-overlay`)
@@ -2535,6 +2622,12 @@
              *target*
              (not (focus-test? *target* dead))
              )
+    ;; a jetpack guard's L1 fires a rocket (battlefront-player.gc `*bf-jet-l1*`): read here, then
+    ;; taken from Jak, who would duck or roll on it (round 36)
+    (when (or (= (-> *bf* class) BF_CLASS_BLUE_JETPACK) (= (-> *bf* class) BF_CLASS_RED_JETPACK))
+      (set! *bf-jet-l1* (logtest? (-> pad button0) (pad-buttons l1)))
+      (set! (-> pad button0) (logclear (-> pad button0) (pad-buttons l1)))
+      )
     (let ((x? (logtest? (-> pad button0) (pad-buttons x))))
       (cond
         ((= (-> *bf* class) BF_CLASS_ROBOGUARD)
@@ -3939,6 +4032,46 @@
   (none)
   )
 
+;; When the orbs and crates were last looked for (`bf-clear-orbs-and-crates`).
+(define *bf-pickups-time* (the-as time-frame 0))
+;; The orbs and crates found by one look, 64 at most.
+(define *bf-clear-handles* (new 'static 'array uint64 64))
+(define *bf-clear-count* 0)
+
+(defun bf-clear-orbs-and-crates ()
+  "A battle under way: every precursor orb (collectables.gc money) and every crate (crates.gc
+   crate) goes (round 36, the author's wish: none in a battle), its entity marked dead first so it
+   is not born again (a new game, the battle's end at the title, gives them back). Run 4 times a
+   second: the levels the battle loads bring theirs. The tree is walked first, the processes
+   deactivated after: a process deactivated during the walk would cut the walk short."
+  (when (time-elapsed? *bf-pickups-time* (seconds 0.25))
+    (set! *bf-pickups-time* (-> *display* game-clock frame-counter))
+    (set! *bf-clear-count* 0)
+    (iterate-process-tree
+      *active-pool*
+      (lambda ((p process))
+        (when (and (< *bf-clear-count* 64) (or (type? p money) (type? p crate)))
+          (set! (-> *bf-clear-handles* *bf-clear-count*) (the-as uint (process->handle p)))
+          (+! *bf-clear-count* 1)
+          )
+        #t
+        )
+      *null-kernel-context*
+      )
+    (dotimes (i *bf-clear-count*)
+      (let ((p (handle->process (the-as handle (-> *bf-clear-handles* i)))))
+        (when p
+          (if (-> p entity)
+              (process-entity-status! p (entity-perm-status dead) #t)
+              )
+          (deactivate p)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (define *bf-counters-hidden?* #f)
 
 (defun bf-stock-counters-hide! ((hide? symbol))
@@ -3965,6 +4098,9 @@
 (defbehavior bf-director-update bf-director ()
   "One frame of the battle."
   (bf-stock-counters-hide! (bf-fighting?))
+  (if (bf-active?)
+      (bf-clear-orbs-and-crates)
+      )
   ;; requests of the battle's pause page (START), run once that page is closed
   (let ((req *bf-request*))
     (cond

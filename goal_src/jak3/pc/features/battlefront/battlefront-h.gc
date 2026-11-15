@@ -77,6 +77,7 @@
 (defconstant BF_WEAPON_RIFLE 0)
 (defconstant BF_WEAPON_TAZER 1)
 (defconstant BF_WEAPON_GRENADE 2)
+(defconstant BF_WEAPON_ROCKET 3)   ;; the jetpack guards' rockets (L1, round 36), for the gun HUD
 
 ;; Indices of `*game-info*` gun-ammo. The class weapons spend Jak's own ammo, so the stock ammo
 ;; pickups refill them: yellow the rifles and guns, red the grenades, blue the tazer. The battle
@@ -216,6 +217,7 @@
    (spectate      handle)         ;; the unit the camera follows while the player waits to respawn
    (weapon        int32)          ;; BF_WEAPON_* in the hands of a guard class
    (mag           int32 3)        ;; shots left in each guard weapon's magazine, by BF_WEAPON_*
+   (rockets       int32)          ;; a jetpack guard's rockets left this life (battlefront-player.gc BF_ROCKETS)
    (redraw?       symbol)         ;; the class model must be drawn again (red guard weapon change)
    (shield?       symbol)         ;; the robotguard's shield is up (battlefront.gc target-attacked)
    (ceiling       float)          ;; highest y a jetpack may reach (force field)
@@ -463,16 +465,14 @@
 (define *bf-jetpack-help*
   (new 'static 'boxed-array :type string
     "<PAD_X> Climb    <PAD_CIRCLE> Come down"
-    "<PAD_R2> + <PAD_ANALOG_ANY> Boost (dark eco refills it)"
-    "<PAD_R1> Two shots    <PAD_SQUARE> Dive kick"
+    "<PAD_R1> Two shots    <PAD_L1> Rocket (10 a life)"
     )
   )
 
 (define *bf-jetpack-help-fr*
   (new 'static 'boxed-array :type string
     "<PAD_X> Monter    <PAD_CIRCLE> Descendre"
-    "<PAD_R2> + <PAD_ANALOG_ANY> Accélérer (l'éco noire recharge)"
-    "<PAD_R1> Deux tirs    <PAD_SQUARE> Piqué"
+    "<PAD_R1> Deux tirs    <PAD_L1> Roquette (10 par vie)"
     )
   )
 
@@ -1064,6 +1064,8 @@
       ((= sym 'roboguard-shot) BF_DMG_ROBOT_SHOT)
       ((= sym 'flying-turret-shot) BF_DMG_JET_SHOT)
       ((or (= sym 'explosion) (= sym 'vehicle-grenade) (= sym 'vehicle-grenade-deflect)) BF_DMG_GRENADE)
+      ;; a jetpack guard's rocket, its hit and its blast (battlefront-player.gc `bf-rocket`)
+      ((= sym 'bf-rocket) BF_DMG_GRENADE)
       ((= sym 'spydroid) BF_DMG_BITE)
       ((or (= sym 'crimson-guard) (= sym 'roboguard-city) (= sym 'flying-turret)) BF_DMG_MELEE)
       (else -1.0)

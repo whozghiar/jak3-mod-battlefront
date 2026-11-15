@@ -145,11 +145,11 @@
   (new 'static 'inline-array bf-class-art 8
     ;; Speeds since round 34 (the author's wish: the player's classes as the units of round 33): the
     ;; guards 1.4 times 1.425, the robotguard 2 times 1.05 on foot, the spider 1.6 times 2.25; the
-    ;; jetpacks kept.
+    ;; jetpacks kept. Round 36: the guards slower with the units' (1.6 / 1.9 of 1.995).
     ;; blue guard: crimson-guard-ag idle 4, walk 5, run 6, jump-high 38, gun-attack 26; blast joint 14
     (new 'static 'bf-class-art :skel "skel-crimson-guard" :level 'ctypesa
          :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
-         :ammo BF_AMMO_YELLOW :speed 1.995 :height 3.8 :fire-delay (seconds 0.5))
+         :ammo BF_AMMO_YELLOW :speed 1.68 :height 3.8 :fire-delay (seconds 0.5))
     ;; blue jetpack: bf-hover-blue (battlefront-h.gc order); gun tips 9 and 11
     (new 'static 'bf-class-art :skel "skel-bf-hover-blue" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
@@ -166,7 +166,7 @@
     ;; red guard: same clip indices as the blue guard (custom_assets/jak3/models/models.jsonc)
     (new 'static 'bf-class-art :skel "skel-bf-red-guard" :level 'ctypesa
          :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
-         :ammo BF_AMMO_YELLOW :speed 1.995 :height 3.8 :fire-delay (seconds 0.5))
+         :ammo BF_AMMO_YELLOW :speed 1.68 :height 3.8 :fire-delay (seconds 0.5))
     ;; red jetpack
     (new 'static 'bf-class-art :skel "skel-bf-hover-red" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
@@ -243,7 +243,8 @@
    (reload?     symbol)         ;; guard: the rifle reloads when it can (its magazine empty, or Triangle)
    (dive-until  time-frame)     ;; jetpack dive kick flying until then
    (dive-foe    handle)         ;; what the dive aims at
-   (fuel        float)          ;; jetpack boost gauge, 0 to 1 (refilled by dark eco only)
+   (fuel        float)          ;; jetpack boost gauge, 0 to 1 (refilled by dark eco only; no boost since round 36)
+   (rocket-time time-frame)     ;; jetpack: its last rocket (BF_ROCKET_DELAY before the next)
    (boost       float)          ;; spider blue eco, 0 to 1
    (was-ground? symbol)
    (shield?     symbol)         ;; robotguard: its shield is up
@@ -880,6 +881,191 @@
   )
 
 (define-extern bf-avatar-still! (function none :behavior bf-avatar))
+
+;; ---------------------------------------------------------------------------------------------
+;; The jetpack guards' rockets (L1, round 36, the author's wish)
+;; ---------------------------------------------------------------------------------------------
+
+(defconstant BF_ROCKETS 10)                  ;; rockets a jetpack guard carries each life
+(defconstant BF_ROCKET_SPEED (meters 60))    ;; its flight, straight from the jetpack to the crosshair
+(defconstant BF_ROCKET_LIFE (seconds 3))     ;; it bursts where it is after this long (180 m)
+(defconstant BF_ROCKET_RADIUS (meters 10))   ;; its blast's reach (the red gun 3 grenade's: 20 m)
+(defconstant BF_ROCKET_DELAY (seconds 0.8))  ;; between two rockets
+
+;; pad 0's L1, read for the jetpack guards before `bf-pad-lock!` takes it from Jak (who would duck or
+;; roll on it), and its value the frame before (battlefront.gc)
+(define *bf-jet-l1* #f)
+(define *bf-jet-l1-was* #f)
+
+(deftype bf-rocket (guard-shot)
+  "A jetpack guard's rocket: a guard-shot's straight flight and collision, the dark gun 3's
+   projectile model (gun-dark-shot.gc skel-gun-dark-3-nuke, its missile trail), bursting where it
+   hits or after BF_ROCKET_LIFE as the red gun 3's grenade bursts (gun-red-shot.gc impact: its
+   sound, its blast's particles and sphere, `bf-rocket-burst`). Its hit and its blast deal a
+   grenade's damage (battlefront-h.gc `bf-attack-damage`)."
+  ()
+  )
+
+(defmethod init-proj-settings! ((this bf-rocket))
+  "The guard-shot's settings, then the rocket's: the missile model at the dark gun 3's scale, its
+   trail, its speed and life; the red gun 3's firing sound."
+  (call-parent-method this)
+  (initialize-skeleton
+    this
+    (the-as skeleton-group (art-group-get-by-name *level* "skel-gun-dark-3-nuke" (the-as (pointer level) #f)))
+    (the-as pair 0)
+    )
+  (set-vector! (-> this root scale) 2.5 2.5 2.5 1.0)
+  (set! (-> this part) (create-launch-control group-gun-dark3-missile-trail this))
+  (set! (-> this max-speed) BF_ROCKET_SPEED)
+  (set! (-> this timeout) BF_ROCKET_LIFE)
+  (sound-play "red3-fire")
+  (none)
+  )
+
+(defmethod projectile-method-40 ((this bf-rocket))
+  "Its stack, as the red gun 3 grenade's (its blast lists the units near it)."
+  512
+  )
+
+(defmethod projectile-method-24 ((this bf-rocket))
+  "At its launch: none of the guard-shot's laser."
+  0
+  (none)
+  )
+
+(defmethod projectile-method-25 ((this bf-rocket))
+  "Every frame of its flight: the model along its flight, its trail, drawn."
+  (let ((dir (vector-normalize-copy! (new 'stack-no-clear 'vector) (-> this root transv) 1.0)))
+    (if (< 0.5 (vector-length dir))
+        (forward-up->quaternion (-> this root quat) dir *up-vector*)
+        )
+    )
+  (spawn (-> this part) (-> this root trans))
+  (ja-post)
+  0
+  (none)
+  )
+
+(defmethod play-impact-sound ((this bf-rocket) (arg0 projectile-options))
+  "None: its burst plays the red gun 3's blast (`bf-rocket-burst`)."
+  0
+  (none)
+  )
+
+(defun bf-rocket-damage ((this bf-rocket))
+  "The rocket's blast: every unit, crate or vehicle within BF_ROCKET_RADIUS of it, Jak aside, is sent
+   the red gun 3 grenade's 'attack (gun-red-shot.gc find-and-damage-targets: an explosion, pushed
+   away from the burst), from the rocket, whose damage the battle sets (`bf-attack-damage`)."
+  (let ((sphere (vector-copy! (new 'stack-no-clear 'vector) (-> this root trans)))
+        (shapes (new 'stack-no-clear 'array 'collide-shape 64))
+        )
+    (set! (-> sphere w) BF_ROCKET_RADIUS)
+    (countdown (i (fill-actor-list-for-box *actor-hash* sphere shapes 64))
+      (let* ((cs (as-type (-> shapes i) collide-shape))
+             (pf (if cs (as-type (-> cs process) process-focusable)))
+             )
+        (when (and pf
+                   (!= pf *target*)
+                   (not (focus-test? (the-as process-focusable pf) disable dead inactive))
+                   (logtest? (process-mask crate enemy guard vehicle civilian) (-> pf mask))
+                   )
+          (let ((dir (vector-! (new 'stack-no-clear 'vector) (get-trans (the-as process-focusable pf) 3) (-> this root trans))))
+            ;; never a null direction: the knock normalizes it (Lisp wiki jak3 4.50)
+            (if (< (vector-length dir) 40.96)
+                (set-vector! dir 0.0 4096.0 0.0 1.0)
+                )
+            (if (>= (square BF_ROCKET_RADIUS) (vector-length-squared dir))
+                (send-event pf 'attack #f
+                            (static-attack-info :mask (vehicle-impulse-factor) ((id (-> this attack-id))
+                                                                                (damage 12.0)
+                                                                                (vehicle-damage-factor 3.0)
+                                                                                (vehicle-impulse-factor 1.0)
+                                                                                (mode 'explode)
+                                                                                (attacker-velocity dir)
+                                                                                (penetrate-using (penetrate explode))
+                                                                                )
+                                                )
+                            )
+                )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-rocket-burst ((this bf-rocket))
+  "The rocket bursts where it is, as the red gun 3's grenade (gun-red-shot.gc impact): its blast's
+   sound, particles and sphere, its damage (`bf-rocket-damage`); the model hidden."
+  (sound-play "red3-blast" :position (-> this root trans))
+  (vector-copy! (-> *launch-matrix* trans) (-> this root trans))
+  (if (logtest? (-> group-gun-red3-shot-explode flags) (sp-group-flag sp13))
+      (part-tracker-spawn part-tracker-subsampler :to *entity-pool* :group group-gun-red3-shot-explode)
+      (part-tracker-spawn part-tracker :to *entity-pool* :group group-gun-red3-shot-explode)
+      )
+  (let ((params (new 'stack-no-clear 'red-3-sphere-init-params)))
+    (vector-copy! (-> params pos) (-> this root trans))
+    (process-spawn red-3-sphere params :name "red-3-sphere" :to *entity-pool*)
+    )
+  (bf-rocket-damage this)
+  (logior! (-> this draw status) (draw-control-status no-draw))
+  (none)
+  )
+
+(defmethod projectile-method-26 ((this bf-rocket))
+  "It hit something: its burst."
+  (bf-rocket-burst this)
+  0
+  (none)
+  )
+
+(defmethod projectile-method-27 ((this bf-rocket))
+  "Its life over: its burst where it is."
+  (bf-rocket-burst this)
+  0
+  (none)
+  )
+
+(defbehavior bf-avatar-rocket bf-avatar ()
+  "A jetpack guard's rocket (L1): one of `*bf*` rockets, from its first gun toward the crosshair's
+   aim point, straight at BF_ROCKET_SPEED (a `bf-rocket`, Jak its owner: its hits are his)."
+  (let* ((art (bf-class-art-of (-> self class)))
+         (from (bf-joint-pos self (-> art gun0) (new 'stack-no-clear 'vector)))
+         (dir (vector-! (new 'stack-no-clear 'vector) (-> self aim) from))
+         (params (new 'stack-no-clear 'projectile-init-by-other-params))
+         )
+    (if (< (vector-length dir) (meters 1))
+        (bf-view-forward dir)
+        )
+    (vector-normalize! dir BF_ROCKET_SPEED)
+    (set! (-> params ent) (-> *target* entity))
+    (set! (-> params charge) 1.0)
+    (set! (-> params options) (projectile-options))
+    (logclear! (-> params options) (projectile-options po14 po15 po16))
+    (set! (-> params notify-handle) (process->handle *target*))
+    (set! (-> params owner-handle) (process->handle *target*))
+    (set! (-> params target-handle) (the-as handle #f))
+    (set! (-> params target-pos quad) (the-as uint128 0))
+    (set! (-> params ignore-handle) (process->handle *target*))
+    (let* ((info *game-info*)
+           (id (+ (-> info attack-id) 1))
+           )
+      (set! (-> info attack-id) id)
+      (set! (-> params attack-id) id)
+      )
+    (set! (-> params timeout) BF_ROCKET_LIFE)
+    (vector-copy! (-> params pos) from)
+    (vector-copy! (-> params vel) dir)
+    (spawn-projectile bf-rocket params *target* *default-dead-pool*)
+    )
+  (+! (-> *bf* rockets) -1)
+  (set-time! (-> self rocket-time))
+  (set! (-> self shoot-until) (+ (current-time) (seconds 0.4)))
+  (bf-combat!)
+  (none)
+  )
 
 (defbehavior bf-avatar-fire bf-avatar ()
   "R1: fire the class weapon if its ammo lasts: a shot, a grenade, or the first shot of a salvo
@@ -1628,21 +1814,17 @@
             )
            )
          )
-       (set! (-> self boost?) (and (cpad-hold? 0 r2) (< 0.0 (-> self fuel))))
-       ;; R2 held while the boost gauge lasts (BF_JET_BOOST_TIME for a full one, refilled by dark
-       ;; eco only): BF_JET_BOOST_SPEED toward where the left stick points, or ahead
-       (when (and (cpad-hold? 0 r2) (< 0.0 (-> self fuel)))
-         (let ((dir (bf-stick-dir (new 'stack-no-clear 'vector))))
-           (if (< (vector-length dir) 0.1)
-               (bf-view-forward dir)
-               )
-           (vector-normalize! dir BF_JET_BOOST_SPEED)
-           (set! (-> *target* control transv x) (-> dir x))
-           (set! (-> *target* control transv z) (-> dir z))
-           )
-         (set! speed (* speed 2.0))
-         (set! (-> self fuel) (fmax 0.0 (- (-> self fuel) (/ dt BF_JET_BOOST_TIME))))
+       ;; no boost since round 36 (the author's wish: R2's rush off for the jetpack guards); L1
+       ;; pressed: a rocket while any is left (`bf-avatar-rocket`), its L1 read before Jak's pad
+       ;; loses it (battlefront.gc `bf-pad-lock!`)
+       (set! (-> self boost?) #f)
+       (when (and *bf-jet-l1* (not *bf-jet-l1-was*)
+                  (> (-> *bf* rockets) 0)
+                  (time-elapsed? (-> self rocket-time) BF_ROCKET_DELAY)
+                  )
+         (bf-avatar-rocket)
          )
+       (set! *bf-jet-l1-was* *bf-jet-l1*)
        )
       ((BF_CLASS_SPYDROID)
        ;; X from the ground: a leap BF_SPIDER_LEAP_HEIGHT high, a jump of Jak's own with his speed
@@ -1778,6 +1960,9 @@
                (not (-> self rolling?))
                (>= (-> art melee) 0)
                (!= (-> self class) BF_CLASS_SPYDROID)
+               ;; no dive kick since round 36 (the author's wish: Square off for the jetpack guards)
+               (!= (-> self class) BF_CLASS_BLUE_JETPACK)
+               (!= (-> self class) BF_CLASS_RED_JETPACK)
                (cpad-pressed? 0 square)
                ;; one close attack at a time: the previous one's clip has ended, and a dive kick has
                ;; hit or missed
@@ -2806,6 +2991,9 @@
   (set! (-> self dive-until) 0)
   (set! (-> self dive-foe) (the-as handle #f))
   (set! (-> self fuel) 1.0)
+  (set! (-> self rocket-time) 0)
+  ;; a jetpack guard's rockets, a full load each life
+  (set! (-> *bf* rockets) BF_ROCKETS)
   (set! (-> self boost) 1.0)
   (set! (-> self was-ground?) #t)
   (set! (-> self crouch?) #f)
