@@ -469,15 +469,15 @@
   )
 
 (defbehavior smoke-quit process ()
-  "START > Quit the battle; the city back, the battle off."
+  "START > Quit the battle: the battle off and, since round 33, the game's title menu with the
+   battle's entries (`smoke-title-up?`)."
   (smoke-step "quit the battle")
   (smoke-neutral)
   (smoke-bf-pause 4)
-  (smoke-wait-for 60.0 (lambda () (and (= (-> *bf* phase) BF_PHASE_OFF) (= *master-mode* 'game))))
-  (smoke-wait-stand 60.0)
-  (smoke-wait 2.0)
-  (smoke-check "Quit the battle ends it, Jak standing, no class model"
-               (and (= (-> *bf* phase) BF_PHASE_OFF) (not (bf-avatar-alive?)) *target* (not (focus-test? *target* dead)))
+  (smoke-wait-for 90.0 (lambda () (smoke-title-up?)))
+  (smoke-wait 1.0)
+  (smoke-check "Quit the battle ends it: the title menu, Start a battle / Options / Quit, no class model"
+               (and (= (-> *bf* phase) BF_PHASE_OFF) (not (bf-avatar-alive?)) (smoke-title-up?))
                )
   0
   )
@@ -5078,6 +5078,113 @@
 
 (define-extern bf-ground-under (function vector float))
 
+(define-extern bf-guard-taunt? (function speech-type symbol))
+
+(defbehavior smoke-r33-jump process ()
+  "X held 0.6 s from the ground: the highest Jak rises over 1.6 s, in meters."
+  (let ((y0 (-> *target* control trans y))
+        (top 0.0)
+        (t0 (smoke-now))
+        )
+    (smoke-hold (pad-buttons x))
+    (while (< (- (smoke-now) t0) (seconds 1.6))
+      (if (>= (- (smoke-now) t0) (seconds 0.6))
+          (smoke-hold (the-as pad-buttons 0))
+          )
+      (set! top (fmax top (- (-> *target* control trans y) y0)))
+      (suspend)
+      )
+    (smoke-hold (the-as pad-buttons 0))
+    (smoke-wait 1.0)
+    (/ top (meters 1))
+    )
+  )
+
+(defbehavior smoke-r33-side process ((b pad-buttons) (lx int) (ly int))
+  "B (L2 or R2) tapped with the left stick at LX, LY: the dodge's velocity along the camera's right
+   (meters a second) into `*smoke-v0*` x, ahead into y, and z 1.0 when a dodge or roll started."
+  (let ((right (bf-view-right (new 'stack-no-clear 'vector)))
+        (fwd (bf-view-forward (new 'stack-no-clear 'vector)))
+        )
+    (set-vector! *smoke-v0* 0.0 0.0 0.0 0.0)
+    (smoke-stick lx ly 128 128)
+    (smoke-wait 0.1)
+    (smoke-tap b 4)
+    (smoke-wait 0.1)
+    (when (and (smoke-av) (< (current-time) (-> (smoke-av) dodge-until)))
+      (set! (-> *smoke-v0* x) (/ (vector-dot (-> (smoke-av) roll-vel) right) (meters 1)))
+      (set! (-> *smoke-v0* y) (/ (vector-dot (-> (smoke-av) roll-vel) fwd) (meters 1)))
+      (set! (-> *smoke-v0* z) 1.0)
+      )
+    (smoke-stick 128 128 128 128)
+    (smoke-wait 1.4)
+    (format 0 "SMOKE ~A stick ~D ~D: started ~f, ~f m/s right, ~f m/s ahead~%" (if (= b (pad-buttons l2)) 'L2 'R2) lx ly
+            (-> *smoke-v0* z) (-> *smoke-v0* x) (-> *smoke-v0* y))
+    *smoke-v0*
+    )
+  )
+
+(defbehavior smoke-s61 process ()
+  "Scenario 61 (`smoke-scenario-late`), round 33, as the Krimzon Guard's red guard: the jump (X
+   held) a little higher; L2 and R2 sideways only (a strafe, a roll; ahead and back nothing); the
+   weapon change on the same avatar, its mesh the other model's (shots of both); the units' top
+   speeds by kind; the speech filter's kinds; Quit the battle to the title menu."
+  (smoke-mods-toggle "mods-menu-on")
+  (smoke-battle-start 0 BF_TEAM_KG)
+  (smoke-deploy 0 "deploy red guard")
+  (smoke-invulnerable #t)
+  (smoke-wait 4.0)
+  (smoke-step "jump")
+  (let ((h (smoke-r33-jump)))
+    (format 0 "SMOKE jump: ~f m~%" h)
+    ;; X is off in the air (one jump): the tapped jump, 1.01 m stock, 1.31 m since round 33
+  (smoke-check "the guard's jump rises over 1.2 m (1.01 m before round 33)" (< 1.2 h))
+    )
+  (smoke-step "L2 and R2 sideways")
+  (smoke-r33-side (pad-buttons l2) 128 0)
+  (smoke-check "L2 + stick ahead: nothing" (= (-> *smoke-v0* z) 0.0))
+  (smoke-r33-side (pad-buttons l2) 128 255)
+  (smoke-check "L2 + stick back: nothing" (= (-> *smoke-v0* z) 0.0))
+  (smoke-r33-side (pad-buttons l2) 255 128)
+  (smoke-check "L2 + stick right: a strafe to the right" (and (= (-> *smoke-v0* z) 1.0) (< 5.0 (-> *smoke-v0* x)) (< (fabs (-> *smoke-v0* y)) 1.0)))
+  (smoke-r33-side (pad-buttons l2) 0 128)
+  (smoke-check "L2 + stick left: a strafe to the left" (and (= (-> *smoke-v0* z) 1.0) (< (-> *smoke-v0* x) -5.0)))
+  (smoke-r33-side (pad-buttons r2) 128 0)
+  (smoke-check "R2 + stick ahead: nothing" (= (-> *smoke-v0* z) 0.0))
+  (smoke-r33-side (pad-buttons r2) 128 128)
+  (smoke-check "R2 alone: nothing" (= (-> *smoke-v0* z) 0.0))
+  (smoke-r33-side (pad-buttons r2) 0 128)
+  (smoke-check "R2 + stick left: a roll to the left" (and (= (-> *smoke-v0* z) 1.0) (< (-> *smoke-v0* x) -5.0) (-> (smoke-av) roll?)))
+  (smoke-r33-side (pad-buttons r2) 255 128)
+  (smoke-check "R2 + stick right: a roll to the right" (and (= (-> *smoke-v0* z) 1.0) (< 5.0 (-> *smoke-v0* x))))
+  (smoke-step "red guard weapon change")
+  (let ((h (-> *bf* avatar)))
+    (smoke-shot "r33-red-rifle")
+    (smoke-press (pad-buttons up) 0.5)
+    (format 0 "SMOKE weapon ~D art ~A same avatar ~A redraw ~A~%" (-> *bf* weapon) (-> (smoke-av) draw art-group name)
+            (= h (-> *bf* avatar)) (-> *bf* redraw?))
+    (smoke-check "D-pad up: the grenade launcher on the same avatar, the other model's mesh"
+                 (and (= h (-> *bf* avatar)) (string= (-> (smoke-av) draw art-group name) "bf-red-guard-gl")))
+    (smoke-shot "r33-red-gl")
+    (smoke-press (pad-buttons down) 0.5)
+    (smoke-check "D-pad down: the rifle on the same avatar"
+                 (and (= h (-> *bf* avatar)) (string= (-> (smoke-av) draw art-group name) "bf-red-guard")))
+    )
+  (smoke-step "speech kinds")
+  (smoke-check "a guard's cry when hit is not a taunt, its battle line is"
+               (and (not (bf-guard-taunt? (speech-type guard-hit))) (bf-guard-taunt? (speech-type guard-generic-battle))
+                    (bf-guard-taunt? (speech-type guard-chatter)))
+               )
+  (smoke-step "unit speeds")
+  (smoke-unit-speeds 30.0)
+  (format 0 "SMOKE top speeds: guard ~M jetpack ~M robotguard ~M spider ~M~%" (-> *smoke-top* 0) (-> *smoke-top* 1)
+          (-> *smoke-top* 2) (-> *smoke-top* 3))
+  (smoke-check "a guard runs faster than 20 m/s (18 until round 33)" (< (meters 20) (-> *smoke-top* 0)))
+  (smoke-quit)
+  (smoke-shot "r33-title")
+  0
+  )
+
 (defun smoke-r32-drops-report ((tag string) (from vector))
   "Round 32: each pickup in *entity-pool* within 15 m of FROM across: its type, state, height, its
    base's height and the ground under it (`bf-ground-under`, 0.3 m over the ground). Returns how many
@@ -6029,6 +6136,7 @@
   "Scenarios 36 to 40 (rounds 26 and 27), each in a function of its own, out of `smoke-scenario`:
    with them in it, the register allocator gave up on its size (RegAlloc Error)."
   (case SMOKE_SCENARIO
+    ((61) (smoke-s61))
     ((60) (smoke-s60))
     ((59) (smoke-s59))
     ((58) (smoke-s58))

@@ -15,21 +15,24 @@
     // plus back, right_wrist and left_wrist, the same bind poses) and its 52 clips after two
     // padding clips, so every clip sits at the index the Jak 3 crimson-guard code uses (idle 4 ...
     // shield-sidle 55). A build-actor model draws all its primitives, so each weapon is its own
-    // model: the rifle (primitives 4-12) or the grenade launcher and tazer (13-17), with the normal
-    // armor (18-24) and the body (25-36); the dark guard armor (0-3) left out.
+    // model: the normal armor (18-24) and the body (25-36), the dark guard armor (0-3) left out,
+    // and the Jak 3 guard's own weapon (round 33: the same as the blue guards'), its rifle
+    // (primitives 4-12) or its grenade launcher and tazer (13-17), with the Jak 3 textures.
     "bf-red-guard": {
       "level": "ctypesa",
       "mesh": "jak2/dig1/crimson-guard-lod0.glb",
-      "prims": [4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36],
+      "prims": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36],
       "skeleton": "jak3/ctypesa/crimson-guard-lod0.glb",
-      "padding": 2
+      "padding": 2,
+      "extra": [{"mesh": "jak3/ctypesa/crimson-guard-lod0.glb", "prims": [4, 5, 6, 7, 8, 9, 10, 11, 12], "suffix": "j3"}]
     },
     "bf-red-guard-gl": {
       "level": "ctypesa",
       "mesh": "jak2/dig1/crimson-guard-lod0.glb",
-      "prims": [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36],
+      "prims": [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36],
       "skeleton": "jak3/ctypesa/crimson-guard-lod0.glb",
-      "padding": 2
+      "padding": 2,
+      "extra": [{"mesh": "jak3/ctypesa/crimson-guard-lod0.glb", "prims": [13, 14, 15, 16, 17], "suffix": "j3"}]
     },
     // The Jak 2 jetpack guard as ripped (34 joints, its 17 clips), drawn on the stock flying-turret
     // code: the three clips that code plays sit at its indices (2 idle, 3 hover = fly-forward, 4

@@ -2484,6 +2484,33 @@
   (none)
   )
 
+;; Until when (the real clock) pad 0 presses START for the title screen after a battle
+;; (`bf-to-title!`, `bf-title-press!`), 0 for no more.
+(define *bf-title-press-until* (the-as time-frame 0))
+
+(defun bf-title-press! ((pad cpad-info))
+  "After a battle's end (`bf-to-title!`): while the title screen waits for START (levels/title/
+   title-obs.gc title-control, state wait, its Press START), pad 0 presses it every other frame, a
+   press's edge, so the title menu opens at once (round 33, the author's wish: the menu after the
+   intro). Stops once the title control opens the menu (state idle), or after 60 s. Side effect:
+   PAD's buttons."
+  (when (and (zero? (-> pad number)) (< (-> *display* real-clock frame-counter) *bf-title-press-until*))
+    (let ((tc (process-by-name "title-control" *entity-pool*)))
+      (when (and tc (-> tc next-state))
+        (cond
+          ((= (-> tc next-state name) 'idle)
+           (set! *bf-title-press-until* 0)
+           )
+          ((and (= (-> tc next-state name) 'wait) (logtest? (-> *display* real-clock integral-frame-counter) 1))
+           (set! (-> pad button0) (logior (-> pad button0) (the-as uint (pad-buttons start))))
+           )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 ;; The pad read (pad.gc cpad-get-data, the kernel's), kept before `bf-pad-lock!` wraps it.
 (define-perm *bf-stock-cpad-get-data* (function cpad-info cpad-info) cpad-get-data)
 
@@ -2493,7 +2520,8 @@
    author's wish); the right stick still turns the camera. The same while he stands still for a
    grenade throw, a rifle shot or a tazer stab (`*bf*` still-until, battlefront-player.gc): no
    weapon fires on the run since round 28 (the author's wish; the rifle did in rounds 26 and 27).
-   Returns PAD."
+   After a battle, START for the title screen (`bf-title-press!`). Returns PAD."
+  (bf-title-press! pad)
   ;; a guard jumps once, no second jump in the air; the robotguard does not jump (the author's
   ;; wish, round 29): X off then. Not while a page or a menu is up (X picks there), nor dead
   (when (and (zero? (-> pad number))
@@ -2771,6 +2799,19 @@
   (none)
   )
 
+(defun bf-to-title! ()
+  "A battle over (its result page's X, or Quit the battle on its pause page): the game's title menu,
+   its entries the battle's (`*bf-title*`: Start a battle, Options, Quit; round 33, the author's
+   wish). A new game at the title's continue point without its intro, title-restart, as the stock
+   demo's return to the title does (progress.gc). Side effects: the whole game reset."
+  (set! (-> *game-info* mode) 'play)
+  (initialize! *game-info* 'game (the-as game-save #f) "title-restart" (the-as resetter-spec #f))
+  (set-master-mode 'game)
+  ;; its "Press START" pressed for the player: the menu at once (`bf-title-press!`)
+  (set! *bf-title-press-until* (+ (-> *display* real-clock frame-counter) (seconds 60)))
+  (none)
+  )
+
 (defbehavior bf-back-to-title bf-director ()
   "Triangle on the war zone page opened from the title: the page gone, the START menu back to the
    title menu (`pop-state`)."
@@ -2946,6 +2987,7 @@
       ((= page BF_PAGE_RESULT)
        (bf-close-page)
        (bf-end-battle!)
+       (bf-to-title!)
        )
       ((and (= page BF_PAGE_PAUSE) (not (bf-pause-ok? i)))
        (sound-play "menu-back")
@@ -3883,9 +3925,11 @@
   (let ((req *bf-request*))
     (cond
       ((= req BF_REQ_END)
+       ;; Quit the battle: the title menu, as at a battle's end (round 33)
        (set! *bf-request* BF_REQ_NONE)
        (bf-close-page)
        (bf-end-battle!)
+       (bf-to-title!)
        )
       ((and (= req BF_REQ_LOBBY) (bf-can-open-menu?))
        (set! *bf-request* BF_REQ_NONE)
@@ -4942,6 +4986,41 @@
       #t
       #f
       )
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; The guards' voices
+;; ---------------------------------------------------------------------------------------------
+
+(defun bf-guard-taunt? ((kind speech-type))
+  "#t for the Jak 3 guards' battle lines (speech-h.gc: guard-generic-battle 1 to guard-bumped-by-jak-b
+   18, their cries when hit, 9 and 10, aside)."
+  (let ((k (the int kind)))
+    (and (<= 1 k) (<= k 18) (!= k 9) (!= k 10))
+    )
+  )
+
+(define-perm *bf-stock-speech-request* (function speech-control process-drawable speech-type none)
+  (the-as (function speech-control process-drawable speech-type none)
+          (method-of-type speech-control speech-control-method-12)
+          )
+  )
+
+(defmethod speech-control-method-12 ((this speech-control) (arg0 process-drawable) (arg1 speech-type))
+  "A speech request (every one goes through here, speech-control-method-13 too): the stock one, but
+   during a battle a red guard does not say the Jak 3 guards' battle lines (`bf-guard-taunt?`): they
+   are the Freedom League's voices, its blue guards' (round 33, the author's wish). Its cries when
+   hit stay. Returns nothing."
+  (if (not (and (bf-active?)
+                arg0
+                (= (-> arg0 type symbol) 'crimson-guard)
+                (bf-red-guard? arg0)
+                (bf-guard-taunt? arg1)
+                )
+           )
+      (*bf-stock-speech-request* this arg0 arg1)
+      )
+  (none)
   )
 
 ;; The game's Quit / Restart page during a battle: Restart Mission is refused with the refusal beep

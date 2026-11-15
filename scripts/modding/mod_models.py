@@ -31,11 +31,17 @@ The manifest (comments allowed):
         "clip_prefix": "",                     // the rip's clip names start with it
         "textures_from": "jak3/ctypesa/crimson-guard-lod0.glb", // images of the same name taken
         "texture_prefix": "cguardgame-",       // from this rip (those starting with the prefix)
-        "recolor": {"hues": [-15, 15], "rotate": 217, "min_saturation": 0.3}
+        "recolor": {"hues": [-15, 15], "rotate": 217, "min_saturation": 0.3},
                                                // a color variant: the texels of a hue in hues
                                                // (degrees, lo below 0 wraps around red) and that
                                                // saturated turned by rotate degrees; "textures":
                                                // [names] limits it to those images (optional)
+        "extra": [{"mesh": "jak3/ctypesa/crimson-guard-lod0.glb", "prims": [4, 5], "suffix": "j3"}]
+                                               // primitives of other rips added to the mesh, with
+                                               // their own textures, each image renamed
+                                               // <image>-<suffix> (the same names as the mesh's
+                                               // stay apart); their joints matched by name to the
+                                               // skeleton, same bind poses (optional)
       }
     },
     "files": {"custom_assets/jak3/music/X.MUS": "jak2/MUS/DANGER4.MUS"}  // copies from a disc
@@ -261,14 +267,17 @@ def copy_skeleton(out: Writer, src: Glb) -> tuple[int, dict[int, int]]:
 
 def copy_mesh(out: Writer, src: Glb, mesh_node: int, keep: list[int] | None,
               joint_remap: np.ndarray | None, textures_from: dict[str, tuple[bytes, str]] | None,
-              recolor: dict | None = None, model: str = ""):
+              recolor: dict | None = None, model: str = "", append: bool = False,
+              image_suffix: str = ""):
     """Copy the skinned mesh of `src` onto node `mesh_node` of `out`.
 
     keep          primitive indices to keep (None: all)
     joint_remap   JOINTS_0 value map from `src`'s skin to `out`'s (None: unchanged)
     textures_from image name -> pixels replacing `src`'s image of that name
     recolor      the model's recolor rule (None: none); an image it changes is renamed
-                 <image>-<model>"""
+                 <image>-<model>
+    append       add the primitives to the mesh already on `mesh_node` (an "extra" entry)
+    image_suffix every image renamed <image>-<suffix> (an "extra" entry's)"""
     mesh = src.json["meshes"][0]
     prims = mesh["primitives"] if keep is None else [mesh["primitives"][i] for i in keep]
     attr_map: dict[tuple[str, int], int] = {}
@@ -284,6 +293,8 @@ def copy_mesh(out: Writer, src: Glb, mesh_node: int, keep: list[int] | None,
             if textures_from and img.get("name") in textures_from:
                 data, mime = textures_from[img["name"]]
             name = img.get("name", f"image{index}")
+            if image_suffix:
+                name = f"{name}-{image_suffix}"
             if (recolor and mime == "image/png"
                     and ("textures" not in recolor or name in recolor["textures"])):
                 width, height, pixels = png_decode(data)
@@ -356,6 +367,9 @@ def copy_mesh(out: Writer, src: Glb, mesh_node: int, keep: list[int] | None,
         if "material" in prim:
             new["material"] = material(prim["material"])
         new_prims.append(new)
+    if append:
+        out.json["meshes"][out.json["nodes"][mesh_node]["mesh"]]["primitives"].extend(new_prims)
+        return
     out.json["meshes"].append({"name": mesh.get("name", "mesh"), "primitives": new_prims})
     node = out.json["nodes"][mesh_node]
     node["mesh"] = len(out.json["meshes"]) - 1
@@ -437,6 +451,8 @@ def needed_rips(manifest: dict) -> set:
         for key in ("mesh", "skeleton", "textures_from"):
             if key in entry:
                 refs.add(entry[key])
+        for extra in entry.get("extra", []):
+            refs.add(extra["mesh"])
     return refs
 
 
@@ -490,6 +506,20 @@ def build_model(ctx: Context, name: str, entry: dict) -> "Writer":
             sys.exit(f"{name}: the bind poses of the mesh and the skeleton differ (max {worst})")
     mesh_node, node_map = copy_skeleton(out, anim_src)
     copy_mesh(out, mesh, mesh_node, entry.get("prims"), remap, textures, entry.get("recolor"), name)
+    for extra in entry.get("extra", []):
+        src = rip(extra["mesh"])
+        names_e, names_s = src.joint_names(), anim_src.joint_names()
+        missing = [n for n in names_e if n not in names_s]
+        if missing:
+            sys.exit(f"{name}: joints of {extra['mesh']} missing from the skeleton: {missing}")
+        extra_remap = np.array([names_s.index(n) for n in names_e], dtype=np.int64)
+        ibm_e = src.accessor(src.json["skins"][0]["inverseBindMatrices"])
+        ibm_s = anim_src.accessor(anim_src.json["skins"][0]["inverseBindMatrices"])
+        worst = float(np.abs(ibm_e - ibm_s[extra_remap]).max())
+        if worst > 1e-3:
+            sys.exit(f"{name}: the bind poses of {extra['mesh']} and the skeleton differ (max {worst})")
+        copy_mesh(out, src, mesh_node, extra.get("prims"), extra_remap, None, None, name,
+                  append=True, image_suffix=extra.get("suffix", "extra"))
     copy_animations(out, anim_src, node_map, entry.get("padding", 0), entry.get("clips"),
                     entry.get("clip_prefix", ""))
     out.json["meshes"][0]["name"] = f"{name}-lod0"
