@@ -688,6 +688,14 @@ int add_material_for_tex(const tfrag3::Level& level,
       model, add_image_for_tex(level, model, tex_idx, tex_image_map, TexImageKind::RGBA),
       tex.debug_name, draw_mode);
   mat.alphaMode = draw_mode.get_ab_enable() ? "BLEND" : "MASK";
+  // glTF's BLEND is the usual alpha blend only: any other blend (additive light shafts, glows) is
+  // kept as its DrawMode::AlphaBlend value, which the importers (gltf_util::
+  // setup_alpha_from_material: build-actor, the level builder) apply back
+  if (draw_mode.get_ab_enable() &&
+      draw_mode.get_alpha_blend() != DrawMode::AlphaBlend::SRC_DST_SRC_DST) {
+    mat.extras = tinygltf::Value(tinygltf::Value::Object{
+        {"ps2_alpha_blend", tinygltf::Value((int)draw_mode.get_alpha_blend())}});
+  }
   // the foreground and background renderers both use this cutoff
   mat.alphaCutoff = (float)0x26 / 255.f;
   // metallic is reserved for the envmap strength below
@@ -1719,9 +1727,13 @@ void add_merc(const tfrag3::Level& level,
     model.nodes[node_idx].name = mmodel.name + "_blerc";
   }
 
-  if (art != art_data.end() && !art->second.anims.empty() && node.skin >= 0 &&
-      node.skin < model.skins.size()) {
-    const auto& skin = model.skins[node.skin];
+  // og:jak2-haven-city changed: `node` (a reference taken at the top) dangles here: model.nodes grew
+  // by one node per bone, and reading it was undefined behavior. On Linux it read freed memory,
+  // so a model such as Jak 2's wren was ripped without its animations. Read it by index.
+  const int node_skin = model.nodes[node_idx].skin;
+  if (art != art_data.end() && !art->second.anims.empty() && node_skin >= 0 &&
+      node_skin < (int)model.skins.size()) {
+    const auto& skin = model.skins[node_skin];
     for (const auto& ja : art->second.anims) {
       auto uncompressed = decompress_anim(ja);
       add_animation_to_gltf(uncompressed, skin, model, node_idx, (int)num_blend_targets);

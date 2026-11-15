@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -8,13 +9,12 @@
 
 #include "goalc/build_level/collide/common/collide_common.h"
 #include "goalc/build_level/collide/jak3/collide.h"
+#include "goalc/build_level/common/DataBlob.h"
 #include "goalc/build_level/common/Tfrag.h"
 #include "goalc/build_level/common/Tie.h"
 #include "goalc/build_level/jak3/Entity.h"
 #include "goalc/build_level/jak3/FileInfo.h"
 #include "goalc/build_level/jak3/Region.h"
-
-#include "third-party/json.hpp"
 
 namespace jak3 {
 struct VisibilityString {
@@ -23,7 +23,12 @@ struct VisibilityString {
 
 struct DrawableTreeActor {};
 
-struct DrawableTreeInstanceShrub {};
+// An empty shrub tree: enough for draw-drawable-tree-instance-shrub to send the PC renderer the
+// level's shrub bucket (it needs a nonzero length and an info with a prototype array), which then
+// draws every shrub tree of the level's fr3.
+struct DrawableTreeInstanceShrub {
+  size_t add_to_object_file(DataObjectGenerator& gen) const;
+};
 
 struct DrawableTreeArray {
   std::vector<DrawableTreeTfrag> tfrags;
@@ -40,17 +45,11 @@ struct TextureId {};
 
 struct VisInfo {};
 
-struct EntityCamera {};
-
 struct BspNode {};
 
 struct RaceMesh {};
 
 struct LightHash {};
-
-struct EntityNavMesh {};
-
-struct CityLevelInfo {};
 
 struct TextureMasksArray {};
 
@@ -132,9 +131,10 @@ struct LevelFile {
   //  (light-hash             light-hash                       :offset-assert 176)
   LightHash light_hash;
   //  (nav-meshes             (array entity-nav-mesh)          :offset-assert 180)
-  // the level's nav meshes, as a relocatable blob of entity-nav-mesh objects (the "nav_data" of
-  // the level: words, pointers, types, symbols, empty_lists, roots "nav-mesh-<n>"); null for none
-  nlohmann::json nav_data;
+  //  (city-level-info        city-level-info                  :offset        208)
+  // both from a DataBlob (nav_data in the level json): its "city-level-info" root and its
+  // "nav-mesh-*" roots (entity-nav-mesh)
+  std::optional<DataBlob> nav_data;
   //  (actor-groups           (array actor-group)              :offset-assert 184)
   std::vector<ActorGroup> actor_groups;
   //  (region-trees           (array drawable-tree-region-prim) :offset-assert 188)
@@ -148,8 +148,6 @@ struct LevelFile {
   std::vector<u32> wind_array;
   //  (wind-array-length      int32                            :offset        204)
   s32 wind_array_length = 0;
-  //  (city-level-info        city-level-info                  :offset        208)
-  CityLevelInfo city_level_info;
   //  (vis-spheres            vector-array                     :offset        216)
   //  (vis-spheres-length     uint32                           :offset        248)
 
