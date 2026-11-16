@@ -1,1855 +1,358 @@
-# Battlefront — Mod Readme
+# Battlefront — developer guide
 
-- **Game:** Jak 3
-- **Repository:** `whozghiar/jak3-mod-battlefront` (prepared locally as `mods/jak3-mod-battlefront`, not published yet)
-- **Status:** In development, no release. Round 43 (2026-11-15: the crash at 100 units at once a side found and fixed, the global DMA buffer's overflow; 100 a side by default again) passed its smoke test in game twice ([`battlefront_tests.md`](battlefront_tests.md), T79). Round 42 (2026-11-15: Jak 3's city no longer offered; two headquarters a side in Jak 2's city, a ship over each, none elsewhere; each side's units drawn at random among its headquarters and held points; a neutral point captured faster the larger the majority, 10 s at the fastest; the author's new rocket and grenade icons in the stock weapon icon's box, both ammo purple; the units spread over every objective, defend the attacked ones from 350 m and run to them, no more patrol walk; the goal draw's overflow in Jak 2's city fixed) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T76 to T78); at 100 units at once a side the game crashed in 3 of 4 runs of five minutes of fights (round 43 found why). Round 41 (2026-11-15: the units at once per side set on the battle setup, 30 to 100; two forward ships a side over the neutral points nearest the front, the units' goals ranked by the front; Jak 2's doors closed in the Jak 2 war zone; Jak 2's city map in the menus, on L3 and on the HUD's minimap, made at install from the player's discs; the menus laid out again) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T71 to T75). Round 40 (2026-11-15: Jak 2's Haven City as a second war zone, made at install from the player's discs, one level with every district, 15 control points, the bases in the slums and at the palace; 63 units a side) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T67 to T70). Round 39 (2026-11-15: the spider's headbutt reach 12 m; its blast charged in 30 s in an orange gauge, 40 m across, with the Super Nova's mushroom cloud, the camera pulling far back to show it) passed its smoke test in game but for the reach, not measured ([`battlefront_tests.md`](battlefront_tests.md), T66). Round 38 (2026-11-15: the robotguard's L1 grenades, 10 a life, from each fist in turn, their icon in the gun HUD, one fallen robotguard in 10 dropping 5; the spider's headbutt shock jumping to 2 more foes with the Peace Maker's look; the spider's L1 blast, a small Super Nova that kills it) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T64 and T65). Round 37 (2026-11-15: the jetpack's R2 boost back, only the Square dive kick off; the rocket icon purple and smaller; one fallen jetpack guard in 10 drops 5 rockets) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T63). Round 36 (2026-11-15: no precursor orb nor crate in a battle; the jetpack guards' L1 rocket, 10 a life, its icon in the gun HUD, their R2 boost and Square dive kick gone; every guard slower; the red guards' weapons the blue guards' at last) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T61 and T62). Round 35 (2026-11-15: points captured within 35 m; L3 + the right stick zooms the camera out and back; the close attacks' reach 5 m; the red guard's clips no longer too fast after a weapon change; the AI guards a little slower; every walker's legs at its speed, the AI's and the player's guards' and robotguard's) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T60). Round 34 (2026-11-15: the player's classes as fast as the units of round 33; a guard's jump at least Jak's whole jump, higher held; the strafe to the left a hop, not a roll) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T59). Round 33 (2026-11-15: a guard's jump 1.3 times higher; L2 and R2 sideways only; the units faster by kind; the red guards' weapons the blue guards' own, changed on the same model; the red guards silent of the Jak 3 lines; a battle's end and Quit back to the title menu) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T58); the red guards do not yet shout Jak 2's lines. Round 32 (2026-11-15: a dead unit's pickups fall to the ground under it; units no longer go NaN and hold their side's places, a jetpack's NaN turn mended and any unit at NaN put back to sleep, so the points keep bringing units to the end of a long battle) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T55 to T57); the guards standing and reloading and the units walking through walls were not seen in the runs. Round 31 (2026-11-14: the START menu's pages no longer scroll at every frame under the running battle; the camera follows a respawn again (it hung in the air or the water); the Respawn page's class, then its point, then X; every class's points fill its health ring; the maps without a disc, their marks smaller; units stuck on their way put onto their waypoint after 4 s) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T51 to T54); the war music was found playing in every run, and no unit stuck on the way to the Slums. Round 30 (2026-11-14: control points captured within 25 m; one round map on every page and on L3, the points' letters inside their marks, a point being taken blinking there and on the minimap; the battle going on under every menu of a fight; the class picked before the battle, shown as a picture; a death's X respawning at once at the respawn point as the last class, a frame on the right saying so, Triangle the Respawn page; Redeploy's class page and its back; no damage from the spawn's drop; a fall's damage crying the class's cry; the jetpack sounding as the battle's jetpack guards) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T48 to T51), but for a robotguard's fall. Round 29, second part (2026-11-14: the mode on by default; the battle's pages in the game's START menu: the title menu's Start a battle, Options and Quit, the war zone page, the battle setup with its time limit, units per side and victory condition, the class page in three columns with its respawn point row, the class's buttons only and a radar on the city's own map, the pause and result pages) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T48 and T49). Round 29, first part (2026-11-14: the player's shots and blows twice a unit's; health packs 3 points; the class's cry when hit, Jak's breaths silent; one jump for a guard, none for the robotguard, their own jump sounds; the jetpack's bike sounds and flames pointing down; the red guards' and the player's dissolve as the stock one launches its sparks; the units keep their goal, and a stuck unit is put onto its waypoint; the reserve meter as a T, the control point shown only in its capture zone, the minimap marks in their holder's color) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T44 to T47). Round 28 (2026-11-13: units brought down within 250 m of their point, a jetpack never over the walkways; the rifle's shot on the whole body, the player still and facing the crosshair; the battle's page at once when the mode is switched on; the guards cross between Slums B and Slums A at once; the red guards dissolve in the blue guards' sparks; the player's class model dissolves under a camera looking down at it; the dead player watches the battle until X (the respawn page) or Triangle (the class page, then the respawn page); Redeploy opens the class page first) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T41 to T43). Round 27 (2026-11-13: Triangle reloads a guard's rifle; eight control points, two in each district, lettered A to H, a red disc with its letter on the minimap; the units' goals drawn at random among the three points their side does not hold nearest its base; at most 3 units posted on a point, a pooled unit's post dropped as it comes down again; the jetpack guards no higher than 15 m over the street) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T38). Round 26 (2026-11-12: guards going by the Industrial Zone's walkways; the units brought to a point going on unless a foe comes; units appearing within 90 m of a point; robotguards and spiders falling at once, through the scenery under the ships; the grenade thrown as the stock guard throws, standing and facing the crosshair, the rifle alone on the run; the war music everywhere; START's page with Options and a redeploy at any time, a unit's cost in combat; no Gamemode in the game's menu, no Restart Mission) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T35 to T37). Round 25 (2026-11-12: the jetpack's flames, longer while it boosts; the units of a control point dropping from the sky, a guard with its jump, a robotguard as a ball, a spider tumbling, a jetpack flying down; the robotguards rolling as a ball on their long marches, their ball 1.5 times as fast, the player's too; the player's respawn from the sky around the point he picked, his controls locked until he lands) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T34). Round 24 (2026-11-11: the jetpack's boost gauge 10 s; the rifle 20/100; the units of a side appear anywhere on the nav meshes around its most advanced control point, no ship there; no foe behind a wall; the pickups' shares, blue ammo recharging the tazer) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T33). Round 23 (2026-11-11: a ship over each base only, the units out of the air elsewhere, three at a time, where the crowd is; goals spread; the Port's base and point swapped; units sent on at once at a section's edge, by the several links a way can take; the robotguard fires behind its shield, stands still, its gauge refills; the spider's headbutt on Square shocks as the tazer, its sprint without the leap clip; the tazer's whole stab and shock; each class's own death and cry; an empty health ring kills; the class page's previews and help) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T32). Round 22 (2026-11-09: L3 shows the kills, the deaths and the whole map; the tazer's whole stab; units come down at the front and defend an attacked point; a fallen unit's place waits 5 s; every unit 1.5 times as fast, its legs at the stock pace; the robotguards and spider robots march to their points; 6 pickups in 10 deaths, each gone after 10 s) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T31). Round 21 (2026-11-09: R3 hides the game's minimap behind the whole map; the guard kneels on L1 and aims steadier, dodges on L2 and rolls on R2 toward the stick; the rifle's spread shown by the crosshair's size) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T30). Round 20 (2026-11-09: START opens the battle's own pause page over the city's live map; R3 shows the kills, the deaths and the whole map; 40 units a side, each brought by a ship over one of its side's points picked at random; guards 1.5 times as fast; units take the nearest point their side does not hold, a contested one near them first, and turn onto the foe they see best; the minimap's marks in each side's color and the points as black discs; maps with units as discs and view cones; no frame of Jak at the deploy; the class model facing the crosshair as it fires) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T25, T26). Round 19's whole city (2026-11-09: every street section of Haven City loaded during a battle, so both armies fight at every point at once) passed its smoke test in game ([`battlefront_tests.md`](battlefront_tests.md), T24). Round 19 (2026-11-08: a side with no point near the player brings its units in from the edge of the loaded area, as Star Wars Battlefront's armies come from every command post; force fields at the ruins of the old town and at the Metal Head nest; every door shut) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T23). Round 18 (2026-11-08: the war zone page with Spargus greyed, a ship stationed over every held point and swapped at a capture, the points on open ground, the 3 s spawn shield with the class model blinking, every class aiming, the live units on the respawn page) passed its smoke tests in game ([`battlefront_tests.md`](battlefront_tests.md), T19). Round 17 (2026-11-08: the whole of Haven City as the battlefield, a control point in each district, no force field, the respawn page at every death on the city's map, the redeploy, the units routed to their points, the transports under open sky) passed its smoke tests in game except the defenders' check ([`battlefront_tests.md`](battlefront_tests.md), T18); round 16 (battle points with capture, troop transports bringing the units, the guard's upper body turned toward its aim) passed T14 to T17, as did round 14 (2026-11-06: health and damage on one 24 point scale, guard rolls and strafes, smaller magazines and the tazer's recharge, the jetpack's boost, the robotguard's timed shield and ball, the spider's 11 m leap, targeting by side, kill counter, class help with the pad's icons) passed its smoke tests in game, as did round 13 (third-person camera, class page right after the side page, Mods menu on L3 + SELECT) ([`battlefront_tests.md`](battlefront_tests.md)). Earlier rounds were tested by automated runs on 2026-10-31 and 2026-11-01 ([§3.1](#31-what-the-in-game-runs-checked)); the author played the second round once; the rounds since, which answer their notes, are checked by automated runs only.
+This guide explains how the Battlefront mod for Jak 3 works, for developers and agents who change
+it: the ideas it rests on, how a battle runs, where the code lives, which engine limits it raises
+and how to test it. Players read the root [`README.md`](../../../README.md); the smoke tests are in
+[`battlefront_tests.md`](battlefront_tests.md).
 
-This is the developer and agent documentation of the mod: what it changes, how it works, how to
-test it, its limits, and its change log. Players read the root [`README.md`](../../../README.md).
-
-**Contents:** [1. What the mod does](#1-what-the-mod-does) · [2. Architecture](#2-architecture) · [3. How to test](#3-how-to-test) · [4. Status and known limits](#4-status-and-known-limits) · [5. Change log](#5-change-log)
+**Contents:** [1. The idea](#1-the-idea) · [2. Key notions](#2-key-notions) ·
+[3. How a battle runs](#3-how-a-battle-runs) · [4. Files](#4-files) ·
+[5. Engine limits](#5-engine-limits) · [6. Build and test](#6-build-and-test) ·
+[7. Known limits](#7-known-limits)
 
 ---
 
-## 1. What the mod does
+## 1. The idea
 
-The mod turns a section of Haven City into a battlefield between the Freedom League and the
-Krimzon Guard. Each side has the units of the battle setup in stock (500 by default, 50 to 1000);
-every death of a unit or of the player takes one from its side, and a side down to 0 loses. The player fights on one side, as any of its
-four classes.
+Jak 3's Haven City already runs a war. Its **traffic engine** spawns Freedom League guards and
+Krimzon Guard robots in the streets, and its **attack controller** makes each one fight the other
+faction. The mod writes no AI of its own. It borrows that machinery and adds what a Battlefront
+game needs:
 
-| Side | AI units | Playable classes |
-|---|---|---|
-| Freedom League (French: Ligue de la liberté) | blue guards, blue jetpack guards | Blue Guard, Blue Guard (Jetpack) |
-| Krimzon Guard (French: Grenagarde) | red Krimzon Guards, red jetpack guards, robotguards, spider robots | Red Krimzon Guard, Red Krimzon Guard (Jetpack), Robotguard, Spider Robot |
-
-The red Krimzon Guard and the jetpack guard are Jak 2 models brought into Jak 3 (§2.3). Jak himself
-was a Freedom League class until the fifth round, the Spargus Citizen until the twelfth; neither is
-playable any more.
-
-### Switching it on
-
-The mode is on at every boot (round 29, the author's wish: `*mod-battlefront-enable*` is `#t` in
-`battlefront-h.gc`, and nothing saves it). Every battle page is a page of the game's START menu
-(round 29, the author's wish: the look of the game's menus, after the multiplayer mod's lobby): the
-progress state `'battlefront`, whose one option (`menu-bf-page-option`) hands the keys to the
-director (`bf-menu-input`); the director draws the page inside the menu's ring (`bf-menu-draw`,
-`*bf-frame*`: yellow header and text, the white and olive bar of the cursor's row). The title menu
-lists **Start a battle** (`menu-bf-title-option`), the game's **Options** and **Quit** in place of
-New Game, Load Game, Options, Secrets and Quit (`set-menu-options`, `*bf-title*`). In a debug boot
-(`task boot-game`: no title), `cpad-get-data` opens the title menu once Jak stands
-(`*bf-boot-menu?*`).
-
-From the title, Start a battle opens the war zone page, then the **battle setup**
-(`BF_PAGE_CONFIG`, `*bf-config*`): the time limit (`*bf-time-choices*`: none, 5, 10, 15, 20, 30
-minutes), the units per side (50 to 1000 by 50), the units at once per side (30 to 100 by 10,
-100 by default, `bf-caps-set!`), the victory condition (`BF_WIN_POINTS`: every
-control point held for `BF_HOLD_WIN`, 20 s, wins; `BF_WIN_UNITS`: only a side out of units loses),
-the special characters (No; Yes is greyed, none exist), the zone's map with its points, and the two
-sides, each change swapping both so they never match. Next starts a new game in the city
-(`BF_REQ_START`: `initialize!` into the zone's continue point, then the battle once Jak stands) and
-opens the class page, its button **Start the battle** (`from-title?`). `bf-check-victory` ends a
-fight at the time limit (the side holding more control points wins, on a tie the one with more
-units left) or at a points victory; a side out of units loses in any case. A save loaded or a new
-game started during a battle ends it and switches the mode off until the next boot (`bf-stop-now!`).
-
-The Mods menu (**L3 + SELECT**) keeps the switch, `battlefront` > **Battlefront mode**. Switched on
-in game, the Mods menu closes and the battle's own pause page opens at once (round 28); on, START opens that page
-(§2.5, START: the battle's pause page); its last entry, Options, opens the game's own START
-menu, where a battle shuts Save, Load Game, Secrets and Restart Mission (their X is refused with
-the game's refusal beep). Off during a battle, it loads the last save (the slot last loaded or
-saved), or, with no save since the boot, ends the battle at the side's spawn.
-
-The pause page lists these entries, the ones that do not apply grey, and shows the city's map as it
-stands in the right frame:
-
-| Entry | Effect |
+| Battlefront needs | The mod gives it |
 |---|---|
-| Resume | Back to the game. |
-| New battle | Out of a battle: the battle menu. Grey during a battle. |
-| Redeploy | During a fight, the player alive: the class page with its respawn point row; Triangle back to this page. The only way to change class since round 30 (Change class is gone). Out of combat for 30 s it is free; in combat it reads "Redeploy (lose a unit)" and costs his side a unit. |
-| Restart the battle | During a fight: the same zone, side and class from the setup's units each, back at the spawn with fresh ammo. |
-| Quit the battle | Ends the battle and restores the stock game. |
-| Options | The game's own START menu. |
+| Two armies | The city's own units, two of them dressed as Jak 2 models (§2.2) |
+| A battlefield | Jak 2's Haven City, rebuilt as one Jak 3 level from the player's discs (§2.8) |
+| Objectives | Headquarters and control points that units capture (§2.5) |
+| Reinforcements | Troop transports and drops from the sky at held points (§2.6) |
+| A soldier to play | Jak, hidden, with a unit's model, moves and weapons drawn over him (§2.4) |
+| A game around it | Menus built as pages of the game's START menu (§2.9) |
 
-Until round 26 the game's START menu also had a Gamemode entry in Options, with the same entries;
-the author had it removed: START is the battle's page.
+Everything ships on by default: the mode's switch (`*mod-battlefront-enable*`, `battlefront-h.gc`)
+starts `#t` at every boot and is not saved. Switching it off in the Mods menu (L3 + SELECT) gives
+the stock game back until the next boot.
 
-The entries that do not apply are grey. In the city the menu has three pages, war zone, side,
-class; from the title, war zone, setup, class (round 30: the class before the battle,
-`class-mode` BF_CLASS_DEPLOY). Its X starts the deployment: the war zone loads on black
-(BF_PAGE_LOADING, "Loading the war zone...", `bf-black-set!`), the game running, and the player
-is in as that class once the zone is ready (`bf-class-apply!`). The class page has three columns
-(`bf-draw-class-page`): on the left the classes, the cursor's under the highlight bar, for a
-respawn or a redeploy (BF_CLASS_RESPAWN, BF_CLASS_REDEPLOY, `respawn?`) a **Respawn point** row,
-whose Left and Right cycle the side's base and the control points it holds
-(`bf-next-held-point`), then what the class picked does with its buttons and nothing else
-(`*bf-classes*` desc); in the middle the reserves (the setup's units before a battle), the class's
-picture (`bf-draw-portrait`) and the button (Spawn for a respawn or a redeploy, Start the battle
-from the title, Deploy otherwise); on the right the objective and the map. Triangle goes back:
-to the setup or the side page, to the death screen, to the pause page. For a respawn or a
-redeploy, X on a class picks it and moves the cursor to the respawn point, whose X confirms both
-(round 31, the author's wish).
+## 2. Key notions
 
-The pictures replaced the turning model in round 30 (the author's wish: nothing to load, and the
-class is picked before the battle, its models not loaded yet). Smoke scenario 53 draws each class
-model alone on black and screenshots it; `scripts/battlefront/make_portraits.py` squeezes the
-shots back to 4:3 (the 640 x 480 smoke window is screenshot at 1280 x 720), crops each around its
-model, shrinks it to 80 x 120 texels with a transparent background, and writes the six side by
-side into one 512 x 128 texture of 8-bit indices with one palette, in
-`battlefront-portraits.gc`. `bf-draw-portrait` uploads it as the map is uploaded, in its own
-texture bucket (`tex-hud-pris2`): an upload in the page's text bucket stopped the game ("expected
-direct, got PC_PORT", DirectRenderer.cpp).
+### 2.1 The director and the battle state
 
-Under the running battle, pad 0 is hidden from the world by `cpad-invalid!`, which also zeroes
-`button0-shadow-abs`, the raw state the next read compares with: until round 31 every held button
-came back as a new press each frame (the cursor ran through a page while Down was held, a page's
-opening press confirmed or closed it at once). `bf-input-update` puts that field back. A respawn's
-camera teleport rebuilt the camera on the dying rig when it came at once (a redeploy, X on the
-death screen): the camera hung where it was sent. Each new rig binds the camera to itself
-(`bf-cam-rig-init-by-other`, the same teleport from where the camera stands).
+One process, `bf-director` (`battlefront.gc`), runs the whole battle. It lives in `*pc-pool*`, so it
+survives level changes and Jak's deaths. The battle's data sits in one static structure, `*bf*`:
+the phase, the reserves, the points, the player's class, his respawn point, and the handles of the
+director and of the class model.
 
-During a fight the battle goes on under every menu (round 30, the author's wish; `bf-live-update`,
-the multiplayer mod's way, Lisp wiki jak3): the opposite of the menu's `'process-mask` setting in
-`*setting-control*` engine-hi, its sounds let go on, the live game shown behind it (the
-`set-menu-mode` wrapper: no still copy), and pad 0 hidden from the world meanwhile (`bf-input`, a
-process run first every frame, and `bf-menu-hook`, which gives the pad back to the menus). The
-director's fight update runs under an open page, its HUD aside. The class and result pages need
-a choice: START does not close them (`can-go-back?`). The texts are French when the game language
-is French, English otherwise.
+The battle moves through four phases (`BF_PHASE_*`, `battlefront-h.gc`):
 
-Every page shows the same map (round 30, the author's wish: one map everywhere, L3's too; round
-31: no disc around it): the war zone's own map (`bf-page-map` places it), its marks drawn by
-`bf-draw-map-marks`, each point as on the minimap (`bf-draw-point-mark`: its letter in white
-inside its disc, sized to it; blinking while `bf-point-capturing?`; round 31, smaller). Before
-round 30 the pages showed the whole city as the START menu's map draws it (white streets, blue water,
-the ruined center and the stadium included), the Freedom League's base in blue, the Krimzon
-Guard's in red, the control points in gray, and Jak in white. North is up, as on the minimap. On
-the maps of a battle (the respawn page, L3, the pause page; `bf-draw-city-map`) each point is a
-black disc ringed in its holder's color, larger than a unit, each unit awake a disc with its view
-cone (60 degrees, toward its heading) in its side's color, as the game's minimap marks a guard, and
-Jak a white one looking where the battle camera looks. On the game's minimap, each unit has its
-side's mark (the guard's blue one for the Freedom League, the robot's red one for the Krimzon
-Guard), each control point a red disc with its letter over it, and each base a black disc (§2.9).
+| Phase | What happens |
+|---|---|
+| `off` | No battle. Every hook the mod placed in stock code answers like the stock game. |
+| `deploy` | The war zone loads under the class page; Jak waits at the spawn until he stands on solid ground. |
+| `fight` | The battle runs: points, reinforcements, HUD, the class model. |
+| `over` | The result page; X goes back to the title menu. |
 
-The battlefield is the whole of Haven City (round 17; until round 16 a battle held one district,
-its sections kept loaded behind a force field). The war zone page lists Haven City, and Spargus
-greyed ("coming soon"), which X refuses.
+> [!IMPORTANT]
+> Keep a process as a **handle**, never as a pointer, across frames. Processes live in dead-pool
+> heaps that compact and reuse their slots, so a stale pointer names another process. A global
+> symbol holds only 32 of a handle's 64 bits, so the handles live in `*bf*` fields.
 
-| Point | Continue point (its levels for a respawn) | Place |
-|---|---|---|
-| Freedom League base | `ctyslumc-freehq-exit` | the entrance of the headquarters |
-| Krimzon Guard base | `ctyport-bbush-8` | the middle of the Port, 89 m from where the Port's point stood until round 23 (the continue point nearest it) |
-| A: Port | `ctyport-bombbot` | (620, 8, 1477) m, the east docks, where the base stood until round 23 (the author swapped them) |
-| B: Port Gate | `ctyport-warzone` | (741, 7, 1349) m, its continue point's place |
-| C: North Industrial Zone | `ctyinda-bbush-5` | (895, 10, 1149) m, its continue point's place |
-| D: Industrial Zone | `ctyinda-bbush-5` | (929, 10, 855) m |
-| E: South Industrial Zone | `ctyindb-start` | (971, 10, 546) m, its continue point's place |
-| F: Slums | `ctysluma-alley` | (1001, 10, 266) m |
-| G: Sewer Exit | `ctyslumb-start` | (721, 5, -294) m, the street to the sewer's exit, where Slums B's nav mesh ends: the exit itself, 61 m east, has no nav mesh within 8 m and its continue point (`ctyslumb-sewer-exit`) loads the sewer |
-| H: Freedom HQ | `ctyslumb-bbush-4` | (522, 3, -340) m |
+### 2.2 Units are the city's traffic
 
-The letters run from the Krimzon Guard's base to the Freedom League's (`*bf-point-order*`), the
-order of the points' links (`*bf-point-links*`: each point next to the one before and after it, A
-to the Krimzon Guard's base, H to the Freedom League's). Round 27 added B, C, E and G (the author's
-wish: more points), at indices 6 to 9 of `*bf-point-defs*`, after the first four (2 to 5); until
-then the letters A to D were the Port, the Industrial Zone, the Slums and Freedom HQ.
+A unit of the battle is a citizen of Haven City's traffic. Three ideas explain how the mod drives
+them:
 
-The control points stand on lane middles found in round 16's battles (`*bf-point-defs*` in
-`battlefront-h.gc`). No district force field holds the player: he walks anywhere but into the
-ruins of the old town and the Metal Head nest, each closed by a force field (§2.9), the game
-loading the sections around him as it does outside a battle; a jetpack class stays under a ceiling 30 m above
-the higher base (Light Jak's shield sparks, "CEILING"), and a fall 20 m below his last place
-standing puts him back there. The player cannot get into a vehicle during a battle; airlocks and
-doors to the interiors stay shut and no car is parked.
+- **Pools.** The traffic keeps one pool per unit type. A pool spawns its processes once; a unit
+  that dies goes back to sleep in its pool and comes out again later. It is never respawned, so
+  its look is chosen once, when the pool spawns it.
+- **Asleep or awake.** A sleeping unit costs nothing. The traffic wakes units onto the streets near
+  the camera and puts them back to sleep when they leave its view. During a fight the mod wakes
+  them itself (§2.6) and keeps them awake wherever the camera looks (`bf-keep-unit?`).
+- **Caps.** Each pool has a `want-count`, rewritten every frame by `traffic-manager-method-22`.
+  The mod's one-line change there asks `bf-want-count`, which returns the battle's caps
+  (`*bf-pool-caps*`) during a fight.
 
-### During a battle
-
-- **Armies:** the battle setup's units at once per side, 30 to 100 by tens, 100 by default since
-  round 43 (60 in rounds 41 and 42, 63 in round 40, 40 until round 39). The Freedom League's are 72 % blue guards, the rest blue jetpack
-  guards; a fifth of the Krimzon Guard's (k) gives 2k red guards (riflemen and grenadiers), k red
-  jetpack guards, k robotguards and the rest spider robots (`bf-caps-set!`): at 100, 72 and 28
-  against 40, 20, 20 and 20. Every unit arrives by one of its side's troop transports (§2.9). Every unit
-  moves faster than the game's, its legs at the stock pace (`*bf-unit-pace*`, battlefront-city.gc):
-  guards 1.6 times (19.2 m/s running; 1.9 in round 35, 2.1 in round 34), jetpack guards 1.5, robotguards on foot 3 and as a ball 2.25
-  (45 m/s, `BF_ROLL_SCALE`), spider robots 2.4; 1.5 for all until round 33 (the author's wish: guards
-  1.4 times faster, robotguards 2 on foot and 1.5 as a ball, spiders 1.6). The player's classes the
-  same since round 34 (§2.4, `*bf-class-art*` speed). A fallen unit's place waits 5 s before its side's ship fills it. A unit
-  standing on the battlefield stays there wherever the camera looks (§2.2). No citizen walks or
-  drives in the city during a battle.
-- **Battle points:** each side's base, and two control points in each district, neutral at the start,
-  each a beam in its holder's color (white while neutral). A side with more units than the other
-  within 35 m (`BF_POINT_RADIUS`; 25 m until round 35, 15 m until round 30) captures a point in 30 s; the HUD shows A to H under the reserves, in the
-  holder's color, with the capture under way in percent. A held point is a place to respawn, and
-  where the side's transports land; units walk toward their side's points, to guard or to take
-  them, and points away from the player are fought for without units (§2.9).
-- **HUD:** the reserves at the top middle in a wide, flat T as the author drew it (round 29,
-  `bf-draw-reserves`: triangles and quads, `bf-draw-quad`, `bf-draw-line`): a semi-transparent slate
-  blue back, a thin light blue-grey border and a divider; the Freedom League's bar fills to the left
-  in blue, the Krimzon Guard's to the right in red, each as long as its reserve, both counts in the
-  inverted trapezoid under its middle (until round 28: the player's side green, the enemy red).
-  Under it, only the control point whose capture zone (15 m) the player stands in: its letter and
-  its capture in percent (`bf-draw-points-hud`; all eight letters until round 28). On the minimap,
-  each control point is a soft glow, a thin ring and a dot with its letter in its holder's color
-  (blue, red, white neutral), drawn over its own mark, now invisible (`bf-draw-minimap-letters`,
-  `bf-draw-ring`); on L3, the player's kills and deaths where
-  the game shows its orb and skull gem counters, and the whole city's map, live, the game's minimap at the bottom right hidden (`'minimap 'clear` setting;
-  L3 again hides them and gives the minimap back; L3 + SELECT still opens the Mods menu, and R3's
-  first-person view is off during a battle); the crosshair in the middle (red when it is on a foe); top right, the stock gun HUD
-  showing the weapon in hand (yellow gun 1 for the rifle, blue gun 2 for the tazer, red gun 3 for
-  the grenade launcher), under it the guard's own rounds: the rifle's magazine as 20 shells in two
-  columns and "magazine/carried" (20/100), the grenades as 5 shells and their count, for the tazer no ammo, only
-  the seconds left while it recharges, in red (§2.8), for a jetpack guard its rocket icon over the
-  hidden stock one, its 10 rockets as purple shells (red until round 41) and their count, for a robotguard its grenade icon
-  (round 38) over its 10 grenades as purple shells and their count; Jak's stock health HUD kept shown, its eco
-  gauges showing the class's gauge: the jetpack's boost in the dark eco gauge, the spider's blue
-  eco in the light eco gauge in blue and its blast's charge in the dark eco gauge in orange (round
-  39), the robotguard's shield in the light eco gauge in red
-  (draining while it is up, refilling until it can go up again). No weapon name, no class model in
-  the ring.
-- **Health and damage:** one 24 point scale for every class and unit (§2.8): guards and
-  robotguards 24, jetpack guards 18, spider robots 12; a rifle shot takes 8, a grenade's blast 20,
-  the tazer 24, a close attack 10 (rifle butt, punch; the jetpacks' dive kick until round 36), a
-  spider robot's bite 12 (the player's spider: a headbutt, the tazer's 24 and shock), a jetpack's
-  shot 6, the player's jetpack rocket 20 (a grenade's), a robotguard's shot 4. A side's own fire takes nothing from its units or from the player;
-  Jak running or jumping into a unit takes nothing from it. Every close attack plays Jak's punch
-  sound ("punch-hit").
-- **Targeting:** twice a second each unit takes again the foe it sees best, the nearest within
-  100 m (its current foe counting double); with one within 40 m it stops its march and fights it,
-  else it goes on to its point; the other side turns onto the player within 50 m of him; his own side never takes him as a target (§2.8).
-  No guard of the battle carries the tazer: a blue guard the squad gives it gets the rifle or the
-  grenade launcher instead (by its process id, for good), the red guards the weapon their model
-  holds.
-- **Outside the campaign:** while a battle runs, no mission or activity can start, no vehicle can
-  be taken, and the START menu's Save, Load Game and Secrets are grey and refused (the stock
-  refusal beep); a load from elsewhere (or a new game) ends the battle and loads the save normally.
-- **Pickups:** 6 of every 10 dead units leave a stock pickup, in a random order (a bag of 10
-  deaths holding 6, `bf-queue-drop`): dark eco 30 % (three pills), ammo 40 % (yellow 60 % of it,
-  red 30 %, blue 10 %), health 30 % (the author's shares, round 24), each exact over a bag of 10
-  pickups and one of 10 ammo pickups (`bf-drop-roll`, `bf-bag-draw`: a draw at each pickup gave
-  health 50 times in 108 over three battles); 3 in 10 before round 22. Blue
-  ammo recharges the tazer at once (`bf-avatar-moves` empties Jak's blue ammo and the tazer's
-  wait). A jetpack guard also leaves its rockets, one death in 10 (the author's 10 %, round 37: its own
-  bag, `*bf-rocket-bag*`, over the bag above), and a robotguard its grenades, one death in 10 too
-  (round 38, `*bf-grenade-bag*`): the stock dark ammo pickup, purple as their icons, which
-  `bf-avatar-moves` turns into 5 rockets for a jetpack or 5 grenades for a robotguard (`*bf*`
-  rockets, `BF_ROCKET_PICKUP`, 10 at most) and wastes for another class; each deployment empties Jak's dark ammo so that only a pickup brings
-  some. During a battle red, blue and dark ammo pickups stay what they are (a `verify-pickup-type`
-  wrapper: the stock one turns them yellow when the save lacks that gun). Each one goes 10 s after it appears, wherever Jak
-  stands (`*bf-drop-fact*`: the stock pickup fades only with Jak over 50 m away; an ammo pickup
-  keeps a fixed 15 s whatever its fact says, so `bf-spawn-drops` sets each born one's `fadeout-timeout`).
-  A pickup born moving bounces down to its `base`, the height it was born at, with no collision
-  (collectables.gc `deploy`): a jetpack guard's stayed in the air. Since round 32 each one born
-  gets the ground's height under the spot as its `base` (`bf-ground-under`, a probe down), and
-  falls there (scenario 58: born 17 m up, resting within 1 cm of the ground). Dark eco is the jetpack's boost: one drop fills its gauge (round 36 took the boost away, round 37 brought it back: the author wanted Square's dive kick off, not R2). Jak's light and dark eco are set aside for the battle and given back at its end, and the
-  "endless dark eco" and "endless light eco" secrets are off during a battle (they would keep every
-  jetpack full and the light eco gauge lit).
-- **Death:** a hit that leaves less than one segment of the health ring kills (the ring lights
-  `(the int health)` segments, and an empty one took one more hit). The player's side loses a
-  unit; his class model dies its own way while the battle camera looks down at it, centered
-  (`bf-avatar-dying`, `bf-cam-rig-update`): a guard plays the stock guard's death clip with its
-  death cry, then dissolves for a second in the purple sparks of the game's death-default effect,
-  8 a frame from its joints, and goes; the robotguard explodes (`group-kg-explosion`, robo-explode);
-  a jetpack guard fades, then explodes (`group-kg-small-explosion`, fly-turret-die); the spider
-  explodes with its death cry. The camera then follows a living unit of his side until he chooses
-  (round 30, the author's wish): a frame on the right shows his respawn point (`*bf*`
-  respawn-point, kept from death to death; his base while his side has lost it) and his class
-  (`bf-draw-respawn-frame`); after 2 s, X respawns him there as that class at once, Triangle opens
-  the class page (`bf-death-class-page`) to change them, and Triangle there comes back. A hit he
-  takes, or a fall's damage (`pickup-collectable!`, round 30), cries his class's cry,
-  not Jak's (round 29, `bf-class-hit-cry` from `target-attacked`): a guard's and a jetpack guard's
-  is the battle's guards' speech (`speech-control-method-13`, `guard-hit`), the robotguard's
-  robo-mtl-rattle, the spider's spydroid-jabber; Jak's own breaths and grunts, effects of his clips
-  (breath-in-loud, breath-out-loud), are skipped in `do-effect`, and oof and hit-up silenced. The
-  guard-hit, spydroid-hit and guard-die sounds the mod played until round 28 are in no bank. During a
-  battle the red guards say none of the Jak 3 guards' battle lines, the Freedom League's voices
-  (round 33, the author's wish): every speech request goes through `speech-control-method-12`,
-  whose wrapper drops a red guard's guard line but its cries when hit (`bf-guard-taunt?`: speech
-  types 1 to 18 but 9 and 10). Jak 2's own Krimzon Guard lines for them (its speech types 9 and 10,
-  43 lines, `kg###` in Jak 2's streamed audio) are not in yet: Jak 3 has no tool to add streamed
-  lines, and they would have to be made from the player's Jak 2 disc at the install. His
-  jumps sound as his class (`sound-play-by-name`: crimson-jump for the guards and jetpack guards,
-  robo-mtl-rattle for the spider); a guard jumps once and the robotguard not at all
-  (`bf-pad-lock!` clears X in the air or always); a health pickup gives back 3 points
-  (`pickup-collectable!` wrapper); his shots and blows deal twice a unit's
-  (`BF_PLAYER_DAMAGE`, `damage-enemy-from-attack!`). On the respawn page he picks his base or a control point his side holds
-  on the city's map (D-pad), and X deploys him there (§2.9), with his class, full health, fresh
-  ammo and 2 seconds of invulnerability.
-- **Redeploy:** START > Redeploy opens the class page, then the same respawn page, without the
-  spectator's wait (round 28: the respawn page at once before): free 30 seconds after his last
-  shot, blow or hit taken, a unit of his side lost before that (round 26; it was grey in combat
-  before). The battle's units keep fighting meanwhile.
-- **End:** a result page (victory or defeat, losses of both sides); X leaves the battle for the
-  game's title menu (round 33, the author's wish; Quit the battle too): `bf-to-title!` starts a new
-  game at the title's continue point without its intro (`"title-restart"`, as the stock demo's return
-  to the title), and `bf-title-press!` presses START for the player while the title screen waits for
-  it (`title-control` state `wait`), so the menu opens at once on Start a battle, Options and Quit.
-
-### Class controls
-
-The player stays Jak underneath: camera, collision, health and stock moves are Jak's. A class
-hides him, draws its own model in his place with its own clips, and changes some moves.
-
-| Class | Moves | R1 | Square | Other |
-|---|---|---|---|---|
-| Blue Guard / Red Krimzon Guard | 24 points; run speed x1.68 (x1.995 in rounds 34 and 35, x1.425 before; round 36 slowed it as the AI guards', 1.6 / 1.9); L1 held on the ground: crouch, the kneeling clip (28), x0.01 (0.06 m moved with the stick pushed), the rifle's spread 0.3 degrees (1.5 standing, 3.5 on the move or in a dodge); X: one jump, at least Jak's whole jump (round 34, the author's wish; round 33's 1.31 m was too low): `bf-jump-set!` sets `*TARGET-bank*`'s heights to 3.5 m tapped and 4.55 m held (Jak's variable jump, `mod-var-jump`, reads X held in its first 0.1 s); in the air `bf-pad-lock!` passes X only when it was down the frame before (a held X, no edge), so a new press, Jak's second jump, stays off (until round 34 X was off once in the air, which also ended a held jump's rise); L2 + left stick left or right: a strafe to that side, a jump 0.8 m high at 11 m/s, the model still facing the crosshair, playing `jump-right` (40), to the left the same clip with the model mirrored (`bf-avatar-mirror!`: node 2's joint callback `cspace<-parented-matrix-joint-flip-z!`, as the stock draws half its enemies; `jump-left`, 41, the clip of the stock guard's roll to its left, looked like a roll, the author's play, round 34); R2 + left stick left or right: a roll to that side, the same jump; the stick ahead, back or at rest: neither (`bf-stick-side`, round 33, the author's wish); the roll's model facing the roll's way and turned head over heels once in 0.45 s around its middle, in the tucked `jump-high` pose (the guards have no roll clip); no attack during either, 0.4 s before the next one | the weapon in hand. Rifle: shot (8) at the crosshair, the stock rifle guard's shot clip on the whole body (`gun-attack`, the whole clip, as the stock guard plays it), the player still and facing the crosshair (round 28, the author's wish: rounds 26 and 27 fired on the run, on the upper body), one every 0.5 s, 20 to a magazine reloaded from 100 carried, 5 magazines (Jak's yellow ammo; 10 and 20 before round 24). Tazer strike (24), 12 m, locked by itself on the nearest foe ahead, the stock guard's stab on the whole body, the player standing still meanwhile, then 20 s before the next, no ammo and no reload clip (the weapon joint drawn at 0.55: a short baton). Grenade (20): the stock grenade guard's throw on the whole body, the player standing still and facing the crosshair (its aim, frames 1 to 12 at 1.5 times; the grenade leaves at frame 12; then 22 to 37), landing on the crosshair's point, 35 m away at most, one a second, from the 5 carried (Jak's red ammo). An empty magazine reloads (the stock guards' reload, about 2 s); Triangle reloads before (round 27) | rifle butt (10, 4 m), 1.5 s between two | D-pad: left tazer, down rifle, up grenade launcher |
-| Blue / Red Jetpack | 18 points; X held climbs (6 m/s measured), slowing into a hover under the ceiling; Circle held comes down (7 m/s); neither holds the height reached, still, for as long as the player likes; two flames out of its turbines (`bf-avatar-flames`: the stock jetpack guards' part, copied into GAME as part 5203, 0.9 to 2.1 m long with its speed, 1.8 times that while it boosts); R2 held: a boost at 24 m/s toward the left stick (ahead when it rests) while the gauge lasts, 10 s in a full one (3 s before round 24; 18 m in 1 s measured); only dark eco refills it, 6 units for a full gauge (off in round 36 only); the model floats 0.8 m above the ground | a salvo of two quick shots (6 each) at the crosshair, 0.8 s between salvos; built-in guns, no ammo. L1 (round 36): a rocket (`bf-rocket`, §2.11), 10 a life (`*bf*` rockets), 0.8 s between two, 5 more in a fallen jetpack guard's dark ammo | none: Square does nothing (no dive kick since round 36) | |
-| Robotguard | 24 points; run speed x2.1 (x1.05 until round 34); R2: rolls as a ball at x5.4 until R2 again (x3.6 until round 34, x2.4 before round 25: 34 m/s measured, 3.4 times its walk; x1.6 before round 22), no attack meanwhile | a salvo of two shots (4 each), 0.9 s between salvos; built-in guns, no ammo | punch: wind-up, punch, back (0.9 s), 10 within 6.5 m, 1.5 s between two | Circle: the Dark Makers' shield sphere around it, glowing red, for 5 s, then 25 s before the next one; Jak's shield level stops every attack meanwhile, and the robot walks, jumps and fires behind it (9.5 m in 1.5 s measured; its shots 100 m out, the sphere having no collision). L1 (round 38): a grenade (`bf-grenade`, §2.11), from its fists in turn (`left-hand?`), 10 a life (`*bf*` rockets), 0.8 s between two, not while it rolls |
-| Spider Robot | 12 points; run speed x3.6 (x2.25 until round 34); X: a leap 11 m high (11.03 m measured); R2 held: blue eco sprint at x2 while the gauge lasts (10 s), refilled in 10 s | nothing | nothing | Square: a headbutt, a leap at the nearest foe ahead, within 12 m (7 m until round 38) the tazer's shock (24, the electrocuted knock), since round 38 with the Peace Maker's look and a chain to up to 2 more foes (`bf-avatar-chain-zap`, §2.11; until round 37 `bf-avatar-zap`'s arcs on the one foe), 1 s between two; L1 (round 38): it blows itself up (`bf-avatar-nova`, §2.11), once charged 30 s after it appears (round 39, `bf-nova-charge`); airborne, its leap clip only after 0.3 s off the ground (a sprint's bumps played it) |
-
-Aiming is free for every class: the right stick turns the third-person camera (§2.4) and the
-camera aims. The shots and grenades go where the crosshair's line of sight (the middle of the
-screen) meets the scenery or a unit (80 m at most), and a class turns to face that point while it
-fires. Only the tazer aims by itself, at short range; the crosshair then moves onto the foe it
-locked. Square attacks and the spider's lunge go for the nearest foe within 70 m and 60 degrees of
-the camera's heading. Each attack plays the unit's own clip (guard rifle, tazer and
-grenade throw, roboguard punch, spider attack jump, jetpack forward
-flight). A close attack (Square, the spider's Circle) plays its clip once, to its end, and the
-next one waits for that end, 0.6 s at least (measured clips: blue guard rifle butt 1 s,
-red guard rifle butt 0.22 s, robotguard punch 0.93 s, spider bite 0.38 s); a jetpack's dive kick
-(until round 36) also waited for the previous one to hit or miss. The jetpacks keep one clip while they fire: their
-hover, or above 2.5 m/s (back under 1 m/s) the flight clip toward where they fly against the
-camera's heading (forward, right, left or back), never the firing clip. Without
-ammo, R1 fires nothing and the HUD shows the count in red. Jak's own gun, melee,
-board, Dark Jak and Light Jak are off while a class is played.
-
----
-
-## 2. Architecture
-
-### 2.1 Files added or changed
-
-| File | Change | Why |
-|---|---|---|
-| `goal_src/jak3/pc/features/battlefront/battlefront-h.gc` (new, GAME) | Battle state `*bf*`, zone and class tables (English and French), skeleton groups of the Jak 2 models, army caps (no citizens during a battle) and look shares, the pickups dead units leave, every function the stock level code calls, and a wrapper of `effect-control` `do-effect` (no death effect on the mod's build-actor models). | The stock files that call into the mod are level code, linked with CWI, CTYPESA, CTYPESC, DESRESC or WWD; the functions they call must exist whatever is loaded, and answer like the stock game while no battle runs. The wrapper: §2.4. |
-| `goal_src/jak3/pc/features/battlefront/battlefront-player.gc` (new, GAME) | `bf-avatar`: the class model drawn in Jak's place, its moves, weapons, salvos, dodges, ammo, gauges and the robotguard's shield (`bf-shield`); `bf-cam-rig`: the third-person camera; `bf-icon`: a class model drawn over the game (class page preview). | See §2.4 and §2.6. |
-| `goal_src/jak3/pc/features/battlefront/battlefront.gc` (new, GAME) | `bf-director` (battle life cycle, menu pages, HUD, force field, pickups); the code of Jak's `target-death` state during a fight (`bf-target-death`); wrappers of `target-attacked`, `game-info` `initialize!`, the START menu's ring options, `progress` `set-menu-options` and `game-text-info` `lookup-text!`; the START menu's Gamemode pages; the Mods menu entry. | The director lives in `*pc-pool*` so it outlives level changes and deaths; it owns the battle's settings. |
-| `docs/modding/current_mod/battlefront_smoke.gc`, `battlefront_tests.md` (new) | The smoke test scenarios and their notebook (§3). | Never in a build: `smoke_test.py install` copies a scenario into GAME for a run. |
-| `goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc` (new, GAME, generated) | The whole city's map: the START menu's map of Haven City inside the city's outline, 384 texels high, one palette, its world corner. | The zone pages show the whole city wherever the player stands (§2.6). |
-| `goal_src/jak3/pc/features/battlefront/battlefront-portraits.gc` (new, GAME, generated) | The class page's picture of each class: one 512 x 128 texture of 8-bit indices, six 80 x 120 cells, one palette (`scripts/battlefront/make_portraits.py`, from smoke scenario 53's screenshots). | The class page shows the class with no model to load, before the battle too (§1). |
-| `goal_src/jak3/levels/city/battlefront/battlefront-city.gc` (new, CWI) | Attack-controller hatred edits, periodic faction commands, the troop transports' dispatch, the units' routes to their points (their lane callback), the release of the default nav mesh before a reset, `bf-keep-unit?`, the player's grenade throw; installs `*bf-city-hook*` and `*bf-city-grenade*`. | These need Haven City's types (the grenade is `vehicle-grenade-deflect`, a lane is a `nav-branch`, a unit a `citizen`), only known in CWI. |
-| `goal_src/jak3/engine/nav/nav-mesh.gc` | The engine's `*default-nav-mesh*` gets 255 nav-controls and users, not 128. | Every new traffic unit takes one there until it is first woken; a far respawn's reset made the traffic spawn its pools again and overflowed 128 (§2.9). |
-| `goal_src/jak3/levels/city/battlefront/bf-transport.gc` (new, CWI) | `bf-transport`: the troop transport that brings a side's units (§2.9). | Ported from the mod Haven City: New Dawn; it wakes traffic units, CWI types. |
-| `goal_src/jak3/engine/ui/hud-classes.gc` | `hud-health`'s `draw` calls `bf-hud-health-gauges` just before it draws its sprites. | During a battle, the class gauge takes one of the stock eco gauges, with its color (§2.6); a no-op otherwise. |
-| `goal_src/jak3/engine/level/level.gc` | `load-begin` asks `*bf-alloc-hook*` (`bf-whole-city-chunk`) for a street section's level heap chunks before the stock banks. | A battle over the whole city puts each of six sections in two chunks of its own (§2.9). |
-| `goal_src/jak3/engine/load/load-state.gc` | `add-borrow-levels` lets `*bf-want-hook*` (`bf-whole-city-want`) rewrite the wanted levels first. | During a battle the game's own requests (load boundaries, continue points, ctywide's aliases) would bring back the stock sections, cars and citizens (§2.9). |
-| `goal_src/jak3/levels/city/traffic/traffic-engine-h.gc` | `traffic-engine` gets `level-data-extra`, six more `traffic-level-data` after its fields; a tracker's `active-object-list` and `active-object-type-list` hold 224 (126), its later fields moved past them (round 41). | The engine kept the street data of two sections (`level-data-array`); `traffic-level-data-ref` (`traffic-engine.gc`) reads the eight as one list. |
-| `goal_src/jak3/levels/wascity/cty-attack-controller.gc` | Haven City's attack controller holds 128 attackers, not 64. | A battle's 80 units, the player and the city's own: past 64, `allocate-attacker` found none (`Unable to allocate new attacker`), the game fell to 4 frames a second and memory was corrupted. |
-| `goal_src/jak3/engine/collide/collide-touch-h.gc` | The touching-prims pool holds 256 records, not 64. | 80 units crowding at their ships and points ran out of them: thousands of `alloc-node` failures, those touches dropped. |
-| `goal_src/jak3/engine/gfx/hw/display.gc` | The frame's global DMA buffer (`DMA_BUFFER_GLOBAL_SIZE`) holds 2560 KB, not 1280 (round 43). | `foreground-draw` writes each drawn unit's bones, merc and shadow packets there without checking the buffer's end: a redeploy's view of 200 units filled 1304 and 1326 KB, and the overflow wrote over the memory after the buffer (crashes in `shadow-execute`, `foreground-engine-execute`, a divide by zero). Twice, not Jak 2's four times (`PROCESS_HEAP_MULT`): the level heap is allocated after it and must end below 256 MB; it ends at `#xf6eec00`. |
-| `goal_src/jak3/engine/gfx/background/background-h.gc`, `background.gc` | `background-work` holds 32 trees of each kind, not 11; `init-background` clears all 32, not 8. | Each displayed level adds its trees with no bound: ctywide and six sections drew 17 tie trees, past the 11, and the game crashed natively once the fifth section was displayed (§2.9). |
-| `goal_src/jak3/levels/city/traffic/traffic-manager.gc` | `traffic-manager-method-22` takes each pool size from `bf-want-count`. | It writes every traffic pool's `want-count` from the faction spawn levels every frame: the army caps must be applied there (§2.2). |
-| `game/graphics/opengl_renderer/foreground/Shadow2.cpp`, `Shadow2.h` | A shadow that no longer fits the frame's vertex or index buffers is dropped instead of stopping the game; the buffers are twice as large; the overflow skip loop tests `!=`. | A battle draws dozens of shadow casters: the stock buffers filled and the `alloc_verts` assertion closed the game (seen in the first deployment). Needs `task build-release-game`. |
-| `goal_src/jak3/levels/city/traffic/traffic-engine.gc` | `set-process-to-killed` calls `bf-unit-killed`; `activate-one-vehicle` takes the number of units of a type it may wake from `bf-wake-count` (none of a battle's during a fight: the transports and the edge reinforcements bring them, §2.9); the per-frame check of the awake pedestrians keeps a unit when `bf-keep-unit?` (`battlefront-city.gc`) says so; its loops over the sections' street data go through `traffic-level-data-ref`, eight sections; the guard pool keeps its sleeping units in 128 slots of its own (`*bf-guard-pool-slots*`), the flying turrets in 64 (`*bf-turret-pool-slots*`), and `add-reserved-process` lists up to that many; `add-active-process` takes up to 224 awake (round 41). | A pool's sleeping units had 20 slots: a guard past them went unlisted, the pool spawned another every frame, and each kept a nav-control on the default nav mesh until it overflowed (`too many users for nav-mesh #f`, 30 guards a second at a deploy with 44 guards; at 22 in round 19 it leaked a few dozen, the 110 measured there). | The first is reached once per real unit death (recycled units never go there): the loss counter. The second replaces the squad controls' count, which starved the Port. The third keeps the units on the district's lanes awake out of the camera's cells (§2.2). |
-| `goal_src/jak3/levels/city/traffic/citizen/guard.gc` | `init-enemy!` takes its skeleton from `bf-guard-skel-name`; `crimson-guard-method-267` registers red guards as roboguards and takes its weapon from `bf-guard-weapon`, and method 270 compares the weapon that would give; `citizen-method-215` registers with `bf-attacker-type`; `citizen-method-194` clears a red guard's dark-guard flag (`bf-guard-flags`) and calls `bf-guard-activated`. | Red guards run the stock guard code (§2.2); no guard of a battle carries the tazer (§2.8). |
-| `goal_src/jak3/levels/city/protect/flying-turret.gc` | `init-enemy!` takes its skeleton from `bf-turret-skel-name` and its scale from `bf-unit-scale`; `citizen-method-215` registers with `bf-attacker-type`; `enemy-common-post` calls `bf-hover-animate`, and `bf-hover-ceiling!` after the stock flight set its height; `flying-turret-method-229` asks `bf-hover-nozzle!` where each thruster flame goes. | Jetpack guards run the stock flying-turret code (§2.2), their flames out of their jetpack's turbines (nodes 15 and 17) instead of the turret's spots under its root. The stock flight keeps a turret 3 to 18 m over its `ground-height`, the first surface a probe meets from 2 m over it to 25 m under it, kept when the probe meets nothing: over a roof it took the roof's height and kept it past the roof, so the jetpack guards climbed from roof to roof, up to 45 m over the street (round 26's tests). During a battle `bf-hover-ceiling!` holds that ground at most 6 m over the middle of its nav poly and the guard at most 15 m over it, a ship's highest hover over the street (round 27, the author's wish). |
-| `goal_src/jak3/engine/ui/minimap.gc` | `draw-connection` tells `bf-minimap-icon-at` where each mark it draws lands on the screen; `update!` takes `bf-havenj2` as a city level when `ctywide` isn't loaded (round 41, §2.10). | A control point's letter is drawn over its mark (`bf-draw-minimap-letters`, the next frame, in font units: the GS screen starts at 1792, 1840). |
-| `goal_src/jak3/dgos/game.gd` | `battlefront-h.o`, `battlefront-player.o`, `battlefront-minimaps.o`, `battlefront.o` at the end. | After the engine code they use (enemy, guard-projectile) and `mods-menu.o`. |
-| `goal_src/jak3/dgos/cwi.gd` | `bf-transport.o`, then `battlefront-city.o`, after `mh-squad-control.o`. | After every type they use; the city code calls the transport's. |
-| `goal_src/jak3/dgos/ctypesa.gd` | `bf-red-guard-ag.go`, `bf-red-guard-gl-ag.go`, `bf-transport-red-ag.go`, `bf-transport-blue-ag.go`; art groups sorted by decreasing size. | Units drawn by CTYPESA processes (§2.3); the transports load with the guards. |
-| `goal_src/jak3/dgos/ctypesc.gd` | `bf-hover-red-ag.go`, `bf-hover-blue-ag.go`; art groups sorted by decreasing size. | Jetpack guards are flying-turret processes, whose level is CTYPESC. |
-| `goal_src/jak3/game.gp` | Six `build-actor` steps (the four units' at `:framerate 15.0`, the two transports'), and the six art groups pre-marked in `*file-entry-map*` before `cgo-file "game.gd"`. | Without the pre-mark, `cgo-file` also adds a copy step from the decompiler output for the same `.go` and the build stops ("multiple ways to make output"). |
-| `custom_assets/jak3/models/models.jsonc` (new) | The six models' recipe for master-dev's `mod_models` (`task modding-models`; at an install, the extractor runs it): the four units, and the Jak 2 troop transport from `FOB.DGO`, red as ripped and blue through a `recolor` rule. | §2.3, §2.9. |
-| `scripts/battlefront/make_minimaps.py` (new) | Writes `battlefront-minimaps.gc` from the START menu's maps (`iso_data/jak3/STR/WOMAP.STR`), or from the decompiled minimap textures for a zone of a few sections. | §2.6. |
-| `custom_assets/jak3/models/custom_levels/bf-*.glb`, `custom_assets/jak3/models/ctypesa/bf-red-guard*-lod0.glb`, `custom_assets/jak3/models/ctypesc/bf-hover-*-lod0.glb` (made, ignored by git) | The models `mod_models` writes (same content in both folders). | `custom_levels/` is read by `build-actor`; `<level>/` is baked into that level's `.fr3` by `task extract`. |
-
-### 2.2 Units: everything runs on stock code
-
-Haven City already runs the war between the two factions: its traffic engine spawns Freedom
-League guards (traffic type `guard-a`, art in borrow level CTYPESA) and KG robots (`roboguard`,
-`spydroid`, `flying-turret`, CTYPESC), and its attack controller (`cty-attack-controller.gc`) makes
-each unit target the other faction with a hatred table indexed by unit type. The mod reuses it:
-
-| Unit | Process type | Pool | How it changes side or look |
+| Unit | Process type | Pool | Side |
 |---|---|---|---|
-| Blue guard | `crimson-guard` | guard-a | stock |
-| Red Krimzon Guard | `crimson-guard` | guard-a | half the guard-a processes spawned during a battle get a red model, `skel-bf-red-guard` (rifle) or `skel-bf-red-guard-gl` (grenade launcher); it registers as a roboguard (type 9), so the stock table sends it against the guards; its weapon is the one the stock code picks |
-| Blue jetpack guard | `flying-turret` | flying-turret | half the processes get `skel-bf-hover-blue` and register as a rifle guard (type 4) |
-| Red jetpack guard | `flying-turret` | flying-turret | the other half get `skel-bf-hover-red` and stay a turret (type 10) |
+| Blue guard | `crimson-guard` | `guard-a` | Freedom League (stock) |
+| Red Krimzon Guard (Jak 2 model) | `crimson-guard` | `guard-a` | Krimzon Guard: registers as a robot, so the stock hatred sends it against the guards |
+| Blue jetpack guard (Jak 2 model) | `flying-turret` | `flying-turret` | Freedom League: registers as a rifle guard |
+| Red jetpack guard (Jak 2 model) | `flying-turret` | `flying-turret` | Krimzon Guard |
+| Robotguard | `roboguard-city` | `roboguard` | Krimzon Guard (stock) |
+| Spider robot | `spydroid` | `spydroid` | Krimzon Guard (stock) |
 
-Each new guard or jetpack guard takes the look furthest below its share of the pool
-(`*bf-look-share*`: guard-a 8 blue, 3 red riflemen, 3 red grenadiers; flying-turret 4 blue, 2 red;
-`bf-guard-skel-name`, `bf-turret-skel-name`). The director counts the live units of each look every
-frame of a battle (`bf-count-looks!`, in its own process); the two functions only read the counts
-and add the unit they dress. An alternation was tried first: the traffic kills and spawns units all
-the time (trims, section changes), and in game the guard pool drifted from 7 blue of 14 to none.
-Counting inside the unit's init crashed the game: the traffic manager sets units up on its small
-stack.
-| Robotguard | `roboguard-city` | roboguard | stock |
-| Spider robot | `spydroid` | spydroid | stock |
+Two sides share the `guard-a` and `flying-turret` pools. Each new process takes the look furthest
+below its share (`*bf-look-share*`, `bf-guard-skel-name`, `bf-turret-skel-name`), from counts the
+director makes every frame. The setup's **units at once** sets the caps (`bf-caps-set!`): at 100,
+the Freedom League fields 72 guards and 28 jetpacks, the Krimzon Guard 40 red guards, 20 jetpacks,
+20 robotguards and 20 spiders.
 
-The skin is chosen when a process is spawned, and a traffic unit is spawned once: when it dies
-it goes back to its pool and comes out again, it is never respawned. The director therefore
-respawns the player at both ends of a battle the way a death does (`initialize!` with `'life`):
-`reset-actors` kills every actor and the traffic manager with its units, then runs each active
-level's activate function, so Haven City's traffic spawns every pool again, with the battle's
-skins (deployment) or the stock ones (end). Measured in game: 13 guards in the pool, 4 of them red
-riflemen and 3 or 4 red grenadiers; none left after the end. A `start` alone resets no actor, and
-restarting the traffic on its own (`ctywide-activate`) left the pools empty (see the Lisp wiki,
-jak3 4.30).
+**Reserves and losses.** The setup's **units per side** (500 by default) are the reserves, the
+Battlefront tickets. A unit really dies once, in `traffic-tracker` `set-process-to-killed`
+(`traffic-engine.gc`), which calls `bf-unit-killed`: the loss is counted there, and a pickup may be
+queued (`bf-queue-drop`, spawned later by the director: the unit's death runs on the traffic
+manager's small stack).
 
-**No Spargus citizen in the armies.** The first version brought wastelanders into Haven City's
-traffic (code and art in CTYPESA, a traffic pool of 8, their `target-counts` written so the
-engine woke them). With them, ten-minute battles froze or crashed the game: the engine thread
-stuck (or faulted) in the background collision query `fill-bg-using-line-sphere-new`, in two
-battles of two; a battle without them ran ten minutes clean. They were removed;
-`wlander-male.gc` is stock again. The Spargus Citizen class went in the twelfth round, with its
-code and art in CTYPESA.
+**Speed.** Every unit moves faster than the stock one: its walk and run speeds and its clips'
+ground per cycle are scaled together (`*bf-unit-pace*`), so the legs keep pace with the body.
 
-**Counts.** The battle's faction commands (`*bf-faction-commands*` in `battlefront-h.gc`) give both
-factions strength 20 everywhere and Metal Heads -20, set the guards to the stock "combat" spawn
-level and the KG to "war", civilians, vehicles and Metal Heads to none. They are applied through
-the stock `faction-command` setting and again every 2 seconds by `battlefront-city.gc`, because a
-death reset or a task change restores the stock faction state. With positive strengths the stock
-faction manager requests both CTYPESA and CTYPESC (`borrow-city`); the director also sets the stock
-`borrow` setting for the three Haven City aliases (`*bf-borrow*`).
+**Units at NaN.** The stock unit code assumes it fights the player. In unit-against-unit fights a
+jetpack's turn could become NaN, then its shots, then the guards those shots knocked: a unit at NaN
+never dies and keeps its side's place. `bf-hover-turn-fix!` mends the jetpack's turn, and
+`bf-city-nan-sweep` puts any unit at NaN back to sleep.
 
-**Army caps.** A traffic pool spawns units up to its `want-count` and deactivates the sleeping ones
-above it; for these types the engine does not check `target-count` (`activate-by-type` skips it
-below type 17). `traffic-manager-method-22` writes every `want-count` from the faction spawn levels
-(`*want-count-levels*`) every frame, so its one changed line asks `bf-want-count` instead: during a
-battle the pools' caps `*bf-pool-caps*` (guard-a, flying-turret, roboguard, spydroid; stock "war":
-13, 6, 6, 9, and 17 Metal Heads), set from the setup's units at once with the look shares
-(`*bf-team-caps*`, `*bf-look-share*`) by `bf-caps-set!` at each battle's start: up to 100 units
-per side (round 41; 63 in round 40, 40 from round 20, 20 before). The four kinds are walkers of the
-traffic, woken on one tracker that listed 126 awake units (traffic-engine-h.gc
-`active-object-list`); its lists hold 224 since round 41, the tracker's later fields moved past
-them (`inactive-object-array`, `danger-sphere-count`, `allow-spawning?`, their stock offsets in
-comments), and `add-active-process` takes up to 224. Waking the turrets, robotguards and spiders on
-the vehicles' tracker instead (unused in a battle) left them asleep (round 40's tests). The guard
-pool sleeps in `*bf-guard-pool-slots*` (128) and the turrets in `*bf-turret-pool-slots*` (64),
-where the stock gives 20 a type; the attack controller holds 256 attackers. 100 a side ran at 60
-frames a second for three minutes (T71). Measured in game, units awake on the street:
-20 Freedom League and 20 Krimzon Guard in each of the four zones (12 per side before the caps
-were raised; 19 for the Freedom League in two zones of the eleventh round's last runs).
+### 2.3 Sides, targets and damage
 
-**The menus' layout (round 41).** The battle setup's rows share the screen's height (5 settings
-of a name over a value between arrows, at most 40 units each: five rows of 50 ran into the keys on
-a 4:3 screen), the sides on the first two rows' lines and Next on the last's; a paragraph is broken
-by its measured width at one size, its lines 40 units apart at scale 1 (`bf-pwrap`: cut at a count
-of bytes and each line shrunk alone, a paragraph came out in mixed sizes); a list's choices share
-one size (`bf-list-scale`), a button's label sits in its middle (`bf-pbutton-text`); the class help
-is a button a line, all at one size, the names in one column (`~Y`, `~Z~+94H`; the stick's icon
-holds a `~Y` of its own, so a label after it is offset from the stick, `~+57H`), the lines closer
-when they would run into the keys. Checked in 4:3 and 16:9 (T74).
+**Who fights whom.** The attack controller (`cty-attack-controller.gc`) picks each unit's target
+from a hatred table indexed by unit type. During a fight `bf-city-apply-hatred` writes the battle's
+table every frame (the stock game rebuilds it at each reset), and twice a second
+`bf-city-retarget` makes units look again: the nearest foe they can see, a foe within 40 m stopping
+their march. A thin background probe from the unit's eyes to its foe (`bf-city-sees?`) passes over
+a foe behind a wall. The player's own side never targets him.
 
-**Units out of the camera's view.** Every frame the traffic engine sends `'traffic-off` to each awake
-pedestrian (guards, turrets, roboguards and spydroids included) standing outside the city cells
-marked `active-pedestrian`, the ones the camera's cell can see, and the unit goes back to its pool
-(`traffic-engine.gc`, `sphere-in-loaded-city-infos?` with bit 1). Units fighting on the far side of
-the battlefield, behind buildings, vanished that way, and with them the fight the reserves count.
-During a fight that test also accepts a unit on a lane of the district (`bf-keep-unit?`, one `or`
-in the stock line), or on no lane (a flying unit). A unit's lane is its `controller` `branch`; it
-belongs to a section when its address lies in that section's nav-graph `branch-array` (the traffic
-engine points each segment's branch there when the section links, `level-link`). A unit that
-walked onto the next section's lanes, which the game loads at the district's edge, goes back to its
-pool as in the stock game: no death, so the reserves keep it.
+**One 24-point scale.** Every class and unit has its health in points (guards and robotguards 24,
+jetpack guards 18, spiders 12) and every attack its damage in points (rifle 8, grenade 20, tazer
+24, blow 10). Two wrappers turn points into the game's units:
 
-**Sections loaded.** Outside a battle Haven City holds its base (ctywide) and two sections, as in
-the stock game. During a battle it holds all six street sections (§2.9, the whole city). A respawn waits until every level its continue point lists is active
-(`target-death.gc` `target-continue`). The Port's war zone (`ctyport-warzone`) was the Krimzon
-Guard's camp at first: it stands on `ctyinda`'s ground, and after a death at the west docks the
-respawn there found `mhcitya` loaded instead and no ground; the base is `ctyport-bombbot`, on
-`ctyport`'s ground. Until round 16 a wrapper of `load-state` `add-borrow-levels` kept a
-two-section district's sections loaded.
+- For units, a `damage-enemy-from-attack!` method on `nav-enemy` takes the attack's share of the
+  unit's hit points, nothing from a unit of the same side, and counts the player's kills.
+- For the player, the `target-attacked` wrapper refuses his own side's attacks and scales the
+  others to Jak's health.
 
-**Waking units: the Port.** The pool size is not all: the unit picker, `activate-one-vehicle`,
-wakes a type only while it has fewer awake units than its `target-counts` entry for the faction
-mode of the segment's territory, which the squad controls (`ff-squad-control.gc`,
-`kg-squad-control.gc`) rewrite from their alert state. At the Port it allowed 7 guards, 1 flying
-turret and no roboguard, so the picker's call takes `bf-want-count` there too. And the traffic wakes
-units only on segments entering its active cells, one a frame (`update-traffic-amount`), and on
-cells that just became active (`handle-new-vis-cell`): around the Port's two spawns it found so few
-that, with the player standing, the dead were not replaced. Until round 16 the battle sent reinforcements
-(`bf-city-reinforce`: woken with `activate-by-type` on random lanes of the district); since round
-16 the troop transports bring every unit (§2.9) and, during a fight, the picker wakes none of the
-battle's four types by itself (`bf-wake-count` in that call).
+The player's shots and blows deal twice a unit's (`BF_PLAYER_DAMAGE`).
 
-**Pickups.** `bf-unit-killed` also queues, at the unit's position, a stock pickup type
-(`bf-queue-drop`); the director spawns it with `birth-pickup-at-point` in its own process (the
-queue exists because the unit's death runs on the traffic manager's small stack). Ammo pickups give
-10 yellow or blue, or 5 red; `verify-pickup-type` turns red and blue into yellow when Jak lacks
-that gun.
+### 2.4 The player is Jak in disguise
 
-**Hatred.** `bf-city-apply-hatred` saves three groups of hatred entries once, then writes the
-battle's values every frame of the fight: each player death runs `ctywide-activate`, whose
-`cty-attack-reset` rebuilds the stock table. The saved entries are written back at the end:
+The player stays Jak: his collision, physics, health and death are Jak's. A class only changes how
+he looks and moves.
 
-| Entries | During a battle |
+- **The class model.** `bf-avatar` (`battlefront-player.gc`) draws the class's model in Jak's place
+  and hides Jak (`no-draw`). It runs before Jak in the frame, so it places itself again once he
+  has moved (`bf-avatar-cam-post`, a camera-post hook), or it would trail one frame behind.
+- **The moves.** The class speed goes through the `speed-mult` setting; jetpack flight, the spider's
+  leap and sprint and the robotguard's roll are changes to Jak's velocity. A guard's dodge and roll
+  send Jak the stock `'launch` event.
+- **The camera.** `bf-cam-rig` drives the stock point-of-view camera (`cam-pov`, the one the
+  city's sniper turret uses) from a bone it moves itself: behind the class's right shoulder, turned
+  by the right stick.
+- **The aim.** `bf-free-aim` casts a ray once a frame from the camera through the crosshair, 80 m
+  long; the class weapons fire at the point it hits. Only the tazer locks a foe by itself.
+- **The weapons.** Rifle shots are stock `guard-shot`s with Jak as their parent, grenades the guard
+  grenade, the jetpack's rocket and the robotguard's grenade a `guard-shot` dressed as the dark and
+  red guns' projectiles (`bf-rocket`, `bf-grenade`). The guard weapons spend Jak's own gun ammo, so
+  the stock ammo pickups refill them; the battle saves Jak's ammo at its start and gives it back at
+  its end.
+- **The HUD.** It reuses the stock pieces: the gun HUD (fed by an `update-values!` wrapper), the
+  health ring's eco gauges for the class gauge (`bf-hud-health-gauges`, called from `hud-classes.gc`).
+  The reserves meter, the crosshair, the rocket and grenade icons and the maps are drawn by the mod.
+
+Its settings (`gun`, `board`, `darkjak`...) belong to the avatar and leave with it, so Jak gets his
+moves back when it goes.
+
+### 2.5 Points and victory
+
+Each side has two **headquarters**, held for good, and each of the 13 other districts has a
+**control point**, neutral at the start, lettered A to M from the palace to the slums. Four times a
+second `bf-update-points` counts each side's units within `BF_POINT_RADIUS` (35 m): the side with
+more units captures the point in `BF_CAPTURE_TIME` (30 s); a neutral point goes faster the larger
+the majority, down to `BF_CAPTURE_MIN_TIME` (10 s). Each point shows as a beam of light in its
+holder's color.
+
+`bf-check-victory` ends a fight: every control point held for 20 s (`BF_HOLD_WIN`, the **Control
+points** condition), the time limit (more points wins, then more units), or a side out of units.
+
+### 2.6 Reinforcements
+
+A side's new units come down where it holds ground, as Battlefront's armies come from their
+command posts:
+
+| Where | How |
 |---|---|
-| robots towards Jak (0), Krimzon Guard player only | 0 (no attack) |
-| guards (3-5) towards Jak, Krimzon Guard player only | the robots' hatred of Jak |
+| A headquarters | A troop transport hovers over it (`bf-transport.gc`, Jak 2's drop-ship ported from the mod Haven City: New Dawn). It wakes a sleeping unit of its pool and sends it out through the stock `exit-transport` state: a guard jumps, a robotguard rolls out as a ball, a spider drops, a jetpack flies. |
+| A held control point | No ship: the unit appears 30 m up over a nav poly within 250 m of the point (`BF_SPAWN_REACH`, `bf-city-spawn-spot`) and falls onto it (`bf-city-spawn-tick`). |
 
-**Losses.** `traffic-tracker set-process-to-killed` (`traffic-engine.gc`) runs once per tracked unit
-that really dies; `bf-unit-killed` finds its side from its type and art group (`bf-unit-team`) and
-calls `bf-count-loss`. The player's deaths are counted by `bf-target-death` (§2.5).
+Each try picks one of the side's headquarters and held points at random (`bf-transport-draw`) and
+brings up to 3 units, each of the kind its side lacks most against its caps
+(`bf-transport-next-kind`). A fallen unit's place stays counted for 5 s. One unit in four dropped
+at a control point is **posted** there (3 at most) and guards it while foes come within 150 m.
 
-**Units at NaN (round 32).** Until round 32, after a few minutes most of a side stopped coming down
-at the points, and many guards stood reloading. The stock unit code, written against the player
-alone, made unit places NaN in unit against unit fights, and NaN spread:
+### 2.7 How units find their way
 
-1. A jetpack guard's flight (`flying-turret-method-227`) normalizes its thrust's direction across
-   the ground; with a thrust straight up or none it has none, and its turn quaternions went NaN for
-   good (each frame blends into the last).
-2. Its bones followed, then its gun bone's axis, then its shots (scenario 60: one jetpack fired 16
-   NaN shots).
-3. A guard such a shot knocked took the shot's NaN direction (`attack-info-method-9`,
-   `get-knockback-dir!`) and flew off at NaN, in `knocked`.
-4. A unit at NaN never died: it kept its side's place, so its side stopped coming down at the
-   points. Every unit that took it as its foe chased it or shot at it and went NaN in turn: a
-   jetpack aims at its foe's bullseye bone (`update-focus`, `get-trans` 3), a robotguard and a
-   spider at its place. A unit's bones stay NaN until it is drawn again, even woken elsewhere.
+The city's walking lanes are loops inside one district: a unit following them never reaches a far
+point. So a unit away from its goal **marches over the nav meshes**, which join the districts:
 
-Scenarios 59 and 60 counted 13 and 32 units of 80 at NaN in 7 minutes. Three fixes:
+1. **A goal.** `bf-city-unit-goal` gives each unit a point: a contested point within 350 m first,
+   then the point it is posted on, else one its side does not hold, drawn at random by its process
+   id and kept until its side holds it.
+2. **The ways.** Every 10 s `bf-ways-build` searches, from each point's nav mesh, every mesh's links
+   breadth first: each mesh keeps its link back toward the point (`*bf-ways*`). Meshes that touch
+   without a link get a bridge (`bf-ways-bridges`).
+3. **The march.** Twice a second `bf-march-plan` sets the unit's destination to the next link on its
+   way; every frame `bf-march-apply` moves it onto the next mesh when it stands on the link. Within
+   12 m of its point (`BF_MARCH_NEAR`) the unit walks the lanes around it instead.
 
-- `bf-hover-turn-fix!` (called by `flying-turret.gc` `enemy-common-post` right after the flight)
-  puts a NaN turn back to none.
-- `bf-city-nan-sweep`, every frame of a fight, puts any battle unit whose place, velocity or turn
-  is NaN back to sleep (`bf-transport-sleep`), so its place is free. Its bones are cleared first
-  (`bf-unit-bones-at!`, read as the origin, never NaN).
-- The same sweep puts an awake unit's bones on its place when its bullseye bone is NaN.
+### 2.8 The war zone: Jak 2's Haven City
 
-After the fixes no unit stayed at NaN, and the points brought 40 to 64 units every 30 s to the
-battle's seventh minute. The sweep still puts about 10 guards to sleep in a battle's first minute.
-They are the first ones to come down from the sky, 500 m from the player, with a NaN turn; the
-cause was not found.
+**A Jak 3 level made at install.** The level port manifest
+`custom_assets/jak3/ports/battlefront-havenj2/port.jsonc` tells `scripts/level_port` (copied from
+the mod Haven City: New Dawn) how to merge Jak 2's city and its 15 districts into one Jak 3 level,
+`bf-havenj2` (DGO `BFH`): background, collision, props, water, and the traffic's navigation (26 nav
+meshes). Its code is Jak 3's city code, so the traffic engine, squads and attack controller come
+with it. Jak 2's doors to the interiors are background in their closed pose, with a collision box.
 
-### 2.3 The Jak 2 models
+**Nothing of Jak 2 is in git.** `task level-port` writes the level from the player's own Jak 2 and
+Jak 3 extractions; a launcher install runs it. Without Jak 2 the port is skipped, `*bfh-built*` is
+`#f` and the war zone page greys the zone.
 
-They are not kept in the repository: `custom_assets/jak3/models/models.jsonc` describes them, and
-master-dev's `mod_models` makes them from the player's own Jak 2 and Jak 3 discs, ripping only the
-DGOs it needs (`task modding-models`; at a launcher install the extractor runs it before its
-decompile; [guide](../guides/models_from_the_discs.md)):
+**The units' levels.** The unit art lives in two borrowed levels, `ctypesa` (guards) and `ctypesc`
+(jetpacks and robots). They borrow from their master level only, so `bf-zone-select!` makes
+`bf-havenj2` their master for a battle and gives `ctywide` back at its end.
 
-| Model | Built from | Notes |
-|---|---|---|
-| `bf-red-guard` | Jak 2 `dig1/crimson-guard-lod0.glb` (mesh, red textures) on Jak 3 `ctypesa/crimson-guard-lod0.glb` (skeleton, 52 clips), plus the Jak 3 rip's rifle (`extra`) | The Jak 3 guard is the Jak 2 guard plus three joints (`back`, `right_wrist`, `left_wrist`), with identical bind poses (checked by the script) and identically named textures. The Jak 2 vertices are remapped to the Jak 3 joint indices and two padding clips put every clip at its stock `crimson-guard-ag` index, so the stock guard code drives it unchanged. The rip carries every mesh segment without its segment flag, and a build-actor model draws them all, so each weapon is its own model: this one has the body and the normal armor (Jak 2 primitives 18-36) and the rifle. Since round 33 the weapon is the Jak 3 guard's (its images renamed `<image>-j3`), the blue guards' own: the two games' weapons share their geometry and texture names, not their texels. The rifle is the Jak 3 rip's primitives 10-17: its barrel, the leather wrap behind it and the blade under it, matched to the blue guards' rifle in captures (round 36; rounds 33 to 35 took 4-12, the launcher with the rifle's wrap and blade: the author saw the red guards' weapons unlike the blue ones'). |
-| `bf-red-guard-gl` | the same | The body, the normal armor and the guards' other weapon, the one the stock code shows for both the grenade launcher and the tazer (mask bit 4): the Jak 3 rip's primitives 4-9: its wide rear, strapped shaft and fork (13-17 in rounds 33 to 35). The player's red guard changes weapon on the same avatar: `bf-avatar-swap-mesh!` sets the other model's lods and mesh (until round 33 the director drew the class again, which looked like a reload). |
-| `bf-hover-red` | Jak 2 `drillmtn/crimson-guard-hover-lod0.glb` | Clips reordered so the three the flying-turret code plays are at its indices: 2 idle, 3 fly-forward (its "hover"), 4 shoot0 (its "fire"). |
-| `bf-hover-blue` | the same, with the Jak 3 guard's `cguardgame-*` textures | The two games use the same texture names for the guards. |
+**The Jak 2 models.** `custom_assets/jak3/models/models.jsonc` tells master-dev's `mod_models` how
+to build the red guard, the jetpack guards and the transports from the player's discs
+([guide](../guides/models_from_the_discs.md)); `game.gp` builds their art groups with
+`build-actor`, and `task extract` bakes them into `ctypesa` and `ctypesc`. The red guard plays the
+blue guard's clips (`bf-guard-clips`), so the stock guard code drives it unchanged.
 
-The rips share their vertex attributes with every model of their level; the script keeps the
-vertices the mesh uses. `build-actor` stores clip k at art-group index 2 + k and names the art
-group after the file, so the skeleton groups in `battlefront-h.gc` reference `bf-red-guard`,
-`bf-hover-red` and `bf-hover-blue`.
+**The map.** The level port's `citymap` step lays Jak 2's minimap textures out into one picture
+(`bf-havenj2-map.gc`, generated), drawn on the menus and on L3; the HUD's minimap shows Jak 2's
+textures through a minimap page the level registers when it loads.
+
+Jak 3's own city is still in the code (zone 0, its six street sections loaded at once), but the
+war zone page no longer offers it.
+
+### 2.9 Menus are pages of the START menu
+
+Every battle page (title menu, war zone, setup, class, respawn, pause, result) is a page of the
+game's START menu, the progress state `'battlefront`. Its one option (`menu-bf-page-option`) hands
+the pad to the director (`bf-menu-input`), which draws the page inside the menu's ring
+(`bf-menu-draw`). The title menu's options are replaced (`set-menu-options` wrapper), and START in
+a battle opens the battle's pause page (an `activate-progress` wrapper).
+
+**The battle never pauses.** Under every page of a fight the game keeps running
+(`bf-live-update`): the menu's process mask is undone and pad 0 is hidden from the world
+(`bf-input`) while the menus read it.
+
+**Outside the campaign.** During a battle no mission starts (`exclusive-task` none), no vehicle can
+be taken (`pilot` off), and Save, Load Game and Secrets are greyed and refused. A load or a new
+game ends the battle first (`game-info` `initialize!` wrapper, `bf-stop-now!`).
+
+## 3. How a battle runs
+
+1. **Title.** START on the title screen opens the battle's title menu: Start a battle, Options,
+   Quit.
+2. **Setup.** The war zone, then the battle setup (`*bf-config*`): time limit, units per side,
+   units at once, victory condition, side. Next starts a new game at the zone's continue point.
+3. **Class and deployment.** The class page opens while the zone loads under it (phase `deploy`).
+   `bf-caps-set!` sets the caps, the stock faction settings bring both armies, and Jak is respawned
+   the way a death does (`initialize!` `'life`), so every pool spawns again with the battle's looks.
+4. **Fight.** Start the battle puts the player in as his class, with a 3 s spawn shield. Every
+   frame the director runs the city side (hatred, marches, drops), the class model, the points and
+   the HUD.
+5. **Death.** During a fight the code of Jak's `target-death` state is `bf-target-death`: his class
+   dies its own way, the camera follows a living ally, then X respawns him at his respawn point and
+   Triangle opens the Respawn page. He comes down from the sky (`bf-sky-drop!`), his controls back
+   once he lands.
+6. **Redeploy.** START > Redeploy opens the same page: free after 30 s out of combat
+   (`BF_REDEPLOY_CALM`), one unit of his side otherwise.
+7. **End.** The result page; X (or Quit the battle) calls `bf-to-title!`: a new game at the title's
+   continue point, as the stock demo's return to the title does, so the whole game is reset.
+
+## 4. Files
+
+| File | Role |
+|---|---|
+| `goal_src/jak3/pc/features/battlefront/battlefront-h.gc` | `*bf*`, the tables (zones, points, classes, caps, texts in English and French) and every function the stock code calls into |
+| `.../battlefront/battlefront-player.gc` | The class model (`bf-avatar`), its moves and weapons, the camera rig, the shield |
+| `.../battlefront/battlefront.gc` | The director: phases, menus, points, HUD, deaths, respawns, the stock wrappers |
+| `.../battlefront/battlefront-havenj2-info.gc` | Reads the generated Jak 2 level's load info and map at compile time |
+| `.../battlefront/battlefront-icons.gc`, `-minimaps.gc`, `-portraits.gc` | Generated pictures: HUD icons, Jak 3's city map, class portraits |
+| `goal_src/jak3/levels/city/battlefront/battlefront-city.gc` | The city side (CWI): hatred, goals, marches, drops, posts, NaN sweep |
+| `goal_src/jak3/levels/city/battlefront/bf-transport.gc` | The troop transport (CWI) |
+| `goal_src/jak3/levels/bf-havenj2/` | The Jak 2 city level's code; the rest of the folder is generated by `task level-port` |
+| Stock files marked `;; MOD battlefront` | One-line hooks into the traffic, guards, turrets, HUD, minimap, loading, and the raised limits of §5 |
+| `custom_assets/jak3/models/models.jsonc` | The Jak 2 models' recipe |
+| `custom_assets/jak3/ports/battlefront-havenj2/port.jsonc` | The Jak 2 city's level port manifest |
+| `scripts/battlefront/` | The generators of the icons, maps and portraits |
+| `scripts/level_port/`, `decompiler/level_extractor/`, `goalc/build_level/`, `tools/fr3_check.cpp` | The level port tooling of the mod Haven City: New Dawn, which builds Jak 2's city as a Jak 3 level |
+| `game/graphics/opengl_renderer/foreground/Shadow2.cpp` | A shadow that no longer fits the buffers is dropped instead of stopping the game |
+
+`battlefront-city.gc` and `bf-transport.gc` are level code: they need Haven City's types, which only
+CWI knows. The GAME files must work whatever level is loaded, so `battlefront-h.gc` defines every
+function the level code calls, answering like the stock game outside a battle.
 
 > [!WARNING]
-> **Art-group order in `ctypesa.gd` and `ctypesc.gd` is load-bearing.** Once the first art group
-> logs in, each DGO buffer shrinks to the object it held plus 2 KB, and the object two slots
-> later lands in it. Keep each block sorted by decreasing size (sizes in the `.gd` comments).
-> Breaking it prints `dgo file header ... has overrun heap`, then fails the klink `version == 5`
-> assert (battle-of-spargus mod, WWD).
+> **Art-group order in `ctypesa.gd` and `ctypesc.gd` matters.** Keep each block sorted by
+> decreasing size (sizes are in the comments). Out of order, loading Haven City prints
+> `dgo file header ... has overrun heap`.
 
-### 2.4 Playing a class
+## 5. Engine limits
 
-`bf-avatar` (`battlefront-player.gc`) is spawned to `*entity-pool*` with the class's skeleton group,
-bound to the level that holds its art (`*bf-class-art*`: ctypesa for the guards, ctypesc for the
-jetpacks and the robots). Each frame it:
+A battle of 200 units goes past several fixed sizes of the engine. The mod raises them:
 
-1. copies Jak's position, faces the camera's heading (turned up to 50 degrees toward its walk, its
-   walk or run clip reversed when it walks backward; facing the aim point while it fires), and sets
-   `no-draw` on Jak (Daxter, the gun and the board copy Jak's draw status);
-2. sets the class speed through `*setting-control*` `user-default speed-mult`, which the target
-   reads every frame (`logic-target.gc`);
-3. applies the class moves to Jak's velocity (jetpack lift on its fuel gauge, spider jump and blue
-   eco sprint, roboguard roll) and raises or lowers the robotguard's shield;
-4. reads the guard classes' D-pad weapon choice, then takes the aim (`bf-avatar-update-aim`): the
-   free aim of the frame (`bf-free-aim`), or, for the tazer, the nearest foe within 12 m ahead of
-   its gun (`locked?`), onto which the HUD moves the crosshair;
-5. on R1, if the weapon's ammo lasts, fires it: a stock `guard-shot` with Jak as its parent
-   (`spawn-guard-projectile`), so the shot skips Jak's collision and counts as Jak's; a guard
-   grenade (`vehicle-grenade-deflect`, thrown by `battlefront-city.gc` on the grenade guards' arc);
-   or the tazer's arc; the spider sends a melee `attack` from Jak instead;
-6. plays the class clip for Jak's motion (idle, walk, run, in the air, shooting, rolling): in the
-   air only when Jak is off a surface and more than 0.6 m above his ground probe's point (the
-   on-surface flag goes off for single frames on the run); walk and run switch with some slack
-   (run above 7 m/s, back to walk under 5), and idle, walk and run each play 0.25 s at least, so a
-   speed jittering against a wall does not flip them. The model is placed again once Jak has moved
-   this frame (`bf-avatar-cam-post`, a `*cam-post-hook-engine*` connection, then `do-joint-math`):
-   the avatar runs in `*entity-pool*`, before Jak, and placed from its own run it showed him where
-   he was the frame before, a gap that changed with each change of speed and shook the jetpack.
-   The same connection computes Jak's own bones (`bf-target-bones!`): hidden, the game skips their
-   math, and his collision follows them; moved by a respawn or the force field, he fell through the
-   ground at 5 of the Port's 9 continue points (Lisp wiki jak3 4.34).
-
-**The red guards' clips.** The red guard model's own clips (build-actor at 15 frames a second)
-played too fast. A red guard, an AI unit (`guard.gc` init-enemy!, right after its skeleton) or the
-class's avatar, now plays the blue guard's clips: `bf-guard-clips` sets its draw's art group to
-`crimson-guard-ag` (same 41 joints and bind pose) and gives it an effect-control for the clips'
-sounds and death effect, the method of the mod Haven City: New Dawn. A unit is therefore told by its
-skeleton, not its art group: `bf-art-name` reads the joint geometry's name (`bf-red-guard-lod0`,
-`bf-hover-blue-lod0`...).
-
-**The spider's legs.** The avatar loops its walk and run clips at the rate of the ground it covers
-over the ground the clip covers (`bf-avatar-loop-rate`: spydroid.gc's walk 4 m/s, run 8 m/s, rate
-0.5 to 4) for the spider; the other classes keep rate 1. At rate 1 the spider, at Jak's speed times
-1.5 (twice that boosting), slid over the ground.
-
-**The camera.** A third-person shooter camera, as in Star Wars Battlefront (2004): `bf-cam-rig`,
-a process spawned with the avatar under Jak (so it runs after him, before the camera) and killed
-with it. It drives the stock point-of-view camera (`cam-pov`, as the city's sniper turret uses
-it), which looks from a bone of a process: the rig is a process-drawable with a node list of one
-cspace whose bone lives in the process itself (a heap compaction moves both). Every frame it turns
-the view (`*bf*` view-yaw, view-pitch, kept across class changes and respawns) by the right stick,
-160 degrees a second sideways and 100 up and down (40 up, 45 down at most), and sets the bone: the
-view's rotation, placed behind a pivot at 80 % of the class's height by 1.6 times that height (5.5
-m at least), 0.3 times it to the right and 0.8 m above, pulled in front of any wall between the
-pivot and there (a 0.4 m sphere probe). That distance behind is times `*bf-cam-zoom*`, 1.0 to
-`BF_CAM_ZOOM_MAX` (1.8), kept from life to life: L3 held, the right stick's up and down change it at
-1 a second instead of tilting the view (round 35, the author's wish; the view of rounds 13 to 34 is
-the closest). A zoom during an L3 hold keeps its release from toggling the map (`*bf-l3-zoomed?*`,
-`bf-l3-tapped?`), and the game's orb and skull gem counters, which the stock shows while L3 is held
-(`hud.gc`), stay disabled during a fight (`bf-stock-counters-hide!`). The crosshair sits in the
-middle of the screen (256, 208).
-Two engine facts set its signs: the camera's rvec points to the screen's left (looking along +z,
-+x is on the left), and the PC settings' default third-person inversions keep the original game's
-camera, which turns the view left for the stick pushed right; the rig turns the other way, as a
-shooter, and follows a change of those settings. The view starts as Jak's facing at the spawn, and
-a respawn looks toward the battlefield. A death's spectating gives the stock camera back, further
-back.
-
-**Guard dodges, rolls and crouch.** L2 with the left stick (a dodge) or R2 (a roll) sends Jak a
-stock `'launch` (`target-standard-event-handler`: a jump of the given height with the given
-velocity) 0.8 m high at 11 m/s toward the stick, and keeps that speed across while it flies; it
-ends as Jak lands, a roll once its head-over-heels turn is done too (`bf-avatar-dodge`). An upward
-speed set by hand did not lift him: 1.2 m along the ground. A dodge keeps the model facing the
-crosshair and plays the stock guards' sideways jump to its side (`jump-right` 40, `jump-left` 41:
-the stock roll-right state throws a guard along its +x, its left, with jump-left), `jump-high` 38
-ahead or back; a roll faces its way and turns the tucked `jump-high` pose. L1 held on the ground
-kneels (`crouch?`): the kneeling shot clip 28 (`attack-shoot-knee` loop) on the whole body, the
-walk speed x0.01, no upper-body shot clip. `bf-avatar-spread` sets the rifle's spread each frame:
-0.3 degrees kneeling, 3.5 on the move (over 1 m/s across) or in a dodge, 1.5 standing; each rifle
-shot goes to a random point of a cone that wide around the aim point, and the crosshair is drawn
-larger with it (`bf-draw-reticle`). The other classes shoot straight at the crosshair.
-
-**The red guards' deaths.** Their skeleton plays `crimson-guard-ag`'s clips with an effect-control
-(above), so their death clip's `'event-death` ran the stock guard's `death-default` effect
-(`guard.gc`), which sets the draw-control's `death-timer`. On PC a model with a death timer is drawn
-through generic merc (`foreground.gc`, the PC reassign), and a build-actor model has only a dummy
-merc-ctrl for it (`build_actor.cpp`): the game crashed in `mercneric_convert` (mips2c
-`generic_merc.cpp`, found with a temporary vectored exception handler) seconds into battles, as
-units died. A `do-effect` wrapper (`battlefront-h.gc`) skips the death effects of the mod's
-build-actor models (`bf-custom-model?`): until round 27 the body went with its death clip, without
-the dissolve. Since round 28 a red guard's death effect starts its look instead (`bf-fizz-start!`,
-`bf-fizz-tick` in the director's frame): the dissolve's sound (enemy-fizz) and 4 sparks a frame of
-its particle (part 53) from the body's joints for a second, the body hidden then; it is let go at
-1.5 s, or as soon as it is no longer dead (its pool woke it again, and its reset shows it). The blue
-guards keep the stock dissolve.
-
-**The jetpack clips' pace.** The jetpack guard's clips are the Jak 2 rip's frames at 15 a second,
-which build-actor stores with a speed of one frame per 60th of a second (measured: speed 1.0): the
-player's jetpack looped its 16-frame hover clip four times a second and its legs shook, the units'
-own (0.5 a frame) twice too fast. Both play at `BF_HOVER_RATE`, 0.25 (measured 0.249 a frame).
-
-**Health by class.** The player keeps Jak's health (8, the health HUD's 8 segments); the
-`target-attacked` wrapper scales the damage of each attack during a fight by the class's
-`*bf-class-damage*` (the attack's damage, or Jak's default `health-single-inc`): guards 1.0 (8
-hits), jetpacks and spider 1.333 (6 hits), robotguard 0.5 (16 hits).
-
-**Grenade guards against guards.** A grenade guard reloading broke off for any target within half
-its keep-away distance; with another guard there, the reload, the backing away and the grenade
-state chained within one frame until the stack overflowed (Lisp wiki jak3 4.40).
-`bf-reload-break-ok?` (`guard-grenade.gc`) breaks it off for the player only during a battle.
-
-**Free aim.** `bf-free-aim` (once a frame, keyed on the real clock's frame counter) casts a ray from
-the camera through the crosshair's screen point (256, 208 of the 512 x 416 screen), 80 m long, with
-`fill-and-probe-using-line-sphere` against the scenery and the units (Jak's own collision skipped).
-The ray's direction is the crosshair's offset from the screen point of a spot 1 m ahead of the
-camera, turned into meters with the projections of the camera's right and up axes there (the method
-of `bf-icon-place`). Its end goes to `*bf*` `aim`, and the foe it meets to `aim-foe`. The class
-weapons fire from their muzzle at that point.
-
-**Ammo.** The guard weapons spend Jak's own gun ammo (`*game-info*` gun-ammo:
-0 yellow, 1 red, 2 blue), so the stock ammo pickups refill them with no new pickup code; the
-jetpacks' and the robotguard's built-in guns spend none, their salvos are paced by a delay. The director saves Jak's ammo,
-light eco and dark eco when a battle starts and writes them back when it ends; each deployment
-(the first class page, a respawn after a death, a restart) tops the ammo up to 60 yellow, 10 red
-and 50 blue, and fills the guard weapons' magazines.
-During the battle the avatar turns any dark eco Jak picks up into jetpack fuel (6 units, one drop,
-fill a tank) and keeps his at 0. The "endless dark eco" secret sets Jak's dark eco to its maximum
-every frame (`target-eco-process`, `powerups.gc`): the director clears its bit for the battle and
-sets it again at the end.
-
-**Weapons of the guard classes.** The blue guard shows the weapon in hand with the stock mesh
-segments (rifle 8, tazer and grenade launcher 16, `crimson-guard-method-267`); the red guard's tazer
-and grenade launcher are its second model, so a change between them asks the director to draw the
-class again (`*bf*` `redraw?`). The tazer is the guards' own lightning (`lightning-control`, spec 19
-built, drawn with spec 20 and 9 points between the gun and the aim, as their tazer draws a miss).
-The lightning-control lives in the avatar's heap: the avatar's `relocate` method moves its pointer
-when the dead-pool heap compacts (as crimson-guard's `l-control`); without it the first tazer shot
-crashed the game.
-
-**Guard magazines and upper-body clips.** The guard classes fire from magazines, the stock
-guards' sizes (`crimson-guard-method-286`): 6 rifle shots, 2 grenades, kept in `*bf*` `mag` so a red
-guard drawn again with its other weapon keeps them; the tazer has none. The shot that empties one
-starts a reload (`reload?`), which waits for the shot's clip to end, plays the stock rifle guard's
-reload (`guard-rifle.gc` `rifle-reload`: `grenade-reload` at 1.1 times, then `cock-gun` at half speed),
-then fills the magazine from Jak's ammo; R1 does nothing meanwhile, and an empty magazine with ammo
-left reloads on the next R1. Triangle reloads the rifle at any time (`bf-avatar-reload-key`, round
-27, the author's wish): its magazine not full, the reserve not empty, the reload's clips once the
-shot's clip ends; the magazine is filled up to its size, the rounds left in it kept, only the rounds
-spent taken from the reserve. A weapon change or a rifle butt drops a reload in progress. These clips
-play on the upper body only, the engine's `top-anim` mechanism that plays Jak's gun clips on his
-arms (`process-drawable.gc` `top-anim-joint-control`): the avatar of a guard class carries one with
-the joints above the hips (`BF_GUARD_UPPER`), and `bf-avatar-top-play` pushes a clip, with its frame
-range, onto it; the legs keep their idle, walk, run or jump clip. A rifle shot played `gun-attack`
-there in rounds 26 and 27; since round 28 it plays on the whole body, the player still and facing
-the crosshair (`bf-avatar-rifle-update`, `rifle-step`: the whole clip, frame 0 to its last, as the
-stock rifle guard plays it; its artist frames 12 to 22, used before, lie before the clip's first
-one and ended the shot at once). A grenade, the stock grenade guard's two parts of `grenade-attack` (artist frames 1 to 12 at 1.5
-times, then 22 to 37, `guard-grenade.gc`). The tazer's `stab-attack` plays on the whole body
-instead (below). Before, the guard switched its whole body to a firing clip for
-0.4 to 0.7 s per shot (the legs stopped on the run), and the grenade throw played `grenade-attack`
-from its first frame, a clip that runs on to the launcher's reload.
-
-**Robotguard punch.** Square plays the stock roboguard's punch, as `roboguard-city.gc` does:
-wind-up (`punch-close-rotate`), punch (`punch-close-go`), back (`punch-close-end`), 0.9 s in all
-(`*bf-punch-clips*`, `melee-step`); the hit lands as the punch clip starts, on the nearest foe ahead
-within 6.5 m (`bf-avatar-punch`). The punch clip alone, 0.18 s, read as a twitch, and 4 m reached
-few foes from a 4.8 m tall robot.
-
-**Robotguard shield.** Circle held spawns `bf-shield`, a subtype of the Dark Makers' shield sphere
-(`shield-sphere`, `engine/common-obs/shield-sphere.gc`, GAME code; its art is in CTYPESA): 3 m
-around Jak, 2.2 m up, strength 3. Its collision is off (its root prim and the backup its states
-restore it from): with the mech shield's, the robot's own shots stopped on it 5.9 m out; Jak's
-shield level stops the attacks instead (below). Its post adds a constant red emissive to the stock
-heat glow. The gauge reads its times on the avatar's clock: read on the HUD's, it came back full at
-once while the shield still recharged. Shots heat it; past 1.0 it breaks into its stock shards, and the avatar, which polls it with
-`'active`, waits 5 s before the next one. Its init binds it to CTYPESA first: `initialize-skeleton`
-looks the art up in the process's level, and without it the shield went straight to
-`process-drawable-art-error`. While it is up, and while the robotguard rolls, the wrapper of
-`target-attacked` in `battlefront.gc` sets Jak's shield level for each attack: 1 when the sender
-is a `projectile` or an `explosion`, 0 for anything else (a blow, sent by the attacker itself), so
-the blasts and the shots that still reach Jak are stopped.
-
-The settings `gun`, `attack`, `board`, `darkjak` and `lightjak` are owned by the avatar and leave
-with it; its `deactivate` gives Jak back his model and speed. When the avatar disappears (its level
-unloads, a death reset kills `*entity-pool*`) the director spawns it again. The mod keeps the
-avatar and the director as handles, in `*bf*` (`avatar`, `director`): both come from dead-pool
-heaps, whose freed records the next spawned process reuses, so a stale ppointer would name an
-unrelated process, and a global symbol holds only 32 of a handle's 64 bits. Kept in globals,
-the handles never resolved: the director spawned a new avatar every frame until the game ran out
-of memory, and the class page never opened after a death (both seen in game).
-
-The avatar blends into each new clip (0.1 s). With two blends still running, the new clip waits
-for one to end (0.3 s at most, then it switches at once): a clip that changes every few frames (in
-flight) would fill the joint-control's 6 channels ("could not do (ja-channel-push! 1)", seen in
-game), and switching at once, as it did before, popped the guard's pose (2 of 14 clip changes in a
-guard run, 0 of 13 since). The jetpack dive and the spider pounce lift Jak off the
-ground and steer him at the foe every frame until they reach it: on the ground, Jak's own stance
-code cancels a single push.
-
-The stock units pick their mesh segments in their own init; the avatar does it for the classes
-that have several: the blue guard shows the rifle and the normal armor (masks of
-`crimson-guard-method-267`).
-
-### 2.5 Battle life cycle
-
-| Phase (`*bf*` `phase`) | What the director does |
-|---|---|
-| off | nothing; every hook answers like the stock game |
-| deploy | sets the `borrow` and `faction-command` settings and the continue point, respawns the player there with `initialize!` `'life` (every unit pool spawned again with the battle's skins), and holds him there (`bf-hold-at-spawn`) until he stands on the ground: the battle's Haven City alias reloads the city's collision, and Jak used to fall through the map and die. When ctywide, ctypesa and ctypesc are active and Jak has stood (state `target-stance`, after at least 2 s): Haven City side `BF_CITY_PREPARE` (hatred saved, wastelander level), then fight. Gives up after 60 s. |
-| fight | class page first (the deployment's), then `BF_CITY_UPDATE` each frame (hatred, faction commands), avatar upkeep, force field (`bf-keep-in-zone`, §2.6), pickups of dead units, HUD |
-| over | result page; X ends the battle |
-
-Ending a battle switches the phase off first, then calls `BF_CITY_RESET` (hatred written back),
-removes the director's settings and respawns the player at his spawn with
-`initialize!` `'life`, so every unit comes back with its stock skin. While Jak drives, the end
-waits until he is on foot.
-
-**START: the battle's pause page.** The game opens its START menu with `activate-progress` `'main`
-(`main.gc`, master mode `'progress`). While the mode is on, a wrapper of `activate-progress` hands
-the director a request instead (`BF_REQ_PAUSE`): no menu process, so the game goes back to `'game`,
-and the director opens its own page `BF_PAGE_PAUSE`, paused under it as its other pages are, with
-the city's map in the right frame (`bf-draw-city-map`). An entry closes the page and hands the
-director its request (`*bf-pause-reqs*`), which it runs once the game runs again; Options sets
-`*bf-stock-start?*` and asks for `'progress`, which the wrapper then lets through once: the game's
-own START menu. START or Circle closes the page; a new request waits 0.4 s from a close, or the
-press that closed it opened it again through the game's menu. Every other menu (save icons, card
-errors) is the stock one. Restart (`bf-restart-battle!`) gives Jak back what the battle set aside
-and starts the same battle again, so the new start sets Jak's own aside once more.
-
-**The game's menu during a battle.** The START ring's Save, Load Game and Secrets are drawn grey
-and their X refused (`bf-locked-option?`, wrappers of `menu-main-menu-option` `respond-progress`
-and `draw-option`); on the Quit / Restart page, Restart Mission's X is refused the same way (a
-wrapper of `menu-restart-mission-qr-option` `respond-progress`): a mission's restart would run the
-game's own reset in the middle of the battle. Until round 26 the Options page also had a Gamemode
-entry (`*options-options-pc*` swapped for a list with a sixth entry) leading to the same requests
-through generic scrolling pages, their labels text ids past the game's own answered by a
-`lookup-text!` wrapper; the author had them removed.
-
-**Switched off in a battle.** The director sees the mode off while a battle runs, closes its page,
-and once the Mods menu has closed (that menu closes itself on this toggle) loads the last save
-(`bf-leave-to-save!`): `(auto-save-command 'restore 0 (-> *game-info* auto-save-which) ...)`, as the
-START menu's Load Game, the slot the game last loaded or saved (`*setting-control*` `user-default`
-`auto-save` is set once one was). The load's `initialize!` 'game ends the battle (`bf-stop-now!`).
-With no save since the boot it ends the battle as Quit does.
-
-**Switched on.** The mode's switch in the Mods menu closes that menu, spawns the director if it
-is not running (`bf-director-ensure!`) and asks for the pause page (`*bf-request*` BF_REQ_PAUSE),
-which the director opens once the Mods menu is closed (round 28, the author's wish).
-
-**Death and spectator.** During a fight the code of Jak's `target-death` state is `bf-target-death`
-(the state's `code` slot set at load, the stock code kept in a `define-perm` and run outside a
-fight). It sets what the stock death sets that the game reads (dead focus status, attacks off, gun
-away), counts the loss, lets the class model die (the battle camera looking down at it from 30
-degrees, centered, `BF_DEATH_PITCH`: kept over the shoulder and level, it framed the body at the
-bottom left, under the HUD), and then, until the player chooses (round 28: X once `BF_RESPAWN_TIME`,
-2 s, has passed, for the respawn page; Triangle for the class page first, `bf-death-class-page`,
-through the director's BF_REQ_CLASS; until round 27 the respawn page came by itself after 4 s),
-hands the camera to a living unit of the player's side (`'change-target`, as cutscenes' `camera-look-at` do; the
-nearest within 150 m, another when it dies), 10 to 14 m behind it (the camera's string settings: by
-default a guard filled the screen), while the HUD counts down. Then it moves Jak to his spawn and,
-still hidden, wants the levels the camp's continue point lists as a respawn there does
-(`bf-want-camp-levels`) and waits until they are active, 10 s at most. It makes the spawn the force
-field's safe place,
-turns him toward the district's middle, fills his health and ammo, gives him 2 s of invulnerability
-(`target-timed-invulnerable`), gives the camera back 6 m behind him (`'change-target`,
-`'teleport-to-vector-start-string`) and goes to `target-stance`; the director draws the class
-again. The stock death froze the enemies for its length (a `'process-mask`
-setting), could play a death movie, and its reset (`initialize!` 'life) spawned every unit of
-Haven City again: the battle's units vanished at each death and came back at their pools' places.
-
-The battle menu sets `*popup-menu-open*` while it is up, as the popup menus do: in the 'menu
-master mode the pause buttons (`toggle-pause`) would otherwise resume the game under the page, and
-the Mods menu would open over it. A page draws its panel and all its text into one DMA buffer,
-panel first (with separate buffers the panel covered the text); centered text has its origin at
-x 256 of the 512-unit screen (the font's `middle` flag centers on the origin); descriptions wrap
-at 44 characters. The texts follow the PC text language (`*pc-settings*` `text-language`), the one
-the game's own texts use; a loaded save sets the stock `language` setting to its own. French
-texts avoid the ASCII apostrophe, which the game's font draws as an acute accent.
-
-The deployment comes before the class choice: the class models, and the class page's preview of
-them, live in CTYPESA and CTYPESC, which only the battle's alias levels load.
-
-### 2.6 Class models over the game, HUD and force field
-
-`bf-icon` (`battlefront-player.gc`) draws a class model playing its idle clip: the class page's
-preview (a child of the director, 230 screen units tall, turning 90 degrees per second) and the
-class icon in Jak's health HUD (a child of the HUD process `hud-health`, 34 units tall, which shows
-and hides it with its 'draw events). It runs on the real clock with the menu and pause masks
-cleared, so it moves while the class page pauses the game. It plays the clips the battle plays:
-the red guard the blue guard's (`bf-guard-clips`: its own ran four times as fast), at the class's
-idle pace (`bf-idle-rate`: the jetpacks' clips at 0.25, the robotguard held still, its idle0 a
-slow shift of weight the game plays at a tenth of its pace).
-
-It is drawn with the world, not through the HUD's model path. Jak 3's HUD icons
-(`hud-create-icon`) draw with `foreground-draw-hud`, which feeds the PS2 generic renderer
-(`foreground-generic-merc`); build-actor models have no data for it, and the red guard's preview
-crashed the game in native code. `bf-icon-place` instead stands the model a few meters in front of
-the camera (3 m for the preview, 1.5 m for the icon), facing it: the screen scale at that depth
-comes from projecting the camera's right and up axes with `transform-point-vector!` (screen origin
-at (1792, 1840)), and each class's model height comes from the bind pose of its rip (guards 3.8,
-jetpack guards 4.3, robotguard 4.8, spider 2.0, in game meters).
-Guessed human heights (2 m) drew them twice too large. The director gives each model its screen
-spot every frame, and a `*cam-post-hook-engine*` connection of the model puts it there again
-right after the frame's camera is set (`update-camera`, `main.gc`), then computes its joints again
-(`do-joint-math`), before anything is drawn. Placed from the process run alone, the model used the
-previous frame's camera and its joints were computed before the camera moved: it trailed a moving
-camera, and a screenshot taken while the camera settled showed the HUD icon at the bottom of the
-ring. Jak's preview uses `target-skel-group`, the
-skeleton group with his outfit's geometry (skel-jchar alone draws one flat quad), with a heap large
-enough for its cloth, turned on as the target does for that outfit.
-
-Since round 30 no page shows a `bf-icon`: the class page shows a picture (§1); smoke scenario 53
-still draws the class models with it to make those pictures. The health HUD keeps its stock look, with no
-model in its ring. The class gauge takes one of the ring's eco gauges: `hud-health`'s `draw`
-(`hud-classes.gc`) calls `bf-hud-health-gauges` once it has set its sprites and before it draws
-them, and during a fight that function sets the scale and color of sprite 2 (the dark eco gauge,
-the right half: the jetpack's fuel, in the bright color the gauge takes when Jak has eco enough for
-a dark bomb) or sprite 1 (the light eco gauge, the left half: the spider's blue eco in blue, the
-robotguard's roll in red), with the stock gauges' pulse kept between 0.5 and 1 (the stock 0 to 1
-made the fuel vanish on the dark disc half the time). The battle keeps Jak's own light and dark eco
-at 0, so the other gauge stays empty. The ring's windows shape the gauges because they are drawn
-before it: a gauge in a later sprite (5) was hidden behind the ring, which writes its depth on its
-whole square. The director asks the health HUD to show every second (`'show`), within its 2-second
-display time.
-
-The gun icon is the stock gun HUD itself (`hud-classes.gc` `hud-gun`), top right. It only shows
-while Jak's own gun is out, which the battle forbids, so `battlefront.gc` replaces its
-`update-values!` (a `define-perm` wrapper): during a fight, with an ammo weapon, it sets the HUD's
-gun (`*bf-hud-guns*`, the pickup-type of the BF_AMMO_* in use) and ammo values and asks it to show,
-then runs the base `hud` update; the stock `draw` does the rest (icon, shell column, "ammo/max"
-count). Otherwise the stock update runs and hides it. The battle's `'gun #f` setting also hides the
-stock gun arrows. The crosshair is the HUD's `hud-gun-reticle` texture drawn as a centered `hud-sprite` in
-the HUD's sprite bucket, at its fixed point or, while the tazer locks a foe, at the foe's
-projection.
-
-**Loading on black.** While a deployment loads its war zone, `bf-black-set!` sets the menu renderer mask
-(`*display*` `vu1-enable-user-menu`, which `drawable.gc` copies into the frame's mask every frame,
-as the stock progress menu's "menu mode" does) to the foreground renderers only (`generic`, `merc`,
-`emerc`): no sky, scenery, ocean, particles or shadows. It also sets `no-draw` on every drawn
-`process-drawable` except the `bf-icon` previews, keeping their handles (1024 at most) to clear the
-flag on exactly those once the zone is ready and the class page goes to the START menu.
-
-**Zone map.** The zone and side pages draw the whole city as the START menu's map shows it.
-`scripts/battlefront/make_minimaps.py` reads it from `iso_data/jak3/STR/WOMAP.STR`, which starts
-with a table of sector numbers (2048 bytes): the map of `bigmap-id` i (`level-h.gc`, city 0) is at
-sector i, a header (palette offset, texel offset, width, height) then a 256-entry ct32 palette and
-8-bit texels in strips 256 wide. The city's is 512 x 832 texels of 4 m, texel 0 at world x -640 m,
-z -1088 m (`bigmap.gc` `*bigmap-info-array*`). The script keeps its part inside the city's outline
-(texels 32 to 464 across, 60 to 804 down), resamples it to 384 texels high (7.75 m a texel) and
-reduces it to 255 colors. The game's minimap textures, used before, cover only the sections with a
-minimap page: Jak 3's center and stadium (map-ctygena, map-ctypala and four others) have none, so
-the map had black holes there. For a zone of a few sections the script can still build the map
-from those textures (`city-map-bits`, `engine/ui/minimap.gc` `*minimap-texture-name-array*`). It
-writes `battlefront-minimaps.gc`: 8-bit texels, one palette in the PS2 order (entry i at i with
-bits 3 and 4 swapped), each map's stored and drawn size, its world corner and texel size, and its
-`tex0`. `bf-zone-view!` fits the whole map in the right frame, its shape kept (a texel is
-`0.923 relative-x-scale` times wider than tall in screen units); `bf-draw-zone-minimap` uploads the
-zone's texels as the START menu's map does (`pc-upload-map-texture` into the texture at tbp 8) and
-draws them as one sprite in its own bucket (`bf-map-sprite`, the stock `sprite-dma` with the view's
-texels and box), then marks the default level's VRAM dirty, as the START menu's map does.
-`bf-draw-zone-marks` draws the frame, the spawns and Jak over it with the same projection.
-
-**Reserves.** `bf-draw-reserves` draws them top middle, after the reinforcement meter of Star
-Wars Battlefront (2004) (its manual: "the numbers and bars represent the strength of
-reinforcements for each faction. The player's faction is Green, the enemy is Red"): a dark panel,
-two bars of `draw-sprite2d-xy` from the middle out, 76 screen units each when full (`BF_BAR_HALF`,
-`BF_RESERVE` units), the player's side left in green and the enemy right in red, and the counts
-under them on either side of a divider. The panel ends left of the stock gun HUD. The zone and
-class line it replaced is gone.
-
-**Jetpack flight.** `bf-avatar-moves` sets Jak's vertical speed every frame he is in the air on
-fuel: X keeps a jump's own speed or climbs at 7 m/s; Circle comes down at 6 m/s; neither steers to
-the height held (`hover-y`) at 4 times the gap, so the hover settles and stays still. Out of fuel
-the fall is capped at 3 m/s (4 measured, gravity included). The model is drawn 0.8 m above Jak
-(`bf-avatar-follow`), on the ground too. Landed means Jak is `on-surface` AND within 0.5 m of his
-ground probe's point (`gspot-pos`): hovering 2 m up, `on-surface` came on for a frame once a second,
-reset the held height and let the jetpack sink a step every second (seen in game, Lisp wiki jak3
-4.33).
-
-**No district force field, the ceiling.** Since round 17 nothing holds the player in a district
-(`bf-keep-in-zone` kept only its fall check and the jetpack's ceiling). Until round 16 the field
-held him in the district's sections: the level the game saw him in (`*load-state*` vis-nick) and a
-minimap cell of the zone (the `city-map-bits` of its sections). `bf-keep-in-zone` takes his safe
-place every 0.5 s while he stands; 20 m below it (a hole, or a place whose ground is not loaded),
-it puts him back there (`move-to-point!`), cancels his speed and sets vis-nick back. A jetpack
-class more than 2 m above the ceiling (only a jump takes it there) has its rise turned into a 2 m/s
-fall. Under the ceiling the jetpack's own lift fades (4 times the gap to the ceiling, in m/s, at
-most 7). The first version cut the thrust at the ceiling, refilled the fuel while X stayed held
-after it ran dry (a thrust every other frame), and pushed down right above the ceiling: the mod's
-author saw the jetpack jerk in flight. The current rules were measured frame by frame (§3.1). It
-spawns Light Jak's shield-hit sparks (`group-lightjak-shield-hit`) and plays `shield-hit`; a
-jetpack holding X stopped at 0.1 m above the ceiling.
-
-### 2.7 Outside the campaign
-
-| What | How |
-|---|---|
-| No vehicle | The director sets `'pilot` to #f with its other settings: a vehicle takes the player only with it on (`vehicle-util.gc` `check-player-get-on`). It goes with the director too. |
-| No mission or activity starts | The director sets `exclusive-task` to `(game-task none)` with its other settings: a task node is open only if its task is one the setting names (`task-control.gc` `game-task-node-info-method-12`), and no node has the task none. NPC prompts, burning bushes, task managers and their minimap icons follow that gate. The setting goes with the director. A mission already running stays open. |
-| Save, Load Game and Secrets grey and refused | Wrappers of `menu-main-menu-option` `respond-progress` (X on one of them, `bf-locked-option?`: the stock refusal beep, nothing opens) and `draw-option` (the stock label, in the PC menus' disabled color) in `battlefront.gc`. A load would end the battle in the middle of the menu; the secrets would change the fight. |
-| A load ends the battle | A wrapper of `game-info` `initialize!`: a `'game` reset (the START menu's load, a new game, the title) or a `'boot` during a battle calls `bf-stop-now!` first, before the reset and the save's data: the avatar and the Haven City side go, Jak gets back what the battle set aside, the mode is switched off and the director goes with every setting it owns. The battle's own respawns (`'life`) go on as before. |
-
-### 2.8 Health, damage and targeting
-
-**One 24 point scale.** `battlefront-h.gc` gives every class and unit its full health in points
-(`*bf-class-hp*`, `bf-unit-hp`) and every attack its points (`bf-attack-damage`, told by the
-sender's type: `guard-shot` 8, or the player's class gun through `bf-shot-damage`; an explosion
-20; a unit's own blow 10, a spider's 12; the player's own attacks carry theirs in `*bf*`
-`own-attack` while `bf-send-attack` sends them, so Jak's body running into a unit deals 0). Two
-wrappers turn the points into the game's units:
-
-- Units: a `damage-enemy-from-attack!` method on `nav-enemy` takes the attack's share of the
-  unit's stock hit points (`default-hit-points`, which caps them first), 0 when the attacker is of
-  the unit's side, and counts the kill in `*bf*` kills when the attacker is the player. It is set
-  on `nav-enemy`, the parent of every unit of the battle: the city's units are defined in level
-  code linked after GAME and copy it at their creation, and GAME itself links with method-set
-  propagation on (Lisp wiki jak3 4.10). Measured: a rifle hit took 1.33 of a guard's 4 hit points (8 of 24).
-- The player: `target-attacked` refuses an attack from his own side (no hit reaction) and sets any
-  other's damage to its points times `health-max / 24` (Jak's 16 health: a guard's blow 6.67,
-  measured). His health at a deployment, a respawn or a restart is his class's share of
-  `health-max` (`bf-class-health`: the spider half the bar). While the robotguard's shield is up,
-  `*bf*` `shield?` sets Jak's shield level, and the stock handler refuses every attack. The flag
-  is set to `#f` at load: a symbol field of a static structure starts as 0, which tests true, and
-  until this round no attack ever hurt the player in a battle (Lisp wiki common 1.4.16).
-
-**Targeting.** `battlefront-city.gc` pushes two hatreds into Haven City's attack controller
-(`bf-city-push-hatreds`: the nearest foe first, kept until it dies, the player twice as hated as a
-unit), writes the attacker/target table of every battle type by side (`bf-city-apply-hatred`, 0
-within a side, the player's row and column included) and clears the guards' anger callbacks.
-Twice a second `bf-city-retarget` makes three kinds of unit look again: the other side's within
-50 m of the player whose foe is farther than him, any whose foe went beyond 150 m, and any of the
-player's side that has him as its foe (a target taken with the stock table while the zone loaded
-was kept for good: a red guard and a red jetpack aiming at a Krimzon Guard player, seen in a smoke
-run). The units' weapon goes through `bf-guard-weapon` in `crimson-guard-method-267`, and method
-270 compares the weapon it would give (Lisp wiki jak3 4.37): no tazer in a battle. The squads
-give the blue guards the tazer mostly: turned into the launcher alone, it left no rifle among them
-(13 launchers, 0 rifles near the player); split by the guard's pid, 7 and 3.
-
-**Guard ammo and the gun HUD.** The rifle's magazine is `*bf*` mag (10), its reserve Jak's
-yellow ammo (capped at 20 every frame), the grenades Jak's red ammo (capped at 5). The `hud-gun`
-`draw` wrapper draws the stock icon with its count and shells scaled to nothing (they would show
-Jak's ammo against its stock maximum), then the guard's own (`bf-draw-gun-ammo`, the stock shell
-sprite 14 and string position).
-
-**The jetpack's rockets (round 36).** L1, which the battle takes from Jak (`bf-pad-lock!` keeps it in
-`*bf-jet-l1*` and clears it, so Jak neither ducks nor rolls), fires a `bf-rocket` on its press: a
-`guard-shot` drawn as the dark gun 3's missile (`skel-gun-dark-3-nuke`, gun-ag, resident) with its
-trail, 60 m/s in a straight line for 3 s at most, aimed from the gun joint at the crosshair's point.
-On a hit or at its end it bursts as the red gun 3's shot does (`group-gun-red3-shot-explode`, the
-`red-3-sphere`, "red3-blast") and hurts every crate, enemy, guard, vehicle and civilian within 10 m
-but the player (`bf-rocket-damage`; `bf-attack-damage` counts it as a grenade, 20, twice that for the
-player's). 10 a life (`BF_ROCKETS`), 0.8 s between two. The gun HUD shows `BF_WEAPON_ROCKET` with the
-red gun 3's values, its icon sprites (0, 1) and the reticle beside it (15) made invisible around the
-stock draw; the director draws the rocket icon in their place (`bf-draw-rocket-hud`): since round 42
-in the box the screen shows the stock icon in, measured on screenshots in two screen shapes
-(`relative-x-scale` 1 and 0.53): from sprite 1's top down its texture's height times its scale,
-ending across at sprite 0's position, `BF_GUN_ICON_STRETCH` (1.22) times as wide as hud.gc's
-`hud-sprite` draw gives sprite 1 (the cause of that stretch is not found); as large as it fits and
-centered. From round 36 to 41 it was placed from the reticle, 100 units across: higher than the
-weapons' icons and too large on the author's wide screen. The icon is the author's pixel-art
-drawing (`scripts/battlefront/rocket-icon.png`), purple since round 42 (golden until then, which
-`make_hud_icons.py` tinted the dark gun's purple: the stock `hud-gunpurple-03a`'s 125, 102, 150), 584
-runs of one color over 105 x 37 art pixels
-(`battlefront-rocket-icon.gc`, `battlefront-icons.gc` since round 38), drawn as flat sprites in one GIF packet in the HUD's direct bucket
-(debug-no-zbuf2). A texture uploaded as the L3 map's (128 x 64, mt8) never showed in a fight, in
-the tex-hud-hud-alpha or tex-hud-pris2 bucket, even followed by a flush.
-
-**The robotguard's grenades (round 38).** L1, taken from Jak as for the jetpacks, throws a
-`bf-grenade`: a `bf-rocket` (its straight flight, its burst, its damage, 20) wearing the red gun 3's
-grenade (`skel-gun-red-3-grenade`, its glow `group-gun-red3-shot-glow`, scale 2.5), whose stock
-flight bounces and falls. Its init calls `guard-shot`'s, not the rocket's, so only one model is set
-up. The fists take turns (`gun0` 11, `gun1` 15, the avatar's `left-hand?`). The grenades share
-`*bf*` rockets with the jetpack (one class at a time), and the gun HUD shows `BF_WEAPON_BOT_GRENADE`:
-the author's purple grenade (`scripts/battlefront/grenade-icon.png`, untinted, 77 x 43 art pixels, 440
-runs, in the stock icon's box as the rocket; a purple bullet in rounds 38 to 41) over purple shells. `scripts/battlefront/make_hud_icons.py` makes both icons
-into `battlefront-icons.gc` (`battlefront-rocket-icon.gc` and `make_rocket_icon.py` until round 37),
-sampled on the drawing's own grid of 8-pixel art pixels (`grid_phase`: the offsets whose cells hold
-the most even colors; round 42's drawings sat off the picture's corner, their outlines lost), the
-dark pixels pure black before its colors are reduced (the near-blacks took the palette's colors),
-cropped to the drawing, the black around it see-through and the dark lines inside it kept;
-`bf-draw-pixel-icon` draws either.
-
-**The spider's chain and blast (round 38).** The headbutt (`bf-avatar-chain-zap`) gathers the 2 foes
-nearest the one struck within 10 m (the Peace Maker's blast radius), flashes
-`group-jak-peacemaker-shot-hit` on it, and shocks each foe 0.1 s after the one before
-(`bf-chain-shock`): a process under the foe strikes it (24, the electrocuted knock), draws for 0.6 s,
-every 0.05 s, the Peace Maker's thick bolt from the source (the player for the first foe, the first
-foe for the others: `process-drawable-shock-effect-bullseye`, lightning spec 16, parts 665, 255, 257)
-and its thin arcs to the walls near it (`process-drawable-shock-effect-replace`, spec 15), and
-strikes again at 1.1 s a foe the shock left at 1 point. A lethal blue shot leaves 1 point and sets the
-unit's `fated-time`, and the stock knocked state then kills it by itself, outside the damage step:
-the battle counts the player's kill on the hit that fates the unit (`damage-enemy-from-attack!`),
-once; before round 38 the spider's were never counted (seen in game), and the tazer's shock, the
-same attack, likely lost its kills the same way (not tested).
-
-L1 (`bf-avatar-nova`) works once charged: `bf-nova-charge`, the avatar's `nova-from` against
-BF_NOVA_CHARGE (30 s from the spider's appearance, on the avatar's clock), drawn in the dark eco gauge
-in orange (`bf-hud-health-gauges`; round 39). It spawns a process at the spider's feet: the Super
-Nova's sound ("pg3nxplo", streamed, or its stock fallback), its mushroom cloud (the stalk's column,
-`group-gun-dark3-stalk`, under a `gun-dark-3-sphere` growing to the Super Nova's size from 5 m up and
-rising 2 m a second, fading after 3 s, gone at 6 s), its shock rings, smoke and debris
-(`group-gun-dark3-ring`), the camera's shake and the pad's buzz; each foe within 40 m gets the Super
-Nova's scorch mark (`group-gun3-dark-scorched-earth`) and its attack (`bf-nova-strike`,
-`bf-send-attack-pen`, 24, penetrate `explode jak-dark-nuke`), and the player a deadly attack from
-the blast. Never the Super Nova's white screen, blur, music cut or `nuke-active?` setting. The
-spider marks itself `nova?`: its dying keeps its model hidden 5 s (BF_NOVA_VIEW, 1.2 s otherwise),
-and the camera rig pulls back to 60 m in 0.6 s, looking 50 degrees down at a point 10 m over the
-blast, short of any scenery (the rig's wall probe). Round 38 drew 15 m with the wall blast's
-`group-gun-dark3-small`, then the rings and a 0.3 dome, from the spider's own camera: the small
-blast's and the stalk's glows (17 to 30 m) and a dome holding the camera washed the screen out
-(seen in game). Round 39's first runs: the dome at its stock size at once held the camera, still
-close (the screen dark), and the far view without the wall probe went into the Industrial Zone's
-structures.
-
-**No orbs, no crates (round 36).** Every 0.25 s of a battle the director ends each precursor orb
-(`money`) and crate alive (`bf-clear-orbs-and-crates`): it gathers their handles over the process
-tree first, then marks each one's entity dead and deactivates it.
-
-**The tazer.** One strike on the foe the free aim locked within 12 m (`bf-avatar-tazer`), then
-`*bf*` tazer-time holds the next for 20 s, across a class change or a respawn. The strike plays
-the stock guard's stab on the whole body, as `guard-tazer.gc` does: `stab-idle-to-attack` (21, the
-thrust) once, `stab-attack` (22, the zap, a 2-frame loop) for 0.5 s, `stab-attack-to-stab-idle`
-(23) once (`stab-clip`, `bf-avatar-pick-anim`). On the upper body alone, over the walking legs,
-the thrust hid behind the guard's back from the camera, and the author saw no stab twice; clip 22
-alone was over in 7 frames. The strike shocks the foe (`bf-avatar-zap`, the spider's headbutt
-too): 24 points as the blue gun's shot hits (`penetrate jak-blue-shot`), so the unit plays its
-electrocuted knock (enemy.gc knocked-type blue-shot, a guard's `blue-hit` clips), with an arc
-drawn across it, its ends drawn again each frame, for 0.6 s (`arc`, `bf-avatar-zap-update`). The
-game keeps a unit the blue gun would kill at 1 point for a second (`apply-incoming-hitpoint-mods`):
-a second strike 1.1 s later kills it. Its look: a
-`joint-mod` in `joint-set*` mode on node 13, the guard skeleton's `gun` joint
-(`joint-nodes.gc`), scaled to 0.55 while the tazer is in hand (`bf-avatar-gun-look`). The avatar
-comes from a dead-pool heap: its `relocate` moves the `gun-jm` field with the process, or the
-scale written through the old address crashed the game seconds after a guard deployed (Lisp
-wiki jak3, process heaps move).
-
-**Class help.** Each class's lines (`*bf-guard-help*`, the robot's and spider's inline) are drawn
-under the list by `bf-draw-class-help`; their `<PAD_...>` tags become the font's button icons, and
-the D-pad's left arrow is drawn from the font's D-pad parts (`~3L`, `~22L` colors and `~+nH`,
-`~-nV` offsets). A line holds about 30 characters in the left frame. The preview fits each class's
-height in the frame, the spider robot its 4.4 m leg span (`bf-icon-size`): at its 2 m height it
-spilled out of the frame.
-
-### 2.9 The whole city: points, transports, routes, respawns
-
-**Points.** `*bf*` `points` holds six `bf-point`s (`battlefront-h.gc`): the two bases, held by
-their side for good, and a control point in each district, neutral at the start, where
-`*bf-point-defs*` puts them (`bf-points-setup`). Four times a second `bf-update-points`
-(`battlefront.gc`) runs each control point's capture:
-
-| Its section | The fight |
-|---|---|
-| Loaded (`bf-point-live?`: a nav mesh within 8 m; the game finds them in active levels only) | Each side's units within `BF_POINT_RADIUS` (15 m) through the actor hash (`bf-point-count`; the player counts while his class is alive): the side with more units adds 0.25 s of capture; the holder's majority, or a capture by the other side, takes it back first; a tie holds. |
-| Not loaded (`bf-point-away`) | No unit to count: a side fights for it from the points next to it it holds (`*bf-point-links*`, `bf-point-pressure`). A side alone at it captures it at the normal pace, at half pace when the holder holds a point next to it too; both sides at a neutral one, the one holding more neighbours. Every 10 s of fight each side there loses a unit (`bf-count-loss`). |
-
-At `BF_CAPTURE_TIME` (30 s) the point changes hands. A neutral point goes faster the larger the
-majority (round 42, the author's wish: `bf-capture-speed`): 1 time plus `BF_CAPTURE_STEP` (0.25)
-for each unit of the majority past the first, `BF_CAPTURE_MIN_TIME` (10 s) at the fastest, a
-majority of 9. Each point is a beam (`draw-beam`, gun-util.gc,
-with the blue gun's beam particle recolored: parts 5200 blue, 5201 red, 5202 white), 150 m tall;
-`draw-beam` builds its frame from the direction crossed with up, so a straight-up beam degenerates:
-it is drawn along (0, 1, 0.01). Round 16 placed three control points on the lanes between the two
-spawns of one district, and drew the force field as security walls across the streets leaving it;
-both went with the district battles (the walls are in the Lisp wiki, jak3 4.42).
-
-**Respawn page, at every death.** Once the dead player presses X (or picked his class after
-Triangle), `bf-target-death` opens the page (`*bf*` `respawn-pick`, the base first): the D-pad steps through the side's points (`bf-next-held-point`),
-the whole city's map shows them, X deploys. The point's continue point (`*bf-point-defs*`) says
-which levels it needs (in a battle over the whole city, all loaded: the first row):
-
-| Its levels | The respawn |
-|---|---|
-| All loaded (`bf-camp-loaded?`) | Jak falls from the sky around the point at once (below); the levels are left as they are. Wanting the continue's levels here unloaded the section that held the borrowed unit levels and crashed the game (below). |
-| Not loaded | A regroup, as the battle's start: its ships down and the stock hatred (`BF_CITY_RESET`), the deployment phase (the traffic wakes its units the stock way), the default nav mesh freed (`BF_CITY_FREE_NAVS`), then `initialize!` 'life at the point's continue point. Jak waits there for its levels (`bf-hold-at-spawn` and `bf-zone-ready?` follow `*bf*` respawn-at); the fight resumes, and `bf-respawn-at-point` drops him from the sky around the point (below) with full health, a fresh loadout and 2 s of invulnerability. The points are kept: they are set up once a battle. |
-
-**The fall from the sky (round 25, the author's wish).** `bf-sky-drop!` asks the Haven City side
-(`BF_CITY_SKY_SPOT`, `bf-city-sky-spot`) for a nav poly around the point, the one with the most sky
-over it of up to 6 drawn (`bf-city-spawn-spot`, `bf-sky-height`), and puts Jak 30 m over it (a
-jetpack under its ceiling). Until he stands on the ground (6 s at most, `bf-sky-drop-update`):
-
-| While he falls | How |
-|---|---|
-| No control | Pad 0 gives only START, SELECT and the right stick (`bf-pad-lock!`, a wrapper of the stock `cpad-get-data`); no class move (`bf-avatar-moves` skipped). The smoke test locks its own buttons the same way. |
-| Straight down | His velocity across is zeroed every frame, and any upward one: the X that picked the point made him jump as he appeared (the page clears its `confirm` button, not X, and Jak's jump reads the presses of the last 15 frames). |
-| Through the units | His collision meets the scenery only (`*bf*` drop-collide keeps the rest): one fall stopped 21 m up for 6 s on a unit in the air over the point. |
-| His class model | Its fall clip (`bf-class-fall-clip`: a guard's jump-high, the robotguard's ball, the spider's attack jump; the jetpacks fly down on their hover clips), then for 0.7 s its landing (`bf-class-land-clip`: the guards' notice from its frame 9, the stock guard's own jump landing; ball-to-idle; attack-land). |
-| Then | His controls back, and the spawn shield starts again as he lands. |
-
-**Redeploy.** The Battlefront page's last entry, Redeploy (`BF_REQ_REDEPLOY`), is open while
-`*bf*` `redeploy-ok?`, which the director sets every frame of a fight: the player alive with his
-class and 30 s (`BF_REDEPLOY_CALM`) since his last shot, blow or hit taken (`bf-combat!`: a shot of
-any class in `bf-avatar-fire`, the tazer, `bf-send-attack`, an attack in `target-attacked`). The
-combat time is on the game clock (`*display*` game-clock): each process reads its own clock with
-`current-time`, and the START menu's is not the game's, so the menu's own 30 s test never passed.
-The request sends Jak into `target-death` with the mode `'bf-redeploy` (`'change-state`):
-`bf-target-death` then counts no loss and skips the spectator: the class page (`*bf*`
-redeploying?), then the respawn page (round 28, the author's wish; the respawn page at once
-before).
-
-**The default nav mesh.** Every new traffic unit takes a nav-control on the engine's
-`*default-nav-mesh*` (citizen.gc, its enemy info's nav mesh) until it is first woken onto a
-street's mesh; a dying process gives it back (`process-drawable` `deactivate`). The engine made it
-128; a reset at a far continue made the traffic spawn its pools again, the old units' nav-controls
-still taken, and a new guard's setup read its missing one (nav-enemy `setup-enemy!`): the game
-crashed. The mod gives it 255 (`nav-mesh.gc`, the most its uint8 count holds), and before each
-reset `bf-city-free-navs` makes every unit of the pools give its own back. With both, two far
-respawns in a row left it at 17 of 255.
-
-**Troop transports.** `bf-transport.gc` is the Haven City: New Dawn port of Jak 2's drop-ship:
-`bf-transport-red` and `bf-transport-blue` are the same rip (`FOB.DGO`), the blue one recolored by
-`mod_models` (`recolor`: hues -15 to 15 turned by 217 degrees). Twice a second
-`bf-city-transports` (round 18) looks at every point in a loaded section:
-
-| The point | What happens |
-|---|---|
-| Not moved yet | It moves onto the open ground nearest it, the first spot of it, then 10 and 20 m around it, with ground at its height, a nav mesh and nothing above up to 60 m (`bf-transport-spot`, `bf-transport-sky?`: a 6 m sphere swept up). Measured: the Freedom League's base moved 10 m, Freedom HQ's point 1 m. |
-| Held, no ship | A ship of its holder comes down right over it and stays there (stationed): it drops a unit whenever its side lacks one of its caps (`*bf-team-caps*`: Freedom League 14 guards and 6 jetpacks; Krimzon Guard 8 guards, 4 jetpacks, 4 robotguards, 4 spiders), each of the kind its side lacks most (`bf-transport-next-kind`). |
-| Taken by the other side, or its section unloaded | Its ship leaves (`'leave`: it climbs and goes); the new holder's comes once it has gone (`old-ship`). |
-
-Until round 17 ships came on demand, two per side, and flew off after their drops. A unit is the traffic's own, woken
-with `'activate-object` (no want-count check) and traffic behavior 6, its exit-transport state,
-with the ship's handle: a guard walks out and jumps down (guard-type 11 keeps its weapon), a
-robotguard falls as a ball, a spider drops, a jetpack flies out. A pool holds both sides' units of
-a kind, so the ship first moves a sleeping unit of its side to the head of the pool
-(`bf-transport-pick`). With the transports there, the traffic wakes none of the battle's types by
-itself (`bf-wake-count`), the deployment included: woken around the player while the zone loaded,
-the Krimzon Guard's units stood at the Freedom League's base when the fight began. As the fight
-starts, any unit of the battle still awake goes back to sleep (`bf-city-sleep-all`): both sides
-start at their bases.
-
-**The whole city loaded.** Star Wars Battlefront (2004) brings each side's units in at every
-command post it holds, all over the map. During a battle Haven City keeps every street section
-loaded (`*bf-whole-city*`: ctysluma, ctyslumb, ctyslumc, ctyinda, ctyindb, ctyport), so every
-point is live and each side's ships bring its units at all its points at once. `*bf*` `city-load`
-steps through four states, run every frame by `bf-whole-city-update`:
-
-| State | Levels |
-|---|---|
-| `BF_LOAD_OFF` | The stock game's. |
-| `BF_LOAD_DRAIN_IN` (the battle starts) | Only ctywide, ctypesa and ctypesc wanted (`bf-whole-city-want`, through `add-borrow-levels`), until no other level is loaded (`bf-whole-city-foreign`): the stock sections, citycast, and the cars and citizens (ctycara, ctycarb, ctypepa), which the city borrow manager lets go once their traffic objects are gone. About 3 s. |
-| `BF_LOAD_WHOLE` | The three, and the six sections displayed: nine of the game's ten level slots. Each section takes two chunks of the level heap (`bf-whole-city-chunk`: 0-1, 2-3, 4-5, 12-13, 14-15, 16-17; ctywide keeps 6 to 11), 24 MB with the PC's pages, for about 6 MB used. About 2 s. |
-| `BF_LOAD_DRAIN_OUT` (the battle ends) | Only the three again, until no section is left in those chunks; then the game gets its continue point's levels, as a respawn there does (`target-continue`), in its own banks. |
-
-Three engine limits gave way. A tenth wanted level made `level-get-for-use` (level.gc) evict a
-loaded one, a borrowed level whose units still lived: the drain keeps the battle at nine. The
-traffic engine kept the street data of two sections: it has eight (`level-data-extra`). The
-background's lists of trees to draw held 11 of each kind and grew with no bound: ctywide and six
-sections drew 7 tfrag, 6 shrub and 17 tie trees, and the game crashed natively (`0xC0000005`, no
-GOAL message) once the fifth section was displayed; they hold 32. The ruins of the old town (ctygenb) and the
-Metal Head nest (mhcitya, mhcityb) are not loaded: force fields close them, and the slots would not
-hold them. ctyfarma and ctyfarmb are not either: no continue point names them, and no run ever saw
-the game load them.
-
-**Reinforcements from the edge.** Before the whole city was loaded, Haven City held two sections
-around the player, and at a battle's start the Krimzon Guard held nothing near the Freedom League's
-base: no enemy came near the player. Twice a second `bf-city-edge-spawn` lets a side with no point in a
-loaded section (`bf-city-team-live?`) bring one of its units in, while it lacks one against its caps
-(`bf-transport-next-kind`, its sleeping unit first in the pool): on the pedestrian street of the
-loaded area furthest toward its nearest held point, 60 to 220 m from the player (from 30 m when
-none is that far), through the traffic's `activate-by-type` (which keeps the stock spawn checks,
-but not `bf-wake-count`). It marches on its point from there. A side with a point here gets its
-units from its ship there. Each side keeps 20 units at most. A first version took the furthest
-street in a 600 m sphere: 540 m off, the street's nav mesh was not loaded, the traffic woke the unit
-without one (`get-nav-mesh` #f), the unit kept its default nav mesh's nav-control, and a far
-respawn's reset overflowed that mesh (96 taken before it, a crash); the search now wants the
-street's mesh loaded (`get-nav-mesh`) and 220 m at most, and the mesh stays near 40. With every
-section loaded each side's base is live, so the edge reinforcements no longer come; the default nav
-mesh held 110 of 255 for the whole battle, the six sections' share.
-
-A guard leaves the hatch only onto free nav mesh 4 to 6 m behind it (`crimson-guard-method-266`,
-crowds included), pinned to the ship until then (method 265), and a jetpack hovers until it
-reaches its exit point:
-
-| Step | What the ship does |
-|---|---|
-| Arrival | Its hatch toward the player, or the first twelfth of a turn from there whose landing (12, 15 and 18 m behind the ship) has ground within 3 m of the point's height on the street's own nav mesh (`bf-city-hatch-dir`, `bf-transport-landing?`). |
-| A guard waits 1.5 s at the hatch | It turns, eased, to the next such twelfth (`bf-transport-turn`). |
-| A unit still in `exit-transport` 8 s after its drop, or the ship going | The unit goes back to sleep through its tracker's `deactivate-object` (`bf-transport-sleep`): no death, the reserves keep it. The event `'traffic-off-force` alone left it asleep but listed awake, and the game crashed in 3 of 6 runs. |
-| Before each drop | The nav mesh under it must have room for the unit (`bf-transport-mesh-room?`). |
-| Its turn | A side's next units come down at a point drawn at random among all those it can use: its headquarters, under their ships, and the control points it holds in loaded sections (`bf-transport-draw`, `bf-transport-point-ok?`, `bf-transport-drop-point`, `*bf-drop-turn*`), drawn again after each try (round 42, the author's wish; round 41 alternated the point drawn with two forward ships over neutral points, round 22 to 40 sent half the units to an attacked point and the rest to the most advanced one). A point where a wanted unit could not come down (a full mesh) is passed over at the next draw (`*bf-drop-skip*`). |
-| A try | Up to 3 units at once (`bf-transport-wake`), each from the hatch's other side in turn. |
-| At a control point | No ship (round 23's invisible ones are gone, the author's wish): twice a second (`bf-city-spawn-tick`), up to 3 units each over a nav poly drawn at random among those of the loaded meshes within 250 m of the point (`BF_SPAWN_REACH`; 45 m until round 26, 90 m until round 27; the author's wish: the fights spread over the city; the player respawns within 90 m, `BF_RESPAWN_REACH`) and 20 m up or down, the link polys aside (`bf-city-spawn-spot`): the streets and the platforms, a jetpack never over an upper deck (its LOW?, `*bf-ways*` deck-y: brought down on the Industrial Zone's walkways, the jetpacks stayed stuck there, the author's play, round 27); of up to 3 drawn, the first with 6 m of sky over it. Each comes down from the sky, 30 m up (`bf-sky-height`), with its landing (round 25, the author's wish; `bf-city-spawn-near`). A guard is woken walking (traffic behavior 2, 'active) on the poly, hidden, and on its first frame awake goes up and is sent the stock 'jump onto the poly (`bf-city-sky-tick`): an event sent at once reached its sleeping state, and the guard stayed in the air. A robotguard and a spider are woken up there in their way out of a ship (behavior 6, exit-transport, which needs no ship: a ball, a tumble; the spider's jump has no clips, a 'jump would read none), meeting nothing until 3 m over the poly they fall onto (`BF_FALL_FREE`), then the scenery only, until they land (`bf-city-fall-through!`, `*bf-sky-fall*`, `bf-city-sky-tick`: they landed on the jetpacks hovering over the point). Those out of a ship's hatch fall the same way, onto the ground under the ship (round 26): the author saw spiders slow to fall and walking in the air, and the tests found them stopped on the scenery 13 and 22 m up under the Krimzon Guard's ship (6 and 14 m over the street), a spider walking its lanes there. A jetpack is woken flying and goes 15 m up on its first frame (its flight holds it 18 m over the ground at most), then flies down. Each then marches on (`bf-march-plan`). |
-| Its kind | The kind the side lacks most against its caps, a fallen unit counting for 5 s (`bf-fallen-count`, `*bf-fallen*`, filled by `bf-unit-killed`): a fallen unit's place waits that long. |
-| Each drop on a control point | One unit in four is posted there (`*bf-posts*`, `bf-post-set!`, `bf-post-point`), unless 3 units awake are posted there already (`BF_POST_PER_POINT`): it guards the point while its side holds it and units of the other side come within 150 m of it (`BF_THREAT_REACH`, `*bf-threat-near*`, counted with the zones twice a second); with no foe coming it goes on to the next point. Every unit coming down drops the post it had: a unit of the pools keeps its process and its handle from one life to the next, so until round 27 a dead unit's post went on with the next unit woken in its process, and the posts grew without end (after 3 minutes, 14 to 26 units of a side stood within 20 m of one of its points: the "stack" the author saw). Until round 26 a posted unit stayed whatever came. |
-
-**Routes to the points.** Each unit has a point (`bf-city-unit-goal`), as Star Wars Battlefront's
-units take the command posts: first a contested point within 350 m (250 m until round 42), one with units of the other
-side in its zone, 60 m around it (`*bf-zone-near*`, counted twice a second), while its own side
-holds it or has units there too (`bf-city-contested-point`), to clear it so the capture can go on
-(with the 15 m capture radius alone, no point was fought over in 10 minutes: the attackers took
-them empty). From outside the zone a unit comes only while its side has fewer than 3 units per foe,
-plus 2, in it (`BF_CONTEST_RATIO`), and it marches at the foe in the zone nearest it, not at the
-point's middle (`bf-city-zone-foe`, `bf-march-plan`): until round 27 every unit within 250 m came
-and stood at the middle, out of sight of the foe that kept the point contested, 25 of a side at
-one point in round 27's second test. Else the one it is posted on, while a foe comes within 150 m
-of it;
-else one of the points its side does not hold, all of them since round 42 (the author's wish: the
-units spread over the objectives and the conflict with them; the three nearest its front in round 41;
-`BF_GOAL_PICK`, `bf-city-goal-point`, `bf-city-front-score`: the distance to its side's nearest point plus the
-distance to the other side's, plus half their difference; ranked from its base until round 40, the
-armies of the Jak 2 city met nowhere in three minutes), drawn at random by its process id and the points' owners
-(`bf-city-owners-key`, kept under 65521 since round 42: over 2^32 with Jak 2's 17 points, the draw's
-32-bit `mod` went negative, nearly every unit drew no point and went to its side's nearest held one),
-kept until its side holds it (`bf-city-sticky-goal`, round 29: drawn again
-at every change of hands, the units turned back at each capture; before round 27, all went for the
-nearest but 3 units in 10); ranked from the base, not from the unit. A unit that has not moved 3 m
-in 10 s, more than 20 m from its point and out of a fight, draws another; a marching one stuck 4 s
-within 20 m of its waypoint is put onto it (8 s and 15 m until round 31), on its mesh (`bf-march-apply`, `BF_STUCK_HOP`: units
-stood up to 90 s at (760, 1206), 3 m from a seam's waypoint between the Port and the Industrial
-Zone). With every control point held, the nearest
-one. A unit with no waypoint to its point runs its lanes there (`bf-city-choose-branch`) with no
-idle stop; within 12 m of it (`BF_MARCH_NEAR`) it walks them (round 42, the author's wish: units
-walked their lanes as on patrol until a foe or a march made them run). Both sides start at their base: the Krimzon Guard goes for the Port, the Port Gate and the
-North Industrial Zone, the Freedom League for Freedom HQ, the Sewer Exit and the Slums. Twice a second every unit also takes again the foe it sees best
-(`bf-city-retarget`, the controller's own choice: the battle's hatred scores a foe by its distance,
-0 beyond 100 m, its current foe counting double), so it attacks what it meets on its way; a unit
-with a foe within 40 m stops its march (`*bf-engaged*`) and the stock guard's attack takes over,
-else it marches on. At 50 m the armies passed each other (8 losses in 6 minutes); stopped by any
-foe up to 100 m, the units stood and the pushes died away. A unit takes no foe a wall hides from it:
-twice a second, after the controller's pick, a thin probe of the background from its eyes to its
-foe (`bf-city-sees?`); a foe behind a wall is passed over for 3 s (`bf-city-hide!`, four foes a
-unit, by its attacker index) and another one picked, which the units' attacker `callback`
-(`bf-city-foe-ok?`) enforces. After 3 hidden foes in one look the unit takes none until its next
-look (`blind`) and goes on to its point, unless it is in the middle of an attack (the stock's
-`lock-focus` flag): a foe taken away then crashed the game twice in three runs. About 1 unit in 14
-still has a foe behind a wall at a given time (1 in 5 without the blind look): units in an
-attack, and the controller's own picks between two looks. Units took foes through the thick walls
-between the Industrial Zone and the Slums and fired into them (the author's play). A robotguard takes a foe within 50 m only
-(the same callback), and one left in its hostile states with no foe walks its lanes again
-(`bf-city-robot-free`, `go-process` to `'active`; also from `'roll-chase`, where a robotguard
-falling from the sky lands): with the 100 m sight the robotguards stood in
-`'hostile-stand` for minutes, 400 to 700 m from their point, and the spider robots, in
-`'hunting`, never marched (round 22). The city's walking lanes cannot take it there: they are loops
-within a section. The Freedom League's base, in ctyslumc, has 138 lane nodes and no lane out of the
-section; 173 of ctyslumb's 177 nodes have one lane out or none, and a citizen at a dead end jumps
-to any lane 20 to 120 m behind it (`citizen-method-208`). Routed by the lanes alone, the guards
-circled 140 to 290 m from Freedom HQ's point and never reached it. So a unit more than 12 m from
-its point marches there over the nav meshes, which join the sections:
-
-| Twice a second, `bf-march-plan` (from `bf-city-steer`) | Every frame, `bf-march-apply` |
-|---|---|
-| For each unit walking its lanes (`bf-city-walking?`: `'active`, or a spider robot's `'hunting`, its `'active` while the faction manager has it at war) away from its point in a loaded section: on the point's mesh (`find-nearest-nav-mesh`), the point; else the first step of its way there from its own mesh's entry in `*bf-ways*`: a spot 2 m past the link poly that starts it, toward the next mesh's own link poly (`bf-march-through`), or a bridge's end. | The unit's controller `dest-point` set to that spot: the citizen's `'active` post gives it to the nav control each frame, which finds the way across the mesh. Standing on the link poly, the unit moves onto the next mesh (`nav-enemy-method-188`) and is sent on at once to its next waypoint there (left to its lanes until the next plan, a unit at a section's edge turned back and circled). Of its mesh's links that lead a mesh nearer the point (`*bf-ways*` depth), a unit takes the same one each time, by its process id (`bf-march-link`): the units spread over the several streets and meshes a way can go by. The march runs (`speed-run`) and skips the idle stops (`wait-time`). |
-
-**The ways.** Every 10 s `bf-ways-build` lists the nav meshes of the active levels (their bsp
-`nav-meshes`) and, for each battle point, searches breadth first from the point's mesh over every
-mesh's links, unbounded: each mesh reached keeps its own link back toward the mesh it was reached
-from. The whole city has nine meshes, one or a few a section, and they did not all join:
-
-| Meshes | Linked to |
-|---|---|
-| ctysluma (the Slums) | ctyindb |
-| ctyindb, ctyinda (the Industrial Zone) | each other; ctyinda to the Port's east mesh |
-| ctyport, three linked meshes and one alone | each other; the west one to an unloaded mesh (the nest's) |
-| ctyslumb (Freedom HQ) | ctyslumc, and an unloaded mesh (the ruins') |
-| ctyslumc (the Freedom League's base) | ctyslumb |
-
-The south (Freedom HQ and the base) joined the rest only through the unloaded ruins: from the
-south no way reached a point of the north, nor from the north one of the south, and a search from
-each unit's mesh (96, then 160 meshes at most) left every Freedom League guard between its base and
-Freedom HQ. `bf-ways-bridges` joins two meshes with no link whose polys come within 6 m of each
-other (the corners of the pair of polys whose centers are nearest): ctyslumb and ctysluma meet
-there, 2.1 m apart, at (746, 8, -84). The search crosses a bridge as a link; a unit within 6 m of
-its end (`BF_BRIDGE_HOP`) moves onto the other mesh (`change-to`) 1.5 m inside it, across the seam
-(`bf-march-apply`). At 2.5 m (until round 27) the guards stopped 3.5 to 4.5 m from the end, 1.5 m
-inside its poly from a corner, and waited there: 31 units in 150 s, one up to 129 s (round 28's
-tests, where the author saw them stuck); at 6 m none waited. The bridges are made again only when the meshes listed change (the search
-compares every pair of polys).
-
-The lanes set `dest-point` again at a lane's end; the next frame puts it back, and the lane
-callback (`bf-city-choose-branch`) answers a marching unit with the stock random lane, cheap. Near
-its point (12 m) a unit walks the lanes again at walking pace: the first lane of the way to its
-point within 256 nodes (`bf-city-route`), turning back across it. A first march aimed at the link
-poly's centroid: the units stopped 4 m short of it (the post's lane-end distance), went back to
-their lanes, and piled up there until the game ran out of touching-prims entries.
-
-**Upper decks (round 26).** The Industrial Zone's two meshes (ctyinda, ctyindb) are one island each,
-streets and walkways: their streets lie at 8 m, their walkways at 27 m (30 and 23 polys), joined by
-stairs (polys at 12, 17.5 and 21.8 m). No poly of the city is a gap or one the walks avoid (`pat`
-1 and 2: every mesh's polys are walkable or links), so the walkways can be walked, but the shortest
-ways keep to the streets: no unit went up there (the author's play). Every 10 s with the ways,
-`bf-ways-build` finds each mesh's upper deck, its polys 8 m over its most common height (5 m bands),
-4 at least (`*bf-ways*` deck-y: the two industrial meshes only). One guard in three (by its process
-id) on such a mesh goes by its deck once (`bf-deck-via`, from `bf-march-waypoint`): its waypoint
-becomes the deck poly that makes its shortest way to it, when that way is at most 1.6 times the
-direct one plus 20 m and the waypoint 40 m away or more; on the deck, or at that poly, it has been
-there (`*bf-deck-done*`, 128 units) and goes on, by the deck or down its stairs.
-
-**Spawn shield.** At a deployment and every respawn, `bf-spawn-shield` makes Jak invulnerable
-for 3 s (`target-timed-invulnerable`) and sets `*bf*` flicker-until: the class model blinks
-meanwhile, hidden a tenth of a second in two (`bf-avatar-blink`), then shows steady.
-
-**Live units on the respawn page.** Every frame `bf-city-dots` writes the units awake, their
-places, headings and sides, into `*bf-unit-dots*` (128 at most); `bf-draw-city-map` draws them over the city's map on the
-respawn page, the L3 overlay and the pause page, as the game's minimap marks a guard: a disc of its
-side's color with its view cone, drawn with triangles of its own (`bf-draw-tri`, the GIF packet of
-`draw-sprite2d-xy` with a triangle primitive); each point a black disc, larger, ringed in its
-holder's color. The same frame gives each unit's minimap mark its side's class (25 the guard's blue
-one, 139 the robot's red one: the stock gives the guard's to every crimson-guard and the robot's to
-every flying turret, so the red guards had the blue one and the blue jetpacks the red one), and the
-director puts a disc on the game's minimap at each point (`bf-point-icons`, a connection at the
-point's place with the "guard" dot): a control point's bright red (255, the minimap's color
-multiplying it by 2), scaled 4 (`*bf-point-minimap-class*`), its letter inside it in white, at font
-scale 0.4, 1.5 units right of the mark's center (centered, it stood 2 units left)
-(`bf-draw-minimap-letters`, round 27, the author's wish: a black disc until then); a base's black,
-scaled 1.8 (`*bf-base-minimap-class*`). The minimap draws its
-marks in `draw-connection` (`engine/ui/minimap.gc`), which tells `bf-minimap-icon-at` where each
-lands on the screen, in GS units (its x, and its z for the height); the letter goes there the next
-frame in font units, the GS screen starting at 1792, 1840 (`hud.gc`), and only for a mark drawn
-this frame or the one before (a mark off the minimap, or the minimap hidden, has no letter).
-
-**Aim.** Every class that shoots faces the aim point while it fires (`bf-avatar-place`), and the
-guards, jetpacks and robotguard turn their upper body toward it, at once for 0.15 s from each
-shot, then eased: the weapon points at the crosshair as it fires. In a run walking sideways with
-the crosshair 70 degrees off the walk, the drawn model stood within 6.6 degrees of the aim's line
-after each shot. Every class that shoots turns its upper body toward the aim
-while it fires (`bf-avatar-aim-torso`, `battlefront-player.gc`; node 4 is the guard's `swivelMe`
-and the jetpack guard's and robotguard's `chest`): the stock guards' own aim (`crimson-guard-method-259` and 260), a
-`polar-look-at` joint-mod on node 4 (`swivelMe`) turned about the model's x and y axes, 80 degrees
-at most each, eased at 5 a second, eased back 0.3 s after the last shot. The avatar's `relocate`
-moves this joint-mod with the process, as the `gun-jm` of §2.8.
-
-**Closed city.** The battle's settings add `'airlock #f`, `'disable-parking-spots? #t` (no parked
-car), and every 2 s `bf-city-command` sends the lift to the Freedom League's headquarters
-(`cty-elevator-2`) `'go-dormant`: only a `'trigger` wakes it again. Every door of the city to an
-interior or the sewers is a `com-airlock` (`engine/common-obs/airlock.gc`), and each opens only
-while `(-> *setting-control* user-current airlock)` is set: the airlocks (`com-airlock-inner`,
-`-outer`) of ctyfarma, ctygenb, ctyinda and ctyport, the Hip Hog's doors (`hip-door-a`), the
-Freedom League's doors (`cty-door`), Vin's (`vin-door-ctyinda`) and the nest's airlock
-(`com-airlock-outer-mhcity`). Vin's gate is an electric gate (`ctyinda-vingate`, an `elec-gate`).
-
-**Force fields.** Two red walls of Jak 2's district border (`spawn-security-wall`, ctywide-obs.gc),
-spawned again whenever gone (`bf-city-fields-up`, twice a second; gone at a reset,
-`bf-city-fields-down`), children of the director, 40 m tall:
-
-| Field | Ends (m) | Closes |
-|---|---|---|
-| The ruins | x 389.75, z -18.44 to -70.72, y 7.94 | The street from Freedom HQ's district (ctyslumb) into the ruins of the old town (ctygenb), toward the stadium: the game's own `security-wall-12`, which it drops after its first task (`decompiler_out/jak3/entities/ctyslumb-actors.json`). |
-| The Metal Head nest | z 1212, x -410 to -335, y 7 | The street from the Port up to the nest (mhcitya), just short of its dark eco door (`mhcity-dark-eco-door-1`, -381 m, 1199 m), read off the START menu's map; the nest's other way out is its airlock. |
-
-A unit's edge spawn never takes a street of ctygenb, mhcitya or mhcityb.
-
----
-
-### 2.10 Jak 2's Haven City, the second war zone (round 40)
-
-**The level.** `custom_assets/jak3/ports/battlefront-havenj2/port.jsonc` is a port manifest of
-`scripts/level_port`, the tool of the Haven City: New Dawn mod, copied into this repository with its
-level builder and decompiler features (not on master-dev, the author's choice). It makes one large
-Jak 3 level, `bf-havenj2` (DGO `BFH`), of Jak 2's ctywide and its 15 districts merged: their
-background, collision (within `collision_bounds`), props baked into a mesh, water, ocean map and
-traffic navigation (their city-level-infos merged into one 50 m grid, their 26 nav meshes kept).
-Its code is Jak 3's city code (`cwi.gd`, with the battle's `bf-transport.o` and `battlefront-city.o`)
-but Jak 3's own city's props, scenes and missions, and its callbacks are Jak 3's ctywide's, so the
-traffic engine, squads, faction and borrow managers come as in Jak 3's city. Its mood is
-`goal_src/jak3/levels/bf-havenj2/bf-havenj2-obs.gc`. Nothing of Jak 2 is in git: `task level-port --
-custom_assets/jak3/ports/battlefront-havenj2/port.jsonc` writes the level files (listed in
-`.gitignore`), and a launcher install's extractor runs it before the compile.
-
-**Without Jak 2.** The port is `optional`: the extractor skips it when Jak 2 isn't installed;
-`game.gp` loads its build file only when it exists; GAME's `battlefront-havenj2-info.gc` takes the
-generated level-load-info's forms at compile time (`file-exists?`, `read-data-file`) and sets
-`*bfh-built*`; the war zone page greys the zone without it (`bf-zone-open?`). After a first
-`task level-port`, compile that file again: the build doesn't see the generated file as its input.
-
-**The zone.** `*bf-zones*` entry 1 (`BF_ZONE_JAK2`), the only war zone the page offers since round
-42 (`BF_ZONE_FIRST`, `bf-row-zone`: a row's zone; Jak 3's city, entry 0, stays in the code). Two
-headquarters a side (round 42, `bases` 4, `*bf-base-count*`: point i the Freedom League's when
-even): the Freedom League's in the slums by the hideout (`ctysluma-alley`, where it deploys) and at
-the port (`ctyport-warp`), the Krimzon Guard's at the stadium (`stadium-start`, where it deploys)
-and at the palace's foot (`ctypal-shaft`), each placed on its continue point; then a control point
-on a continue point of each of the 13 other districts (`*bf-point-defs-jak2*`), lettered A to M from
-the palace's side to the slums', linked as Jak 2's own nav graphs link the districts. The four
-point tables the battle reads point at the zone's (`bf-zone-select!`), which also makes the zone's
-city level the units' levels' host: ctypesa and ctypesc are `borrow-city-small`, which borrows from
-its master level only (level.gc `level-find-borrow-slot`), so their `master-level` becomes
-`bf-havenj2` for a Jak 2 battle and goes back to `ctywide` at its end. The battle's gates ask
-`bf-city-level` (the zone's `city`) for the level that must stay active, and a zone of one level
-loads at once (`bf-zone-sections`: no street section). Its force fields stay Jak 3's
-(`spawn-security-wall` is in ctywide-obs.o, which bf-havenj2 leaves out).
-
-**Its doors.** Jak 2's doors to the places the zone leaves out (the palace's gate, Mar's tomb's and
-the other airlocks, the Hip Hog's, the hideout's, the oracle's, Vin's, the fortress's gates, the
-stadium's garage doors: 26) are background in their closed pose, each with a collision box: the
-port's `mesh` props (`palace-door`, `com-airlock-outer`...). The level builder's collision is
-one-sided (`gltf_mesh_extract.cpp`): Jak walked through the boxes from outside until the `mesh`
-step marked them `double_sided` (T73).
-
-**Its map.** The `citymap` step of the level port (`scripts/level_port/steps/citymap.py`, the
-manifest's `city_map`) lays Jak 2's minimap textures out as its `minimap.gc` does (a 5 x 7 grid of
-384 m cells, each texture 1024 m around its cell), crops the picture to what they show and reduces
-it to 255 colors: `goal_src/jak3/levels/bf-havenj2/bf-havenj2-map.gc`, generated, read at compile
-time by GAME's `battlefront-havenj2-info.gc` (`bfh-include-map`; without it, `*bfh-map?*` is #f
-and the marks stand alone). `bf-draw-zone-minimap` uploads it for the menus and L3 as Jak 3's
-city's (z down: the Port at the bottom, as on Jak 3's map). The `extract` step saves the texture
-PNGs it needs (`save_texture_pngs`).
-
-**The HUD's minimap.** Jak 3's minimap draws the texture of the city cell Jak is in, found by name
-in the active levels' minimap page (level texture-page 8), when a level's `city-map-bits` names
-the cell: Jak 2's grid and names are the same. The port's `particles` block (no particle, its
-`source_textures` alone) puts Jak 2's 21 map textures in a texture page of bf-havenj2's own (an id
-Jak 3 never uses), its level code registers it while it loads (`bfh-sprite-page-new`,
-`bfh-sprite-page-register`), and the level's activation callback (`bf-havenj2-activate`, wrapping
-Jak 3's `ctywide-activate`) makes a copy of it its minimap page (`bfh-map-pages-on`, Haven City:
-New Dawn's method); its logout takes them out (`bfh-map-pages-off`). Its `city-map-bits` name every
-cell. The HUD's minimap shows only while `minimap` `update!` finds a city level, `ctywide` by name:
-one line of `engine/ui/minimap.gc` takes `bf-havenj2` too (T75).
-
-## 3. How to test
-
-1. Select the game: `task set-game-jak3`.
-2. Models: `task modding-models`, with both games' disc files in `iso_data/jak2` and
-   `iso_data/jak3` (`-- --check` only lists what is missing).
-3. Re-extract, so `ctypesa.fr3` gets the red guard and `ctypesc.fr3` the jetpack guards:
-   `task extract`. The log should show `Adding custom model bf-red-guard-lod0 to ctypesa` and the
-   two `bf-hover` models for ctypesc.
-4. Compile: `task compile-check`, or `(make-group "iso" :force #t)` for the first compile in this
-   worktree.
-5. Boot cold: `task boot-game-retail` (proves the Mods menu works in a retail boot). Use a save
-   where Haven City is open. To rebuild the zone minimaps, `python scripts/battlefront/make_minimaps.py`
-   after `task extract`.
-6. In a stock area first, check nothing changed (guards blue, flying turrets, no red guard in
-   Haven City).
-7. Mods menu (L3 + SELECT) > battlefront > Battlefront mode, then START > New battle, and for each
-   zone and side:
-
-   | Check | Expected |
-   |---|---|
-   | Zone and side pages | black screen; the whole city as the START menu's map draws it, the blue and red bases, the gray control points |
-   | Class page, deployment | right after the side page, black, "Loading the war zone..." while the zone loads under it; the preview turns once the models are in; then the game pauses and "Deploy" shows |
-   | Class page | two Freedom League classes, four Krimzon Guard ones; the class under the cursor stands in the right frame and turns; X deploys, HUD with 500 / 500 |
-   | Camera | over the class's right shoulder, the crosshair in the middle; the right stick pushed right turns right, pushed up looks up; the class faces where it aims and walks sideways and backward |
-   | Guard moves | L1 held: the guard kneels and stays put, the crosshair smaller; L2 with the left stick dodges that way, still facing the crosshair; R2 with the stick rolls that way head over heels |
-   | L3 | the kills, the deaths and the whole map; the minimap at the bottom right gone; L3 again: the minimap back; L3 + SELECT: the Mods menu, the map unchanged |
-   | Units | blue guards and red Krimzon Guards in the streets, jetpack guards in the air, robotguards, spider robots; the two sides shoot each other; at most 20 per side, still there when the camera turns away; no citizen |
-   | Losses | each kill lowers the right side's reserve; pickups appear where units die, dark eco now and then |
-   | Each class | its model in Jak's place, its clips, the moves, R1, Square and Circle of §1 |
-   | Guard weapons | D-pad left, down, up: tazer (a short baton in hand; one strike on the nearest foe within 12 m, then 20 s), rifle (20/100, a reload when the magazine is empty), grenades (5); firing while walking keeps the legs walking |
-   | Free aim | shots and grenades go where the crosshair points, for every class and for Jak; the crosshair turns red on a foe |
-   | HUD | stock health ring, no model; "Kills" on the left; the stock gun icon top right for the guards with 20/100 and 20 shells for the rifle, the grenades left and 5 shells, nothing but the recharge seconds for the tazer; jetpack boost in the dark eco gauge, spider blue eco and robotguard shield in the light eco gauge, blue and red |
-   | Robotguard | R2 rolls as a ball until R2 again; Circle: red shield sphere for 5 s, every attack stopped, the robot walking behind it, then 25 s before the next; R1: salvos of two shots; Square: a full punch |
-   | Outside the campaign | no mission prompt; START menu: Save, Load Game and Secrets grey, X refused |
-   | Jetpack | X climbs, Circle comes down, neither hovers still, for as long as you like; R2 boosts toward the stick while the gauge lasts; dark eco alone refills it; L1 fires a rocket that bursts as the red gun 3's shot, 10 a life, their purple icon and count in the gun HUD; Square does nothing; the model floats above the ground, its legs calm when it stands still |
-   | Reserves HUD | top middle: your side's bar in green to the left, the enemy's in red to the right, the counts under them |
-   | Vehicles | Triangle by a vehicle does nothing during a battle |
-   | Player death | the side loses 1; 4 s on a unit of the side with a countdown; back at the spawn as the same class |
-   | Whole district | every street of the district's sections can be walked; crossing into the next district puts the player back where he last stood in this one, with sparks and "FORCE FIELD"; a jetpack stops at the ceiling |
-   | Change class, Restart | START: the class page with the battle going on; a restart back to 500 / 500 at the spawn, same class |
-   | End | START > ... > Quit the battle: stock Haven City again (blue guards, turrets), Jak's ammo as before; the mode switched off in the Mods menu during a battle: the last save loads |
-
-The smoke tests, from round 13 on, are in the test notebook,
-[`battlefront_tests.md`](battlefront_tests.md): each one is a scenario of
-[`battlefront_smoke.gc`](battlefront_smoke.gc) that boots the game retail, loads save slot 1 and
-drives the mod's real menus with the pad.
-
-### 3.1 What the in-game runs checked
-
-The runs used a copy of the user's settings and save slot 1 (Haven City open, 100 %), each
-launched cold. Pad input was injected by replacing `cpad-get-data`, screenshots were taken with
-`pc-screen-shot`, state lines were printed to the game's output. The final runs used a pure retail
-boot (`-boot -fakeiso`) with a temporary scenario file compiled into GAME (not part of the mod), so
-no REPL took part: title, slot 1, Mods menu, battle, each class of the side, a battle of two to ten
-minutes, forced victory, end of battle.
-
-| Check | Result |
-|---|---|
-| Mods menu in a retail boot (L3 + SELECT), `battlefront` submenu, the three pages, French texts | Opened and navigated by pad; pages laid out inside their panel |
-| Deployment, Port (Krimzon Guard) and Industrial Zone (Freedom League) | Jak stands at his side's spawn; fight phase, 500 / 500 |
-| Units | Both sides present and fighting: 7 blue guards, 4 red riflemen and 3 red grenadiers, 2 or 3 blue and red jetpack guards, 5 robotguards, 4 or 5 spider robots; the looks stayed balanced for ten minutes; both reserves drop |
-| Player death | His side loses 1, respawn at the spawn, class page with "Déployer" |
-| Each Krimzon Guard class | Model in Jak's place; Red Guard rifle and rifle butt kill; Red Jetpack climbs from 4.8 to 27.9 m holding X, its rifle and dive kick kill; Robotguard runs at 6.9 m/s, rolls at 15.9 m/s, its fists and punch kill; Spider Robot runs at 12.9 m/s, jumps 5.5 m (other classes 3.5 m), its lunge and pounce hit |
-| Each Freedom League class | Blue Guard runs at 8.7 m/s, its rifle and rifle butt kill; Blue Jetpack climbs to 14.8 m, its rifle and dive kick kill; Spargus Citizen runs, its rifle and rifle butt hit; Jak's own gun and punch kill |
-| Change class (Mods menu) | Class page, new model |
-| Victory | Foe reserve at 0: result page "VICTOIRE", winner and losses; X ends the battle (both sides) |
-| End of battle (result page, Mods menu "End the battle") | Stock city again: 8 blue guards, 3 stock flying turrets, no red guard, no jetpack guard; Jak himself |
-| Stability | After the last fixes, three long runs in a row ended clean: a ten-minute battle as a Blue Guard (118 deaths), the full Freedom League scenario and the full Krimzon Guard scenario |
-
-The second round (weapons, ammo, crosshair, HUD, gauges, shield, army caps, force field) ran the
-same way, one Freedom League and one Krimzon Guard scenario in the Industrial Zone, two minutes
-each, with screenshots and state lines every half second:
-
-| Check | Result |
-|---|---|
-| Class page | Opens at the spawn after the deployment; the preview stands in its frame at its size for the eight classes, Jak included, and turns |
-| Guard weapons (Blue Guard) | Rifle: yellow 100 to 95; tazer (D-pad left): arc drawn to the foe, blue 180 to 172 in 1.6 s; grenade launcher (up): one grenade bursts, red 28 to 27; back to the rifle (down) |
-| Crosshair | On the foe and red when one is ahead, white 30 m ahead otherwise |
-| Health HUD | Shown all the fight; the class model (blue guard, red guard, spider) stands inside the pips; weapon and ammo beside it |
-| Jetpack | Fuel drained at 0.25 per second of thrust, climb stopped at the ceiling (38.1 m for 38.0 m); refilled at 0.1 per second |
-| Spider blue eco | The gauge drains while Circle is held |
-| Robotguard shield | Circle held: shield level 1, Light Jak's shield model; shots and blasts stopped, blows let through (logged attacks, §2.4) |
-| Army caps | Awake units on the street: at most 11 Freedom League and 12 Krimzon Guard |
-| Pickups | Up to 12 ammo pickups and 1 health pickup on the ground at once |
-| Force field | Held at 0.1 to 0.3 m inside the edge while running out; "FORCE FIELD" and sparks |
-| Crashes found and fixed | The first tazer shot (pointer to the arc not relocated); the red guard's preview (HUD model path) |
-
-A third round measured each war zone with the reinforcements and the final zone table: one battle
-per zone, the player standing at his spawn for 90 seconds as the first class of his side, units
-counted every 3 seconds (awake, alive, drawn, outside the player), then a jetpack climb holding X
-and a run out of the battlefield from 5 m beyond its edge:
-
-| Zone (player's side) | Units awake, mean (max) | Losses in 90 s | Jetpack top / ceiling | Force field |
+| Limit | Stock | Mod | File | What overflowed |
 |---|---|---|---|---|
-| Port (Freedom League) | 8.0 (12) FL, 7.9 (12) KG | 19 FL, 23 KG | 37.26 / 37.17 m | held at 148.06 to 148.15 m, radius 148.30 m |
-| Industrial Zone (Krimzon Guard) | 6.7 (10) FL, 5.4 (11) KG | 1 FL, 9 KG | 38.03 / 37.99 m | held at 140.04 to 140.26 m, radius 140.29 m |
-| Slums (Freedom League) | 5.6 (10) FL, 6.0 (11) KG | 24 FL, 25 KG | 38.22 / 38.13 m | held at 145.49 m, radius 145.74 m |
-| Freedom HQ (Krimzon Guard) | 5.5 (12) FL, 7.8 (12) KG | 7 FL, 11 KG | 31.91 / 31.88 m | held at 140.36 m, radius 140.61 m |
+| Frame's global DMA buffer | 1280 KB | 2560 KB | `engine/gfx/hw/display.gc` | Each drawn unit writes about 6.5 KB there, unchecked; 200 units in view filled 1.3 MB and corrupted the memory after it |
+| Default nav mesh users | 128 | 255 | `engine/nav/nav-mesh.gc` | Every new pool unit holds one until it is first woken |
+| Traffic tracker's awake list | 126 | 224 | `levels/city/traffic/traffic-engine-h.gc` | 100 units a side |
+| Sleeping units per pool | 20 | 128 guards, 64 turrets | `levels/city/traffic/traffic-engine.gc` | A pool spawned a new unit every frame past 20 |
+| Attack controller's attackers | 64 | 256 | `levels/wascity/cty-attack-controller.gc` | Units without one corrupted memory |
+| Touching-prims records | 64 | 256 | `engine/collide/collide-touch-h.gc` | Crowds at the ships |
+| Background trees per kind | 11 | 32 | `engine/gfx/background/background-h.gc` | Jak 3's whole city loaded at once |
 
-The force field rows come from a last pair of runs that put Jak 4 m beyond the edge on ground
-found by a downward probe (a first try without the probe dropped him off the map in the Industrial
-Zone and the Slums). The same runs timed the gauges from empty, once a second: the jetpack's fuel
-and the spider's blue eco both went 0.0, 0.1, 0.2 ... 0.9, 1.0 in 10 seconds.
+Two constraints set the next ceiling, about 120 units a side:
 
-No crash in these runs. Before the reinforcements, the Port as the Krimzon Guard held 2 to 6
-Freedom League units; the first Slums pair 1.1 Freedom League unit on average; Main Town none.
+- **The level heap must end below 256 MB** (above it, adgif shader links break). The DMA buffers are
+  allocated before it, so they can only double, not quadruple as Jak 2's do. With 2560 KB the level
+  heap ends at `#xf6eec00`.
+- **Several counts are bytes.** The default nav mesh holds 255 users at most, and 160 to 200 are
+  taken at the start of a battle at 100 a side; the robotguard and spider pools already fill their
+  stock 20 sleeping slots.
 
-A fourth round followed the author's first play (jetpack jerks, gauges, free aim, citizens,
-previews on black, dark eco): Freedom League runs at the Port and in the Slums, Krimzon Guard runs in the Slums,
-with screenshots, the jetpack's height logged every frame, and state lines:
+The Lisp wiki records how to measure the DMA buffer's use from a process
+([jak3.md, Memory](../../../.agents/skills/goal-lisp/wiki/jak3.md)).
 
-| Check | Result |
+## 6. Build and test
+
+| Step | Command |
 |---|---|
-| Pages | Zone, side and class pages on a black screen; the four zone maps with their lanes, spawns and edge; the class preview alone in its frame |
-| Free aim | The crosshair's ray ends on the crosshair: its end projects back to (256.0, 196.0) within 0.07 units; it met guards at 19 to 25 m (crosshair red); a rifle shot burst on the crosshair's point; a grenade landed 0.73 m from it |
-| Jak's gun | With the plain blaster, his shot flew straight at the free aim's point (direction to the point: dot 1.000) |
-| Tazer | Locked by itself on a guard 4.7 to 5.4 m away; the crosshair moved onto it, in red |
-| Jetpack | Holding X: 239 frames of climb at 6.0 to 10.9 m/s with no frame going down, fuel from 1.0 to 0 in 4 s, then a fall; refilled at 0.1 per second on the ground. Near the ceiling the climb slowed into a hover 0.26 m under it |
-| Dark eco | Left by units killed in battle: 1 of 7 pickups in a Port battle (10 deaths), 4 of 26 in a Slums battle (44 deaths). Each drop is 3 pills; a jetpack brought onto them went from 0.22 to 0.56, 0.93 and 1.0 at the Port, from 0.21 to 0.55, 0.91 and 1.0 in the Slums, one pill each, Jak's dark eco staying 0; the ring's yellow bar went from a sliver to full. A drop spawned by hand at 0.41 filled it at once. The test save had the endless dark eco secret on: before the fix the fuel never went down |
-| Gauges | Jetpack fuel in yellow and spider blue eco in blue on the ring's left, the class model beside them |
-| Citizens | 2 to 6 awake and 18 to 22 in their pool before a battle, none during it |
-| HUD icon | While the camera swung at full right stick for 3 s, and for 1.5 s after a camera teleport, the drawn icon stayed within 0.06 screen units of its spot in the ring (its root projected with the frame's camera, every frame) |
+| Select the game | `task set-game-jak3` |
+| Build every binary: the renderer, the level builder and the decompiler changed | `task build-release` |
+| Build the Jak 2 models from the discs (`iso_data/jak2`, `iso_data/jak3`) | `task modding-models` |
+| Bake them into the unit levels | `task extract` |
+| Build the Jak 2 city level | `task level-port -- custom_assets/jak3/ports/battlefront-havenj2/port.jsonc` |
+| Compile (the first time in a worktree: `(make-group "iso" :force #t)`) | `task compile-check` |
+| Boot as a player does, through the title | `task boot-game-retail` |
 
-A fifth round followed the author's second set of notes (HUD with the stock gauges and gun icons, robotguard, salvos, spider, no Jak, save pictures, outside the campaign): one Freedom League and one Krimzon Guard scenario at the Port, two minutes each, plus a shield test with guard shots fired at the robotguard:
+After a first `task level-port`, compile `battlefront-havenj2-info.gc` again: the build does not
+see the generated file as its input.
 
-| Check | Result |
-|---|---|
-| Pages | Zone and side pages with the city's save picture above the zone map; three Freedom League classes, four Krimzon Guard ones |
-| Gun icon | Top left: yellow gun 1 "100/300" (rifle), blue gun 2 "180/300" (tazer), red gun 3 "28/150" (grenade launcher), yellow gun 1 for the Spargus citizen; none for the jetpack. Moved top right afterwards (below) |
-| Gauges | The stock ring, no model; jetpack fuel at 0.62 in the dark eco gauge (purple); spider blue eco in blue and robotguard roll in red in the light eco gauge |
-| Salvos | Jetpack: two shots 0.13 s apart, 0.8 s between salvos; robotguard: 0.13 s, then 0.9 s |
-| Robotguard roll | 9 m/s walking, 14 to 16 m/s rolling for 1.2 s; the red gauge drained, then refilled from 0 to 1 in 5 s; R2 during the refill did not roll |
-| Robotguard shield | Up while Circle was held; a guard shot heated it to 0.42, the second broke it into red shards; Jak's health stayed 16 |
-| Spider | 14.9 m/s, 18 to 25 m/s with R2 held; Circle bit a guard 4.4 m away |
-| Missions | Open task nodes: 15 before the battle, 0 during it, 15 after the load |
-| Save | START menu: "Save Game" grey; X on it left the ring as it was |
-| Load | Loading slot 1 during the battle: mode off, phase off, no director, no avatar, Jak at the save's place in `target-stance`, 8 stock blue guards |
-
-A sixth run, Freedom League at the Port, checked the gun icon once moved into the stock gun HUD:
-top right, yellow gun 1 with "100/300" and its shell column (rifle), blue gun 2 "180/300"
-(tazer), red gun 3 "28/150" (grenade launcher), yellow gun 1 "99/300" for the Spargus citizen,
-nothing for the jetpack; the gun HUD's values read back as gun 29, ammo 99, state `hud-in`.
-
-A seventh round followed the author's third notes. One Freedom League run at the Port logged the
-jetpack every 0.25 s; then one GIF run per side recorded every weapon of every class:
-
-| Check | Result |
-|---|---|
-| Reserves HUD | Top middle: "500" in green and "498" in red under their bars, clear of the gun HUD |
-| Vehicles and missions | `user-current pilot` #f during the fight; open task nodes 15 before, 0 during |
-| Jetpack on the ground | Model 0.80 m above Jak, fuel refilling at 0.1 per second |
-| Jetpack climb (X) | 6.0 m/s, fuel down 0.0625 per 0.25 s |
-| Jetpack hover | From 17.89 m it settled at 17.54 m within 1.5 s and stayed; later held 10.4058 m for 4 s |
-| Jetpack down (Circle) | 7.0 m/s |
-| Out of fuel | 4.0 m/s down, landed, model 0.80 m above the ground |
-| GIFs | Blue and red guard: rifle, tazer, grenade, rifle butt; jetpacks: climb, salvos while hovering, Circle down, dive kick; Spargus citizen: rifle, rifle butt; robotguard: salvos, shield, roll, punch; spider: sprint, leap, bite |
-
-Found and fixed in these runs: the hover sank a step every second (Jak's `on-surface` flag),
-fixed by the ground probe test (§2.6).
-
-An eighth round followed the author's fourth notes. One run per side logged the shots, the close
-attacks (Square or Circle tapped every 0.15 s for 3 s), the grenades and the jetpack's clip
-changes; then the seven GIFs were recorded again:
-
-| Check | Result |
-|---|---|
-| Rifle cadence | R1 held 2.5 s: a shot every 150 ticks (0.5 s), blue guard and Spargus citizen |
-| Grenade after a rifle shot | Red guard: red ammo 33 to 32 and one more grenade in flight, 0.6 s after the rifle shot; blue guard: 28 to 27 |
-| Close attacks | Blue guard and Spargus: clip end at 1.0 s, next attack at 1.05 s; red guard, robotguard, spider: clip end at 0.22, 0.18 and 0.38 s, next attack at 0.6 s |
-| Jetpack clip | 4 s hovering: 1 clip; moving: hover to forward flight once; 3 s of salvos: no change (before: the firing clip on and off every 0.4 s) |
-| GIFs | The guards' grenade now flies and bursts in both guard GIFs |
-
-Before this round the GIFs never showed a grenade: the clip pressed R1 within a second of the last
-tazer tick, and the grenade launcher shared the rifle's and the tazer's timer.
-
-A ninth round followed the author's fifth notes. One Krimzon Guard run, repeated after each fix,
-logged the jetpack's drawn model, the robotguard's shield and punch and the spider's clips:
-
-| Check | Result |
-|---|---|
-| Zone pages | The four zones and the side page on the world map, the spawns on the streets, the circle around them |
-| Jetpack | Drawn model on Jak's height of that frame at every frame of a climb (gap 0.0000 m, Jak moving 0.10 to 0.19 m a frame) |
-| Robotguard shield | Circle tapped: no shield 0.1 s later; held: up, R1 fired nothing, R2 did not roll, the stick moved it 0.1 m/s, X did not jump; let go: gone |
-| Robotguard punch | Wind-up, punch, back: clips at 0, 0.20 and 0.40 s, idle at 0.93 s; a guard 5.3 m away went from 6 to 2 health |
-| Spider | Half stick: walk; full stick: run; R2: run; no clip change within 0.25 s, no jump clip on flat ground |
-| GIFs | All seven recorded again; the menu GIF from the four zone pages and the side page |
-
-Found and fixed in these runs: a speed multiplier of 0 under the shield (the game crashed once,
-Jak walking with it; Jak's surfaces scale their speeds by it and his walk divides by them), now
-0.01; the spider's clips flipping between idle and walk against a wall.
-
-A tenth round followed the author's sixth notes. Freedom League runs at the Port, the menus driven
-by pad, logged the START menu's page after each press, the guard's magazine and clips frame by
-frame, the units awake every 2 s, and two deaths:
-
-| Check | Result |
-|---|---|
-| Mods menu | L1 + SELECT opened and closed it (bind `#x401`); Battlefront mode on: START > Options went from 5 to 6 entries, Gamemode last; off out of a battle: 5 again |
-| START pages | Options, down to Gamemode (option 5), X: the Gamemode page; X: the Battlefront page; X on New battle: the START menu closed and the war zone page opened |
-| Zone pages | The four zones on their own minimap textures, the spawns on the streets |
-| Units | Up to 17 Freedom League and 14 Krimzon Guard awake, Jak at the battlefield's edge included (12 per side before) |
-| Force field | Jak running outward for 3 s held at 148.11 m of a 148.30 m radius |
-| Guard rifle | R1 held: 6 shots 0.5 s apart, then `grenade-reload` and `cock-gun` on the upper body (2.0 s), then shots again; firing while walking: legs on `walk`, upper body on `gun-attack` |
-| Guard grenades and tazer | 2 grenades, then the reload; the tazer's thrust held while its arc lasts |
-| Death | Jak in his death state 4 s, the camera on a blue guard of his side, "YOU WERE KILLED", "Back in 4" to "1"; then at his spawn (0.02 m away), 16 health, his class drawn, his side's loss counted; 20 of 21 units the same processes before and after |
-| Change class | START > ... > Battlefront > Change class: the class page, class 0 to 1, the fight and its reserves going on |
-| Restart, Quit | Restart: 500 / 500 at once, the deployment, then the fight with the same class; Quit: the battle off at once |
-| Mode off in a battle | The save loaded at once (a second `AUTO SAVE COMMAND restore` in the log), Jak back at the save's place, mode off, START > Options at 5 entries |
-
-Found in these runs: the test's own navigation (the generic pages read no input while the menu
-moves, and keep the line of the last visit), and the test save's invulnerability secret, which
-refuses plain attacks (the death test sends `'attack-invinc`).
-
-Two proof runs then played a battle in each of the four zones, each started from START > Options >
-Gamemode > Battlefront and ended with Quit: the zone page's map, the units awake every 0.5 s for
-30 s with Jak at his spawn, the force field in four directions (Jak put 3 m inside the edge, running
-outward 3 s with a jump), a death, and in the Port the guard's clips frame by frame. The second run
-had the reinforcement retries and the clip wait (§2.2, §2.4); both ran with no crash.
-
-| Check | Port | Industrial Zone | Slums | Freedom HQ |
-|---|---|---|---|---|
-| Minimap texture: the game's for the battlefield's center cell, the HUD minimap's with Jak there, the zone page's | `map-ctyportc`, all three | `map-ctyinda`, all three | `map-ctysluma`, all three | `map-ctyslumc`, all three |
-| Zone page's drawn map against each zone's texture (correlation of the pixels) | 0.978 own, 0.29 at most others | 0.970 own, 0.37 | 0.957 own, 0.38 | 0.927 own, 0.19 |
-| Units awake, most per side (Freedom League / Krimzon Guard), first run | 19 / 20 | 20 / 20 | 20 / 20 | 20 / 20 |
-| Units awake, most per side, second run (samples at 20 of 60) | 20 / 20 (14 / 8) | 20 / 20 (45 / 58) | 20 / 20 (24 / 32) | 20 / 20 (38 / 44) |
-| Force field: farthest past the edge in four directions, both runs | -0.03 m (inside) | -0.02 m | -1.28 m | -0.0004 m |
-| Death: 4 s on a unit of the side, back at the spawn (0.00 to 0.02 m), 16 health, units the same processes | 26 of 32 | 30 of 32 | 22 of 32 | 27 of 32 |
-
-Guard, Port (standing fire 4 s, walking fire 3 s, running fire with a jump, a rifle butt, the
-grenade launcher 4 s, the tazer): the reload clips started 6 times (3 reloads), each with the
-weapon's magazine at 0; the legs' clip changed 14 times in the first run, 2 of them at once (no
-blend), and 13 times in the second, all blended.
-
-An eleventh round made each war zone a whole district (§1, §2.2, §2.6) and proved it in two final
-runs, each battle started from START > Options > Gamemode > Battlefront and ended with Quit, Jak a
-blue guard of the Freedom League. In each district every stock continue point of its sections was
-reached: Jak grabbed, held 1 s at the point and released, then four 3-second runs from it, north,
-east, south and west, with a jump. Then three edge runs, 8 s outward from the district's middle;
-a teleport to a point of the next district; the units awake every 0.5 s for 20 s at the camp; a
-death. The demo GIFs of the README are those runs (the camp's run, then the first run from four
-points).
-
-| Check | Port | Industrial Zone | Slums | Freedom HQ |
-|---|---|---|---|---|
-| Continue points stood on in the zone, with ground | 9 of 9 | 9 of 10: at `ctyinda-start` Jak landed 2.7 m below the point, then ran in all four directions | 5 of 5 | 8 of 9: at `ctyslumc-burning-bush` he fell into the water 9.9 m below |
-| Runs from the points stopped by the field, ending out of the zone | 0 of 36, 0 | 0 of 40, 0 | 0 of 20, 0 | 0 of 36, 0 |
-| Edge runs ending in the zone | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 (from the burning bush, 12 sparks: the field held him over the water) |
-| Teleport to the next district's point | back at once (`ctyinda-bbush-5`) | back at once (`ctyport-bombbot`) | back at once (`ctyslumb-bbush-3`) | back at once (`ctysluma-bbush-1`) |
-| Units awake, most per side, samples at 20 of 40 | 20 / 20 (35 / 39) | 19 / 20 (0 / 40) | 19 / 21 (0 / 26) | 20 / 20 (40 / 39) |
-| Units awake on another section's lanes | 0 | 0 | 0 | 0 |
-| Death, then back at the camp standing | yes | yes | yes | yes |
-
-Krimzon Guard battles in the Port and the Industrial Zone: the deployment at the camp
-(`ctyport-bombbot`, `ctyinda-bbush-5`), the teleport into the next district (back at once), a
-death after a trip to the other camp (back at the camp standing: 0.15 m and 0 m away). A walk from
-the Port's war zone toward the Industrial Zone met a wall 34 m on, still in the Port's cells.
-
-Found on the way, all fixed: hidden under the class model, Jak fell through the ground after a
-teleport at 5 of the Port's 9 points (his bones' math skipped, §2.4); the battle's level filter
-hung the respawn of a camp whose list named another level; the stock loading of the Port took
-`mhcitya` instead of `ctyinda` for a respawn at the war zone (the camp moved); and the game kept
-seeing Jak in the Port while he stood in the Industrial Zone (the minimap cell test). The test's
-own teleport first left Jak swimming in the air (he had ended a run in the water) and took the
-field's safe place from his old spot: it now grabs him and sets the safe place after.
-
-Found and fixed in the earlier runs: a texture upload into a bucket the PC renderer wants empty (the save pictures, `bf-picture-set!`), a freeze from a DMA bucket opened inside another (the gun icon), a gauge hidden behind the ring (now drawn in the stock gauge sprites), and a shield that died at once (its art level).
-
-The game's output also shows `call_method_of_type failed` lines ("has invalid type ptr"): the
-kernel prints an object through its type and calls any type above 128 MB invalid, while this
-build's level heaps sit above it (`engine-internals` skill). They come with the stock warning
-"could not do (ja-channel-push! 1) because it has 5/6 channels" of a unit whose code is level
-code (its name cannot be printed); the object is sound.
-
-### 3.2 Troubleshooting
+The smoke tests drive the real menus with the pad in a retail boot:
+[`battlefront_tests.md`](battlefront_tests.md) lists them and how to run one.
 
 | Symptom | Cause |
 |---|---|
 | A red guard or a jetpack guard is invisible or untextured | `task extract` not run since the models changed |
-| `multiple ways to make output out/jak3/obj/bf-...-ag.go` | the `*file-entry-map*` pre-marks are missing from `game.gp` |
-| `dgo file header ... has overrun heap` while loading Haven City | art groups of `ctypesa.gd` / `ctypesc.gd` no longer sorted by decreasing size |
-| "battlefront: the war zone did not load" in the console | ctypesa or ctypesc never became active within 60 s |
+| `multiple ways to make output out/jak3/obj/bf-...-ag.go` | The art groups' pre-marks in `game.gp` are missing |
+| `dgo file header ... has overrun heap` while loading Haven City | `ctypesa.gd` or `ctypesc.gd` no longer sorted by decreasing size |
+| The war zone is greyed | Jak 2 not extracted, or `battlefront-havenj2-info.gc` not compiled again after `task level-port` |
+| A native crash (`0xC0000005`) with no GOAL message | Often an engine buffer overflowed (§5); a temporary vectored exception handler in the runtime names the function (`smoke-tests` skill, `game-control.md`) |
 
----
+## 7. Known limits
 
-## 4. Status and known limits
-
-- **A guard drawn with its legs only.** Seen by the author (round 23), mostly on the Freedom
-  League's side. Its mesh masks are not the cause: a set `seg-mask` bit hides a segment, and no
-  awake guard had both armor segments hidden (bits 1 and 2) in 40 scans of 44 guards, 5 s apart,
-  on the Freedom League's side (smoke scenario 33). The model past 20 m (`lod2`) or a guard sunk
-  into the scenery are left to check; the cause is not found.
-- **Little hand play.** The author played the second round once; everything since was checked by
-  automated runs (§3.1). The feel of each class (camera, free aim, balance) needs a player, and
-  battles longer than ten minutes were not run.
-- **Earlier builds crashed in long battles.** Each cause found was fixed (§5): the shadow
-  buffers, the avatar flood, the Spargus citizens in the traffic, the forced guard weapon, a
-  process-tree walk in a unit's init, the red guards' death effect (§2.4), the global DMA buffer's
-  overflow at 100 a side (round 43, `display.gc` in §2.1). Crashes whose cause was
-  not identified could remain; a crash ends the game with no message (exit code `0xC0000005`). A
-  temporary vectored exception handler in the runtime names the faulting GOAL function, or the
-  runtime module and offset of a native one (`smoke-tests` skill, game-control).
-- **No more than 100 units at once a side.** Past it, the engine's own limits come near: the
-  traffic tracker counts its awake units in a byte (255 at most, its lists hold 224), and every new
-  pool unit holds one of the default nav mesh's 255 nav-controls until it is first woken (161 to 200
-  of them at a battle's start at 100 a side); the robotguards' and spiders' pools already fill the
-  stock 20 slots. Each drawn unit takes about 6.5 KB of the frame's global DMA buffer (2560 KB,
-  `display.gc`).
-- **The units at once are a ceiling, not a constant.** A side's ships and points bring a unit
-  every second or two, so the armies reach the setup's number about a minute into a battle; a unit
-  that dies counts until it has left, and its replacement comes on the next drop, so the count dips
-  below it in a heavy fight. 100 a side ran at 60 frames a second in the runs (T71); a weaker
-  machine may need fewer.
-- **Hit rate of some attacks.** The spider's pounce and the citizen's rifle butt missed a moving
-  foe in some runs: they only reach a foe still within range when Jak arrives.
-- **The zone minimaps are carried texels.** Jak 3's city's is generated from the user's decompiled
-  minimap textures (Naughty Dog assets, like the models), 4 m a texel: soft once framed on a
-  battlefield; a new war zone needs the script run again. Jak 2's city's is made at install from
-  the player's Jak 2 (§2.10), 7.2 m a texel, 24 colors.
-- **A death leaves Jak where he fell, hidden,** until the respawn: a unit can still bump into him,
-  and the stock death's movies and its reset of the area do not happen during a fight.
-- **A mission already running stays open** during a battle (the `exclusive-task` setting closes the
-  others); the battle does not stop it.
-- **The robotguard shield's sounds may be silent:** its stock sounds are in level banks that Haven
-  City does not load.
-- **No aim assist.** A shot needs the crosshair's line of sight to touch a unit's collision; only
-  the tazer aims by itself. The camera's speeds, distance and shoulder offset are the author's to
-  tune by hand (`battlefront-player.gc` BF_YAW_RATE and `bf-cam-rig-update`).
-- **Hidden Jak runs, the class walks.** Jak, hidden, turns toward where he runs; the class model
-  faces the camera's heading, turned 50 degrees at most toward its walk. The guards and robots
-  have no sideways walk clip: a sideways walk is their forward walk turned that way.
-- **The red guards' dissolve is its sparks alone:** their death effects are skipped (§2.4), the
-  build-actor models having no data for the renderer path the dissolve takes; their sparks and
-  sound stand in for it, and the body vanishes at once after a second instead of fading.
-- **The class models over the game are lit by the place.** The preview and the health icon are
-  drawn with the world, a few meters in front of the camera: the level's lights color them, and
-  scenery nearer than that can cover them. With the icon, the health HUD keeps only its pips.
-- **The ammo is Jak's.** The battle spends and refills Jak's gun ammo and gives it back at its end;
-  a save made during a battle keeps the battle's amounts. Without the scatter gun or the vulcan,
-  the red and blue pickups turn yellow (stock `verify-pickup-type`).
-- **Symbol names in logs.** In a retail boot the game's own name of a symbol (printed with `~A`,
-  e.g. the master mode) can come out garbled after level loads: the kernel keeps some names in the
-  top of the global heap, which DGO loading reuses. The values are right; only printing is
-  affected.
-- **Jetpack guards fly on the flying-turret code:** they explode into KG robot debris, and the
-  turret's aim joint mod pitches their chest. A direct blow (`bf-send-attack`) on one in flight
-  took nothing in a smoke run: the close attacks reach the ground units.
-- **Classes are drawn over Jak:** hits, health and death are Jak's; the class model only follows him.
-  The Robotguard's roll, the dives and the leaps are Jak's own physics with a changed speed or
-  velocity, not the robots' own movement code.
-- **The tazer's baton is the guard's weapon drawn smaller,** not a model of its own (§2.8).
-- **The guards have no roll clip:** the roll turns the tucked jump pose head over heels by code.
-- **A crash the author met choosing the blue guard in the Industrial Zone** (the game window closed)
-  did not come back in three automated runs of the same choice (scenario 10, 2026-11-06).
-- **A guard showing only its legs** (the author's play) was not found again: in the runs no guard
-  had both armor segments hidden. A red guard is no longer a dark guard (`bf-guard-flags`), as in
-  Haven City: New Dawn, but the masks cannot hide parts of a build-actor model (Lisp wiki jak3
-  4.35), so this does not explain it.
-- **Zones are Haven City districts only.** Spargus would need the city's unit code and art in WWD
-  (the battle-of-spargus mod does it for the guards).
-- **No cars or citizens during a battle.** The battle takes nine of the game's ten level slots:
-  ctywide, the two unit levels and the six street sections (§2.9). No interior or mission level
-  loads; a continue point whose list names another level cannot be a camp (a respawn would wait
-  for ever).
-- **A crowd at the battle's start.** For about the first 30 s the units piled at their ships fill
-  the engine's touching-prims entry pool: 3,895 failed allocations in the whole-city run
-  (`touching-prims-entry-pool::alloc-node() failed!`), those touches dropped, no crash, none after.
-- **Defenders patrol close by.** A point's guards walk the lanes within about 12 m of it and march
-  back when they stray: in the runs they were on it (15 m) in 32 of 35 counts. They fight what
-  comes; a determined attack can still take the point.
-- **A point far from its holder's base falls.** Its defenders are the ones its ship drops: at the
-  Port, 400 m from the Krimzon Guard's base, the Freedom League's held it 105 to 115 s.
-- **Marching is slow at first.** From the Freedom League's base, 240 m from Freedom HQ's point,
-  the first guards reached it 60 s into the battle, and 14 walked onto it within 65 s.
-- **The battle's start waits for the city.** About 3 s for the stock levels to leave and 2 s for
-  the six sections, under the class page.
-- **Some guards find no ground behind a hatch:** about 16 units a run go back to sleep after 8 s
-  at it (§2.9).
-- **The transports are silent:** their engine sounds are Jak 2's.
-- **Nothing is saved:** the battle ends with the session.
-- **The Jak 2 models are Naughty Dog assets** converted from the user's rips: the mod repository is
-  meant to stay private.
-
----
-
-## 5. Change log
-
-| Date | Touched/Created Files | Technical Description | Objective |
-|---|---|---|---|
-| 2026-11-04 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `battlefront-city.gc`, `guard.gc`, `guard-grenade.gc`, `ctypesa.gd`, `jak3_config.jsonc`, `README.md`, `docs/img/mod/spargus.gif` (removed) | Red guards (AI and avatar) play the blue guard's clips (`bf-guard-clips`), units told by their skeleton (`bf-art-name`); the spider's walk and run follow its speed (`bf-avatar-loop-rate`); pickups 27 % instead of 67 %; a third-person camera held by the avatar (`bf-avatar-camera`); damage scaled by class (`*bf-class-damage*`: guards 8 hits, jetpacks and spider 6, robotguard 16); the Spargus Citizen class removed, with its code and art in CTYPESA and the decompiler config; grenade guards break off a reload for the player only (`bf-reload-break-ok?`, Lisp wiki jak3 4.40). `traffic-engine.gc` asks `bf-keep-unit?` (CWI code) during a fight only: the file also runs in Spargus, where calling it, undefined there, crashed the game at boot with a save in Spargus (seen twice). Compiled; a smoke run (Port, mode on, 4 minutes) showed red guards on the blue guard's clips and no crash; the battle itself could not be started from the test scenario, so the camera, the damage by class, the spider and the pickups are not checked in a fight yet. | The author's round 12 goal: animations, spider legs, rarer pickups, a Battlefront camera, health by class, no Spargus Citizen. |
-| 2026-11-01 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `battlefront-minimaps.gc`, `battlefront-city.gc`, `traffic-engine.gc`, `scripts/battlefront/make_minimaps.py`, `README.md`, `docs/img/mod/zone-port.gif`, `zone-industrial.gif`, `zone-slums.gif`, `zone-freehq.gif` (new) | War zones are whole districts: the Port, the Industrial Zone (`ctyinda`, `ctyindb`), the Slums (`ctysluma`), Freedom HQ (`ctyslumb`, `ctyslumc`), with new camps at their ends and maps of the whole district. Force field on the game's level of the player (vis-nick), the district's minimap cells (`bf-zone-cell?`, `*bf-zone-cells*`) and a 20 m fall, putting him back at his last safe place. Loading: the stock one in a one-section district, the two sections kept in a two-section one (`bf-want-zone-levels`, an `add-borrow-levels` wrapper). Reinforcements and units kept out of view on the district's lanes only (`bf-city-zone-branch?`, `bf-keep-unit?` moved to `battlefront-city.gc`, the stock hook passes the unit). A respawn wants its camp's levels and waits for them (`bf-want-camp-levels`). Jak's bones computed while he is hidden (`bf-target-bones!`): he fell through the ground after teleports. Verified in game in the four districts and at both sides' camps (§3.1). | The author's note: each zone must be its whole district, tested in each with a demo GIF. |
-| 2026-11-01 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `battlefront-minimaps.gc` (new), `traffic-engine.gc`, `game.gd`, `scripts/battlefront/make_minimaps.py` (new), `README.md`, `docs/img/mod/menu.gif` | Mods menu on L1 + SELECT, with the mode's switch alone; START > Options > Gamemode > Battlefront (new battle, change class, restart, quit), labels through a `lookup-text!` wrapper; the mode switched off in a battle loads the last save; zone pages on each zone's own minimap texture; armies of 20 per side, the battlefield's units kept awake out of the camera's cells (`bf-keep-unit?`); guard magazines (6 rifle shots, 2 grenades), a reload only when one is empty, the weapon clips on the upper body (`top-anim`), every clip change blended (`anim-wait`); reinforcements of up to three units a tick with retried spawns; a death watches the battle 4 s on a unit of the side, then respawns at the spawn as the same class, with no reset of the city. Verified in game in the four zones (§3.1). | The author's sixth notes. |
-| 2026-11-01 | `battlefront.gc`, `battlefront-player.gc`, `README.md`, `docs/img/mod/menu.gif`, `blue-guard.gif`, `jetpack.gif`, `spargus.gif`, `red-guard.gif`, `red-jetpack.gif`, `robotguard.gif`, `spider.gif` | Zone and side pages on the game's world map of Haven City framed on the battlefield (`bf-zone-view!`, `bf-draw-zone-minimap`, `bf-draw-zone-marks`); the save picture, the lane map and its stored lanes removed. The class model placed again after the camera (`bf-avatar-cam-post`). Robotguard: full punch (three clips, 6.5 m), standing still behind its shield (no move, jump, roll or shot). Jump clip only when clearly airborne; walk and run with slack; 0.25 s per locomotion clip. Verified in game (§3.1). | The author's fifth notes. |
-| 2026-11-01 | `battlefront-player.gc`, `docs/img/mod/blue-guard.gif`, `jetpack.gif`, `spargus.gif`, `red-guard.gif`, `red-jetpack.gif`, `robotguard.gif`, `spider.gif` | Rifle every 0.5 s (guards, Spargus citizen). The grenade launcher on its own timer (`grenade-time`). A close attack holds its clip to its end (`ja-done?`), the next one waits for it, and for a dive kick's end. The jetpacks' clip by speed only, with slack, never the firing clip. GIFs recorded again (the grenade flies). Verified in game (§3.1). | The author's fourth notes. |
-| 2026-11-01 | `battlefront.gc`, `battlefront-player.gc`, `battlefront-h.gc`, `README.md`, `docs/img/mod/hud.png`, `blue-guard.gif`, `jetpack.gif`, `spargus.gif` (new), `red-guard.gif`, `red-jetpack.gif` (new), `robotguard.gif`, `spider.gif` | Reserves HUD after Star Wars Battlefront (2004) (`bf-draw-reserves`), the zone and class line removed. Jetpacks: X climbs, Circle comes down, neither hovers still (`hover-y`), slow descent out of fuel, model 0.8 m above Jak; landing tested against the ground probe. `'pilot` #f during a battle: no vehicle. One GIF per class showing each of its weapons. Verified in game (§3.1). | The author's third notes. |
-| 2026-11-01 | `battlefront.gc`, `README.md`, `docs/img/mod/hud.png` | The class's gun in the stock gun HUD, top right, with its shells and ammo count: a `hud-gun` `update-values!` wrapper feeds it the gun and ammo during a fight; the mirrored copy of its sprites top left, its white count and the unused `bf-weapon-name` removed. Verified in game (§3.1). | The author's note: the gun where the original game puts it, with the same ammo view. |
-| 2026-11-01 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `hud-classes.gc`, `gun-util.gc` (hook removed), `README.md`, `docs/img/mod/menu.gif`, `class.gif`, `hud.png`, `blue-guard.gif`, `jetpack.gif`, `red-guard.gif`, `robotguard.gif`, `spider.gif` | HUD: the stock gun icon of the weapon in hand top left with its ammo, no weapon name, no class model in the ring, the class gauge in a stock eco gauge through a hook in `hud-health` draw (jetpack dark, spider blue, robotguard roll red). Robotguard: R2 roll with a 5 s recharge, shots and blasts stopped while it rolls, Circle the Dark Makers' red shield sphere (`bf-shield`), which breaks under fire, R1 salvos of two shots. Jetpacks: salvos of two shots, 0.8 s apart. Jetpacks and robotguard spend no ammo. Spider: x1.5, R2 blue eco x2, Circle bite. Jak no longer playable. Zone and side pages: the save menu's picture above the map (`*bigmap*`, menu texture mask). Outside the campaign: `exclusive-task` none, Save grey and refused, a load ends the battle (`initialize!` wrapper). Endless light eco secret set aside too. Verified in game (§3.1). | The author's second set of notes. |
-| 2026-10-31 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `gun-util.gc`, `README.md`, `docs/img/mod/menu.gif`, `class.gif`, `hud.png` | Free aim for every class: a ray from the camera through a fixed crosshair (`bf-free-aim`), followed by the class weapons and, through a hook in Jak's gun post, by Jak's gun; the tazer alone locks the nearest foe within 12 m. Jetpack: steady thrust until the fuel is gone, lift fading under the ceiling, no refill while X stays held after it ran dry, force field push only 2 m above the ceiling. Fuel and blue eco gauges in the health ring (HUD sprites 5 and 6). No citizens during a battle (`bf-want-count`). Dark eco drops (6 %) refill the jetpacks; Jak's dark eco and the endless dark eco secret set aside for the battle. Pages on black (renderer mask, other models hidden) and a zone map on the zone and side pages, with the lanes of each zone read in game (`*bf-lanes*`). English texts without ASCII apostrophes. Class models over the game placed again after each camera update (`bf-icon-cam-post`), so the health icon no longer trails a moving camera. Verified in game (§3.1). | The author's notes after their first play. |
-| 2026-10-31 | `docs/img/mod/blue-guard.gif`, `jetpack.gif`, `red-guard.gif`, `robotguard.gif`, `spider.gif`, `README.md` | Class GIFs recorded again with the second round's HUD and moves (weapon change and tazer, fuel gauge, shield, blue eco sprint), same method (§3.1). | The README shows the mode as it is. |
-| 2026-10-31 | `battlefront-h.gc`, `battlefront-city.gc`, `traffic-engine.gc`, `README.md` | Port stall fixed: the unit picker's count per territory (`activate-one-vehicle`) asks `bf-want-count`, and reinforcements (`bf-city-reinforce`) wake the battle's type furthest below its cap on a battlefield segment 30 m or more from the player, four times a second. Slums moved to `ctysluma-alley` / `ctysluma-bbush-2` and Main Town replaced by Freedom HQ (`ctyslumc-freehq` / `ctyslumc-bbush-2`): the first pairs had almost no unit lanes. Measured per zone in game: awake units, reserves, jetpack ceiling, force field (§3.1). | Battles that keep going in every zone. |
-| 2026-10-31 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `battlefront-city.gc`, `traffic-manager.gc`, `README.md`, `docs/img/mod/menu.gif`, `class.gif`, `hud.png` | Class page after the deployment, with the class under the cursor turning in a frame (`bf-icon`, drawn with the world in front of the camera; the HUD model path crashed on build-actor models); guard weapons on the D-pad (tazer arc from the guards' lightning, rifle, guard grenades through `*bf-city-grenade*`); class weapons on Jak's ammo, saved and given back, topped up at each deployment; stock ammo and health pickups left by dead units; crosshair (`hud-gun-reticle`); health HUD kept shown with the class model among its pips; jetpack fuel gauge (4 s, refilled in 10 s); spider blue eco sprint; robotguard shield (Light Jak's, `target-attacked` wrapper lets blows through); army caps of 12 per side (`bf-want-count` in `traffic-manager-method-22`, look shares); force field and jetpack ceiling replacing the countdown on foot; avatar `relocate` for the tazer arc; class model heights from the rips. | The second request of the mod's author: weapons, ammo, crosshair, HUD, gauges, shield, caps, force field. |
-| 2026-10-31 | `README.md`, `docs/img/mod/*.gif`, `docs/img/mod/victory.png` | README gallery recorded in game: a retail boot with a temporary scenario file (not part of the mod) saved one frame in four at 640x360 with `pc-screen-shot`, and ffmpeg assembled them at game speed (480 px, 64 colors, no dither). The recording runs found the Port stall of §4. | Show the mode to players. |
-| 2026-10-31 | `battlefront-h.gc`, `battlefront.gc`, `battlefront-city.gc`, `guard.gc`, `wlander-male.gc` | Stability fixes from ten-minute battles: the AI Spargus citizens removed (they froze the game in `fill-bg-using-line-sphere-new`; `wlander-male.gc` stock again); the red guards keep the weapon the stock code gives (forcing it in `crimson-guard-method-267` crashed a weapon change); the looks of new guards and jetpack guards balanced from live counts made by the director (an alternation drifted to no blue guard; counting inside a unit's init crashed). | Long battles run clean. |
-| 2026-10-31 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `battlefront-city.gc`, `Shadow2.cpp`, `Shadow2.h` | Fixes from the in-game runs: shadow buffers no longer stop the game in a crowd; Jak held at the spawn until he stands, and put back after a fall; avatar and director handles in `*bf*` (no avatar flood, class page after a death); player respawned like a death (`initialize!` 'life) at both ends of a battle, so every unit pool is spawned again (battle's skins, then stock skins); spider jump pushed up during its rise; dive and pounce steered to the foe; avatar blend channels capped; menu panel and text in one buffer, centered text, wrapped descriptions, PC text language, no ASCII apostrophe in French; HUD and losses line resized. | The mod works in game as specified. |
-| 2026-10-31 | `README.md`, `index.json` | Mod branch prepared from master-dev by `create_mod_repo.py --prepare-only` (repository not published). | Start the mod. |
-| 2026-10-31 | `battlefront-player.gc`, `battlefront-h.gc`, `make_models.py`, `ctypesa.gd`, `game.gp` | Square attack for every class from its unit (rifle butt, punch, dive kick, pounce), the roboguard roll on L1; a second red guard model with the grenade launcher, given to one red guard in two (grenadier). Review fixes: handles for the avatar and the director, `*popup-menu-open*` while the battle menu is up, hatred written every frame, avatar mesh segments, end of battle deferred while Jak drives. | Each class uses its unit's moves and attacks; red guards fight with both weapons of the Jak 2 guard. |
-| 2026-10-31 | `battlefront-h.gc`, `battlefront-player.gc`, `battlefront.gc`, `battlefront-city.gc` (new)<br>`traffic-engine.gc`, `guard.gc`, `flying-turret.gc`, `wlander-male.gc`<br>`game.gd`, `cwi.gd`, `ctypesa.gd`, `ctypesc.gd`, `game.gp`, `jak3_config.jsonc`<br>`scripts/battlefront/make_models.py`, `custom_assets/jak3/models/**/bf-*.glb` (new) | First version: Mods menu entry, three-page battle menu (English/French), four Haven City war zones, reserves of 500 per side, loss counting on unit and player deaths, result page, battlefield bounds; Jak 2 red Krimzon Guard on the stock guard code and Jak 2 jetpack guard (red and blue) on the stock flying-turret code; Spargus citizens in Haven City; eight playable classes drawn over Jak with their own moves and R1 weapons. | The Battlefront mod as specified. |
+- **About 100 units at once a side** is the tested maximum (§5); the count dips under it in heavy
+  fights, since a fallen unit's replacement comes on a later drop.
+- **The class is Jak underneath:** hits, health and death are Jak's, and the robotguard's roll or the
+  spider's leap are Jak's physics with another speed.
+- **No aim assist** but the tazer's lock.
+- **Sounds:** the red guards shout no lines (Jak 2's are streamed audio, which Jak 3 cannot add yet),
+  the transports are silent, and the robotguard's shield may be.
+- **The red guards' death** is a burst of sparks: their models cannot take the stock dissolve.
+- **Jetpack guards are flying turrets:** they explode into robot debris.
+- **A guard drawn with its legs only** was seen once; its cause is not found.
+- **Quit the battle froze the game once** while the title loaded, after a long battle in Jak 2's
+  city (a smoke run, 2026-11-16: no crash report, nothing printed after "Opening TITLE DGO"); not
+  investigated.
+- **About 10 units go NaN** in the first minute of a battle and are put back to sleep; the cause is
+  not found.
+- **Nothing is saved:** a battle ends with the session, and the ammo it uses is Jak's.
+- **No Naughty Dog asset in git:** the Jak 2 models and city are made from the player's discs at
+  install.
