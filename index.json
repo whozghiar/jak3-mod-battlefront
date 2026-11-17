@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceName": "Jak 3 - Battlefront Source",
+  "lastUpdated": "2026-11-17T00:35:47Z",
+  "mods": {
+    "battlefront": {
+      "displayName": "Jak 3: Battlefront",
+      "description": "Jak 3: Battlefront is an OpenGOAL mod inspired by Star Wars: Battlefront (2004).",
+      "authors": [
+        "whozghiar"
+      ],
+      "tags": [
+        "gameplay",
+        "custom-engine"
+      ],
+      "supportedGames": [
+        "jak3"
+      ],
+      "websiteUrl": "https://github.com/whozghiar/jak3-mod-battlefront",
+      "versions": [
+        {
+          "version": "1.0.0",
+          "publishedDate": "2026-11-17T00:35:47Z",
+          "supportedGames": [
+            "jak3"
+          ],
+          "assets": {
+            "windows": "https://github.com/whozghiar/jak3-mod-battlefront/releases/download/battlefront-v1.0.0/windows-battlefront-v1.0.0.zip",
+            "linux": "https://github.com/whozghiar/jak3-mod-battlefront/releases/download/battlefront-v1.0.0/linux-battlefront-v1.0.0.zip"
+          },
+          "checksums": {
+            "windows": "58df765e630abcd11bb3299274e2422ae0f19e237e26edf5a41dd95541c98412",
+            "linux": "1076e0669efdf5f27504b62e12cf64b29a2bf9c89d94154758f5a4c056c294d1"
+          }
+        }
+      ],
+      "coverArtUrl": "https://raw.githubusercontent.com/whozghiar/jak3-mod-battlefront/main/docs/img/mod/mod_cover.png",
+      "thumbnailArtUrl": "https://raw.githubusercontent.com/whozghiar/jak3-mod-battlefront/main/docs/img/mod/mod_cover.png"
+    }
+  },
+  "texturePacks": {}
+}
