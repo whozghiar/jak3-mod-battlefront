@@ -152,14 +152,13 @@ task boot-game
 This debug boot skips the title: the battle's title menu opens once Jak stands in the city. `task boot-game-retail` goes through the opening scenes and the title screen, as a player's game does.
 *(Or launch via the OpenGOAL REPL using `task repl`, then compile and run with `(mi)` and `(r)`).*
 
+## Teaser Video
+[![TEASER Video](https://img.youtube.com/vi/0bK9VnEgkxU/maxresdefault.jpg)](https://youtu.be/0bK9VnEgkxU)
+
 ## Demonstration Video
 
-[![Demonstration Video](https://img.youtube.com/vi/{YOUTUBE_ID}/maxresdefault.jpg)](https://youtu.be/{YOUTUBE_ID})
+[![Demonstration Video](https://img.youtube.com/vi/{VIDEO_ID}/maxresdefault.jpg)](https://youtu.be/{VIDEO_ID})
 
-**[Watch the demonstration video on YouTube](https://youtu.be/{YOUTUBE_ID})**
-
-> [!NOTE]
-> *Demonstration videos must be hosted externally on YouTube to prevent repository bloating. Replace `{YOUTUBE_ID}` with your YouTube video ID (e.g. `MnqnybexhSA` from `https://youtu.be/MnqnybexhSA`).*
 
 ## Technical Documentation
 For how the mod works, its engine limits and how to test it, refer to:
