@@ -1,0 +1,152 @@
+// The Battlefront mod's third war zone: Jak 3's Spargus, ported into a level of its own by
+// scripts/level_port (its README describes every key) from the player's Jak 3 disc. Nothing of the
+// disc is in git: `task level-port -- custom_assets/jak3/ports/battlefront-spargus/port.jsonc`
+// writes the level files, and a launcher install's extractor runs it before the compile.
+//
+// One level, bf-spargus: Spargus's two districts (wascitya, wascityb) and its city-wide level
+// (waswide) merged, with Haven City's traffic code (the battle's) in place of Spargus's own, which
+// can't be loaded beside it. No actor of Spargus comes along: no Wastelander, animal, ladder,
+// turret, elevator or door; its props are baked into the background, and the doorways to the
+// places the war zone leaves out (the garage, the arena, the palace's elevator) are walled with
+// their doors in their closed pose. It hosts the borrow heaps of Jak 3's ctywide, where the battle's
+// units' levels load (ctypesa, ctypesc).
+{
+  "name": "battlefront-spargus",
+  "source_game": "jak3",
+  "target_game": "jak3",
+  "tag": "og:battlefront-spargus",
+  "ignore_outputs": ".gitignore",
+  "prefix": "bfs-",
+  "paths": {
+    "levels": "custom_assets/jak3/levels",
+    "models": "custom_assets/jak3/models/custom_levels",
+    "code": "goal_src/jak3/levels/bf-spargus"
+  },
+  "build": {
+    "file": "goal_src/jak3/levels/bf-spargus/bf-spargus.gp",
+    "default_deps": [],
+    "code_deps": {
+      "bf-spargus-obs": ["ctywide-init"]
+    }
+  },
+  "level_info": {
+    // not compiled by itself: GAME's goal_src/jak3/pc/features/battlefront/battlefront-spargus-info.gc
+    // takes its forms when it exists
+    "file": "goal_src/jak3/levels/bf-spargus/bf-spargus-levels.gc",
+    "comment": [
+      "The level-load-info of bf-spargus, Jak 3's Spargus as the Battlefront mod's third war zone,",
+      "with its continue points. Compiled into GAME by battlefront-spargus-info.gc, which includes",
+      "these forms. Its mood: goal_src/jak3/levels/bf-spargus/bf-spargus-obs.gc."
+    ],
+    "levels_var": "*bfs-levels*",
+    "levels_var_comment": "every level of the Spargus war zone"
+  },
+  "level_defaults": {"level_info": {"draw_priority": "10.0"}},
+  "continues": {
+    "prefix": "bfs-",
+    "names": {"wascitya-start": "bf-spargus-start"},
+    // the sides' camps, the battle's bases (battlefront-h.gc *bf-point-defs-spargus*), on the nav
+    // mesh at the city's two ends, the player facing the city: the Freedom League's on wascitya's
+    // east terrace, the Krimzon Guard's on wascityb's west plaza. Each on open ground with open
+    // sky, where its troop transport lands (round 50's probe of every nav poly: at 2422, -100 the
+    // Freedom League's ship never came)
+    "new_continues": {
+      "ff-camp": {"level": "wascitya", "pos": [2474.8, 23.5, -107.1], "facing": [-1.0, 0.0],
+                  "distance": 0.0, "wants": [["wascitya", "'display"]]},
+      "kg-camp": {"level": "wascityb", "pos": [1494.0, 27.9, -341.7], "facing": [1.0, 0.0],
+                  "distance": 0.0, "wants": [["wascityb", "'display"]]}
+    }
+  },
+  "levels": [
+    {
+      "name": "bf-spargus",
+      "nick": "bfs",
+      "iso": "BFSPARG",
+      "index": "0x12a",
+      "base_id": 22000,
+      "what": "Jak 3's Spargus, its two districts and its city-wide level as one level: the Battlefront's Spargus war zone",
+      "sources": ["wascitya", "wascityb", "waswide"],
+      "memory": "large",
+      "sky": true,
+      "ocean": "*ocean-map-bf-spargus*",
+      "ocean_source": {"file": "goal_src/jak3/levels/wascity/wascity-ocean.gc", "name": "wascity"},
+      "ported_actors": false,
+      "code": ["bf-spargus-ocean.o"],
+      // the city with a margin (Spargus's continue points lie between x 1430 and 2515 m, z -480
+      // and 135 m): the desert backdrop around it would blow the collide hash grid up
+      "collision_bounds": [1300, -60, -650, 2650, 320, 160],
+      // the camps (the bases) and a continue point in each district (the control points' respawns
+      // load the one level whichever they name)
+      "continues": ["ff-camp", "kg-camp", "wascitya-start", "wascityb-start"],
+      "mesh": {
+        // Spargus's props as background. The doors to the places the war zone leaves out, in their
+        // closed pose with a collision box, so they never open: the garage's (wascity-airlock-small),
+        // the arena's (wascity-stad-door), the palace elevator's (wascity-elevator-door)
+        "props": {
+          "wascity-airlock-small": ["box", 16],
+          "wascity-stad-door": ["box", 16],
+          "wascity-elevator-door": ["box", 16],
+          "wascity-market-sack-a": ["box", 16],
+          "wascity-market-sack-b": ["box", 16],
+          "wascity-market-crate": ["box", 16],
+          "wascity-market-basket-a": ["box", 16],
+          "wascity-market-basket-b": ["box", 16],
+          "wascity-fruit-stand": ["box", 16],
+          "wascity-water-pump": ["box", 16],
+          "wascity-awning-a": [null, null],
+          "wascity-awning-b": [null, null],
+          "wascity-flag-a": [null, null],
+          "wascity-flag-b": [null, null],
+          "wascity-flag-c": [null, null],
+          "wascity-flag-d": [null, null],
+          "wascity-windmill": [null, null],
+          "wascity-wind-fan": [null, null],
+          "wascity-cactus": [null, null],
+          "urn-a": [null, null],
+          "urn-c": [null, null],
+          "ladder": [null, null]
+        },
+        "post_width": 0.6,
+        "palette": {"ambient": 110.0, "sun": 100.0}
+      },
+      // the traffic navigation of the two districts, merged into one city-level-info
+      "nav": {
+        "cell": 50.0,
+        "outside_depth": 10000.0,
+        "sources": ["wascitya", "wascityb"],
+        // Haven City's territory 0, clock-mask 1 (Jak 2's city's lanes): on Spargus's own, 128,
+        // every unit put on a lane went to sleep (round 50's tests: 534 "Going inactive")
+        "clock": [0, 1],
+        // the pass between the two districts: their nav meshes stop 17 to 20 m apart with no link
+        // (Spargus's people never cross it), so a strip of polys across the gap and a link
+        "links": [{"a": ["wascitya", 1, 68, 2], "b": ["wascityb", 0, 32, 1]}]
+      },
+      // Jak 3's city code (its ctywide's DGO, with the battle's level code) but not Haven City's
+      // props, particles, missions and scenes; the units' art comes in the borrow levels
+      "traffic": {
+        "code_from": "goal_src/jak3/dgos/cwi.gd",
+        "skip": ["ctyport-obs", "ctywide-obs", "ctywide-part", "ctywide-scenes", "ctywide-tasks",
+                 "krimson-wall", "mhcity-obs", "mhcity-obs2", "mhcity-part", "trail", "trail-graph"],
+        "code": ["bf-spargus-obs.o"],
+        // the Battlefront's precursor artifact (round 54, battlefront-artifact.gc): Jak 3's precursor
+        // generator C, its textures baked into the level with it
+        "art": ["precur-generator-c-ag"]
+      },
+      "level_info": {
+        // Jak 3's ctywide's own callbacks (ctywide-init.o, in the city code above): the traffic
+        // engine, the squads, the faction and borrow managers and the attack controller, as the
+        // battle's code expects them
+        "callbacks": [[33, "ctywide-login"], [34, "ctywide-logout"],
+                      [35, "ctywide-activate"], [36, "ctywide-deactivate"]],
+        "draw_priority": "9.0",
+        // Jak 3's ctywide's borrow heaps (KB), where ctypesa and ctypesc load
+        "borrow_sizes": [420, 420, 420, 780, 810],
+        "comment": [
+          "Jak 3's Spargus, the whole city as one level (custom_assets/jak3/levels/bf-spargus), the",
+          "Battlefront's Spargus war zone. Kept at Spargus's world coordinates: never loaded together",
+          "with Jak 3's own Spargus levels. Its borrow heaps are Jak 3's ctywide's (the units' levels)."
+        ]
+      }
+    }
+  ]
+}

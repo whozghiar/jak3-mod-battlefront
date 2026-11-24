@@ -133,3 +133,203 @@ def level_load_info(name, nick, index, memory_mode, flags, mood, continues, call
 
 (cons! *level-load-list* '{name})
 """
+
+
+# Jak 3 as a source game ##########################################################################
+# A port can take Jak 3's own levels too (the Battlefront mod's Spargus: wascitya and wascityb as
+# one level that runs Haven City's traffic code). The decompiler's dumps have Jak 2's layouts:
+#   - decompiler_out/jak3/entities/<level>-actors.json, -cameras.json, -nav.json, -city.json,
+#   - decompiler_out/jak3/levels/<level>/*.glb: its model rips (rip_levels),
+#   - out/jak3/fr3/<level>.fr3: its background, collision and textures.
+# Only what such a port uses is read: no story (every actor of a dump is spawned), no regions.
+
+import functools  # noqa: E402
+import glob  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+
+ENTITIES = "decompiler_out/jak3/entities"
+RIPS = "decompiler_out/jak3/levels"
+RAW_OBJ = "decompiler_out/jak3/raw_obj"
+LEVEL_INFO = "goal_src/jak3/engine/level/level-info.gc"
+
+# the background's sun directions, as Jak 2's (palettes 1-4 of the time of day; mesh.py lights the
+# props baked into the background with them)
+SUN_DIRECTIONS = [
+    (0.906, 0.397, 0.143),
+    (0.5, 0.814, 0.296),
+    (-0.5, 0.814, 0.296),
+    (-0.906, 0.397, 0.143),
+]
+
+# Jak 3's classes whose rip has another name (mesh.py find_rip): the art group their code spawns
+RIP_NAMES = {
+    "wascity-market-basket-a": "market-basket-a",
+    "wascity-market-basket-b": "market-basket-b",
+    "wascity-market-crate": "market-crate",
+    "wascity-market-sack-a": "market-sack-a",
+    "wascity-market-sack-b": "market-sack-b",
+    "wascity-fruit-stand": "cty-fruit-stand",
+    "wascity-cactus": "des-cactus-a",
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _level_actor_dump(level):
+    path = os.path.join(ENTITIES, level + "-actors.json")
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        return json.load(f) or []
+
+
+def dump_actors(level):
+    """Every actor of a level's dump."""
+    return list(_level_actor_dump(level))
+
+
+class Story:
+    """Jak 3 as a source has no story state: every actor of a dump is spawned and every background
+    prototype shown."""
+
+    def __init__(self, state="end", open_tasks=(), level_open_tasks=None):
+        pass
+
+    def closed(self, task, open_tasks=(), level=None):
+        return True
+
+    def task_mask(self, level):
+        return 0
+
+    def spawned(self, actor, level):
+        return True
+
+    def level_actors(self, level):
+        return list(_level_actor_dump(level))
+
+    def all_actors(self):
+        by_name = {}
+        for path in glob.glob(f"{ENTITIES}/*-actors.json"):
+            level = os.path.basename(path)[: -len("-actors.json")]
+            for actor in _level_actor_dump(level):
+                by_name[(level, actor["lump"].get("name"))] = actor
+        return by_name
+
+    def hidden_prototypes(self, levels):
+        return []
+
+
+def _level_blocks():
+    src = open(LEVEL_INFO, encoding="utf-8").read()
+    for block in re.split(r"\n\(define ", src):
+        if "level-load-info" in block[:200]:
+            yield block
+
+
+def level_names():
+    """Every Jak 3 level name (a level-load-info's :name is alone on its line)."""
+    src = open(LEVEL_INFO, encoding="utf-8").read()
+    return set(re.findall(r"^\s*:name '([a-z0-9-]+)\s*$", src, re.M))
+
+
+@functools.cache
+def _nicknames():
+    out = {}
+    for block in _level_blocks():
+        name = re.search(r":name '([\w-]+)", block)
+        nick = re.search(r":nickname '([\w-]+)", block)
+        if name and nick:
+            out[name.group(1)] = nick.group(1)
+    return out
+
+
+def dgo_of(level):
+    """The DGO holding a level: its nickname's (wascitya: WCA.DGO)."""
+    return _nicknames()[level].upper() + ".DGO"
+
+
+def memory_modes():
+    """Jak 3 level -> its level-memory-mode."""
+    out = {}
+    for block in _level_blocks():
+        name = re.search(r":name '([\w-]+)", block)
+        mode = re.search(r":memory-mode \(level-memory-mode ([\w-]+)\)", block)
+        if name:
+            out[name.group(1)] = mode.group(1) if mode else "small-edge"
+    return out
+
+
+def music_banks():
+    """Jak 3 level -> its music (level-load-info :music-bank), for the levels with one."""
+    out = {}
+    for block in _level_blocks():
+        name = re.search(r":name '([\w-]+)", block)
+        music = re.search(r":music-bank '([\w-]+)", block)
+        if name and music:
+            out[name.group(1)] = music.group(1)
+    return out
+
+
+def cameras(level):
+    """A level's fixed cameras (<level>-cameras.json), [] if it has none."""
+    path = f"{ENTITIES}/{level}-cameras.json"
+    if not os.path.exists(path):
+        return []
+    return json.load(open(path))
+
+
+def _vector(block, key):
+    """A continue's vector field (game units): (new 'static 'vector :x ...) or (static-vectorm x y
+    z) in meters (the test continues)."""
+    m = re.search(r":" + key + r" \(static-vectorm ([^)]*)\)", block)
+    if m:
+        return [float(x) * METER for x in m.group(1).split()] + [1.0]
+    m = re.search(r":" + key + r" \(new 'static 'vector([^)]*)\)", block)
+    values = {"x": 0.0, "y": 0.0, "z": 0.0, "w": 0.0}
+    for k, v in re.findall(r":([xyzw]) (-?[0-9.e+-]+)", m.group(1)):
+        values[k] = float(v)
+    return [values["x"], values["y"], values["z"], values["w"]]
+
+
+def _int16s(text):
+    """The values of a GOAL int16 array (#x... above #x7fff are negative)."""
+    out = []
+    for x in text.split():
+        v = int(x[2:], 16) if x.startswith("#x") else int(x)
+        out.append(v - 0x10000 if v > 0x7fff else v)
+    return out
+
+
+def continues():
+    """Jak 3's continue points: name -> level, trans, quat, camera_trans, camera_rot (game units,
+    the rotations as floats), flags, wants (the level list: (level, display?))."""
+    src = open(LEVEL_INFO, encoding="utf-8").read()
+    result = {}
+    for block in re.split(r"\(new 'static 'continue-point", src)[1:]:
+        head, _, rest = block.partition(":want ")
+        name = re.search(r':name "([^"]+)"', head).group(1)
+        quat = re.search(r":quat \(new 'static 'vector4h :data \(new 'static 'array int16 4 ([^)]*)\)",
+                         head)
+        rot = re.search(r":camera-rot \(new 'static 'array int16 9 ([^)]*)\)", head)
+        flags = re.search(r":flags \(continue-flags([^)]*)\)", head)
+        wants = re.findall(r"level-buffer-state-small :name '([a-z0-9-]+) :display\? ('?[a-z#]+)",
+                           rest.split(":want-sound")[0])
+        sounds = re.search(r":want-sound \(new 'static 'array symbol 3 ([^)]*)\)", rest)
+        result[name] = dict(
+            level=re.search(r":level '([a-z0-9-]+)", head).group(1),
+            trans=_vector(head, "trans"),
+            quat=[x / 32767.0 for x in _int16s(quat.group(1))],
+            camera_trans=_vector(head, "camera-trans"),
+            camera_rot=[x / 32767.0 for x in _int16s(rot.group(1))],
+            flags=set(flags.group(1).split()) if flags else set(),
+            wants=wants,
+            want_sound=[None if x == "#f" else x.lstrip("'") for x in sounds.group(1).split()]
+            if sounds else [None] * 3,
+        )
+    return result
+
+
+def regions():
+    """No region of Jak 3 is ported (its load and camera regions concern its own levels)."""
+    return {}

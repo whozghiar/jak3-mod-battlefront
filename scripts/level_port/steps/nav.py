@@ -30,8 +30,14 @@ Manifest, on the level:
                                multiples of their cell size)
     "outside_depth": 10000.0,  meters under the level of the spheres of cells no district covers
     "height_map": {"source": the source game's traffic-height-map.gc},
+    "clock": [clock-type, clock-mask] every merged lane gets (optional: the source's; Jak 3's
+             Spargus lanes are territory 128, which Haven City's faction manager sends to sleep),
     "sources": [the source levels whose navigation it holds, else the level's own; none: only the
-                height map (a city's hub: its districts hold their own)]
+                height map (a city's hub: its districts hold their own)],
+    "links": [{"a": [source level, nav mesh index, poly, edge], "b": [the same]}, ...] (optional,
+              a merged level only): a walkable strip across the gap between poly a's free edge
+              (from its vertex `edge` to the next) and poly b's, cut in three, and a nav-mesh-link
+              between the two meshes, the way Jak 3 links its own (link_meshes)
   }
 A level whose sources have nav meshes but no traffic data (a place outside the city) gets their
 nav meshes alone, as they are (write_meshes): where the mod's actors walk.
@@ -407,6 +413,187 @@ def write_meshes(port, level, sources):
           f"{len(w.blob.words) * 4 // 1024} KB")
 
 
+def mesh_tag(blob, root):
+    """Byte of the type tag of the nav-mesh of entity-nav-mesh ROOT (its field after the aid)."""
+    return blob.ptr(blob.roots[root] + 48) - 4
+
+
+def mesh_poly(blob, tag, i):
+    """Poly I of the nav mesh at TAG: its vertices (world), adjacent polys (one per edge, from
+    vertex k to k + 1, 255 none), pat and link. A poly is 64 bytes: 4 vertices local to the mesh's
+    origin, their w words id, pat, vertex count and link (bytes), the adjacent polys (bytes), min-y,
+    max-y (local)."""
+    origin = [blob.f32(tag + 48 + 4 * k) for k in range(3)]
+    at = blob.ptr(tag + 8) + 64 * i
+    count = blob.u8(at + 14)
+    return {"v": [[blob.f32(at + 16 * j + 4 * k) + origin[k] for k in range(3)] for j in range(count)],
+            "adj": [blob.u8(at + 28 + j) for j in range(4)]}
+
+
+def poly_raw(origin, i, verts, adj, pat=0, link=255):
+    """64 bytes of a nav-poly (see mesh_poly): VERTS in world coordinates."""
+    local = [[v[k] - origin[k] for k in range(3)] for v in verts]
+    ys = [v[1] for v in local]
+    out = b""
+    for j in range(4):
+        v = local[j] if j < len(local) else [0.0, 0.0, 0.0]
+        w = [struct.pack("<4B", i, pat, len(local), link), bytes(adj), struct.pack("<f", min(ys)),
+             struct.pack("<f", max(ys))][j]
+        out += struct.pack("<3f", *v) + w
+    return out
+
+
+def add_polys(blob, tag, polys, link):
+    """The nav mesh at TAG with POLYS (dicts of v, adj, pat, link; their ids follow the mesh's) after
+    its own, and LINK (a nav-mesh-link's id, dest-mesh-id, src-link-poly-id, src-switch-poly-id) in
+    its link-array: a new poly array, route table and link array at the blob's end, and the new
+    polys' bits in its poly-hash. The new polys hang off one old poly (`anchor`, their only way to
+    the rest of the mesh), whose free edge toward them the caller set in `anchor_edge`."""
+    n = blob.u8(tag + 13)
+    total = n + len(polys)
+    assert total <= 255, "a nav mesh has at most 255 polys"
+    origin = [blob.f32(tag + 48 + 4 * k) for k in range(3)]
+    old_array = blob.ptr(tag + 8)
+    adj = [mesh_poly(blob, tag, i)["adj"] for i in range(n)] + [p["adj"] for p in polys]
+    anchor, anchor_edge = polys[0]["anchor"], polys[0]["anchor_edge"]
+    adj[anchor][anchor_edge] = n
+
+    def put_ptr(field, target):
+        blob.pointers[(tag + field) // 4] = target
+        blob.words[(tag + field) // 4] = 0
+
+    def append(data):
+        while len(blob.words) % 4:
+            blob.words.append(0)
+        start = len(blob.words) * 4
+        data += b"\0" * (-len(data) % 16)
+        blob.words += list(struct.unpack("<%dI" % (len(data) // 4), data))
+        return start
+
+    # the polys: the old ones as they are but the anchor's adjacency, then the new ones
+    raw = bytearray(blob.raw(old_array, 64 * n))
+    raw[64 * anchor + 28 + anchor_edge] = n
+    for i, p in enumerate(polys):
+        raw += poly_raw(origin, n + i, p["v"], p["adj"], p.get("pat", 0), p.get("link", 255))
+    put_ptr(8, append(bytes(raw)))
+    blob.words[(tag + 12) // 4] = (blob.words[(tag + 12) // 4] & ~0xff00) | (total << 8)
+
+    # the route table: 2 bits per (from, to), the index of from's edge toward to. Old pairs keep
+    # theirs; an old poly reaches a new one through the anchor; a new one walks its strip.
+    old_route = blob.ptr(tag + 16)
+
+    def old_hop(a, b):
+        bit = (b + a * n) * 2
+        return (blob.u8(old_route + bit // 8) >> (bit % 8)) & 3
+
+    def strip_hop(a, b):
+        """The edge of new poly A toward B (a new poly, or the anchor for any old one)."""
+        seen, todo = {a: None}, [a]
+        while todo:
+            cur = todo.pop(0)
+            for k, nb in enumerate(adj[cur]):
+                if nb != 255 and nb not in seen and (nb >= n or nb == anchor):
+                    seen[nb] = k if cur == a else seen[cur]
+                    todo.append(nb)
+        return seen[b]
+
+    route = bytearray((total * total * 2 + 7) // 8)
+    for a in range(total):
+        for b in range(total):
+            if a == b:
+                continue
+            if a < n and b < n:
+                hop = old_hop(a, b)
+            elif a < n:
+                hop = adj[anchor].index(n) if a == anchor else old_hop(a, anchor)
+            else:
+                hop = strip_hop(a, b if b >= n else anchor)
+            bit = (b + a * total) * 2
+            route[bit // 8] |= hop << (bit % 8)
+    put_ptr(16, append(bytes(route)))
+
+    # the poly-hash: each new poly's bit in the cells its box covers (as setup-search-box)
+    hash_tag = blob.ptr(tag + 20) - 4
+    size = blob.s16(hash_tag + 14)
+    assert total <= 8 * size, "the poly-hash's buckets have no bit left for the new polys"
+    scale = [blob.f32(hash_tag + 16 + 4 * k) for k in range(3)]
+    dims = [blob.s8(hash_tag + 28 + k) for k in range(3)]
+    box_min = [blob.f32(hash_tag + 36 + 4 * k) for k in range(3)]
+    buckets = blob.ptr(hash_tag + 32)
+    for i, p in enumerate(polys):
+        local = [[v[k] - origin[k] for k in range(3)] for v in p["v"]]
+        cell = [[max(0, min(int((f(v[k] for v in local) - box_min[k]) * scale[k]), dims[k] - 1))
+                 for f in (min, max)] for k in range(3)]
+        for x in range(cell[0][0], cell[0][1] + 1):
+            for y in range(cell[1][0], cell[1][1] + 1):
+                for z in range(cell[2][0], cell[2][1] + 1):
+                    byte = buckets + x * size + z * dims[0] * size + y * dims[0] * dims[2] * size \
+                        + (n + i) // 8
+                    blob.words[byte // 4] |= 1 << ((n + i) % 8 + 8 * (byte % 4))
+    blob.words[(hash_tag + 60) // 4] = (blob.words[(hash_tag + 60) // 4] & ~0xffff) | total
+
+    # the link array: the old links, then this one (its dest-mesh #f until both meshes are born)
+    count = blob.u8(tag + 72)
+    old_links = blob.ptr(tag + 68)
+    links = bytearray(blob.raw(old_links, 16 * count) if count else b"")
+    lid, dest, link_poly, switch_poly = link
+    links += struct.pack("<II4BI", lid, dest, link_poly, switch_poly, 255, 255, 0)
+    start = append(bytes(links))
+    for k in range(count):
+        if (old_links + 16 * k + 12) // 4 in blob.symbols:
+            blob.symbols[(start + 16 * k + 12) // 4] = blob.symbols[(old_links + 16 * k + 12) // 4]
+        elif (old_links + 16 * k + 12) // 4 in blob.pointers:
+            blob.pointers[(start + 16 * k + 12) // 4] = blob.pointers[(old_links + 16 * k + 12) // 4]
+    blob.symbols[(start + 16 * count + 12) // 4] = "#f"
+    put_ptr(68, start)
+    blob.words[(tag + 72) // 4] = (blob.words[(tag + 72) // 4] & ~0xff) | (count + 1)
+    return n
+
+
+def link_meshes(meshes, cfg, link_id):
+    """A walkable strip between two nav meshes and a nav-mesh-link between them, the way Jak 3 links
+    its own (ctyslumc and ctyslumb): the strip from poly a's free edge to poly b's, cut in three, A
+    taking its first two thirds, B all three. Each mesh has a landing poly (pat 0) and a switch poly
+    (pat 4, its link field the link's index) over the other's landing poly: a nav-enemy on a switch
+    poly moves onto the other mesh (nav-enemy-method-188), where it stands on a landing poly. A
+    gets [landing 0-1/3, switch 1/3-2/3]; B [switch 0-1/3, landing 1/3-2/3, 2/3-1 to its poly]."""
+    sides = []
+    for key in ("a", "b"):
+        src, index, poly, edge = cfg[key]
+        blob = meshes[src]
+        tag = mesh_tag(blob, f"nav-mesh-{index}")
+        p = mesh_poly(blob, tag, poly)
+        assert p["adj"][edge] == 255, f"{src} mesh {index} poly {poly} edge {edge} isn't free"
+        sides.append((blob, tag, poly, edge, p["v"][edge], p["v"][(edge + 1) % len(p["v"])],
+                      blob.u32(blob.roots[f"nav-mesh-{index}"] + 44)))
+    (blob_a, tag_a, poly_a, edge_a, a0, a1, aid_a), (blob_b, tag_b, poly_b, edge_b, b0, b1, aid_b) = sides
+    # the two edges face each other: a0 across from b1, a1 from b0
+    assert math.dist(a0, b1) < math.dist(a0, b0), "the edges don't face each other"
+
+    def at(t):
+        return ([a0[k] + (b1[k] - a0[k]) * t for k in range(3)], [a1[k] + (b0[k] - a1[k]) * t for k in range(3)])
+
+    def quad(t0, t1):
+        """The strip from T0 to T1, wound as the meshes' polys: edge 0 toward t0, edge 2 toward t1."""
+        (l0, r0), (l1, r1) = at(t0), at(t1)
+        return [r0, l0, l1, r1]
+
+    third = 1.0 / 3.0
+    n_a, n_b = blob_a.u8(tag_a + 13), blob_b.u8(tag_b + 13)
+    link_a, link_b = blob_a.u8(tag_a + 72), blob_b.u8(tag_b + 72)
+    add_polys(blob_a, tag_a, [
+        {"v": quad(0, third), "adj": [poly_a, 255, n_a + 1, 255], "anchor": poly_a, "anchor_edge": edge_a},
+        {"v": quad(third, 2 * third), "adj": [n_a, 255, 255, 255], "pat": 4, "link": link_a},
+    ], (link_id, aid_b, n_a, n_a + 1))
+    add_polys(blob_b, tag_b, [
+        {"v": quad(2 * third, 1), "adj": [n_b + 1, 255, poly_b, 255], "anchor": poly_b, "anchor_edge": edge_b},
+        {"v": quad(third, 2 * third), "adj": [n_b + 2, 255, n_b, 255]},
+        {"v": quad(0, third), "adj": [255, 255, n_b + 1, 255], "pat": 4, "link": link_b},
+    ], (link_id, aid_a, n_b + 1, n_b + 2))
+    print(f"  linked {cfg['a']} and {cfg['b']} across {math.dist(a0, b1) / 4096:.1f} to "
+          f"{math.dist(a1, b0) / 4096:.1f} m (link id {link_id:#x})")
+
+
 def write_level(port, level):
     cfg = level["nav"]
     meter = port.source.METER
@@ -430,8 +617,16 @@ def write_level(port, level):
         if os.path.exists(nav_path_src):
             meshes[src] = data_blob.Blob(nav_path_src)
     mesh_aids = {blob.u32(byte + 44) for blob in meshes.values() for byte in blob.roots.values()}
+    for k, link in enumerate(cfg.get("links", [])):
+        link_meshes(meshes, link, 0x7f000000 + k)
     grid, cells, segments, nodes, branches = merge(districts, mesh_aids, cfg["cell"] * meter,
                                                    cfg["outside_depth"] * meter)
+    if "clock" in cfg:
+        # every lane's territory (clock-type, byte 10) and clock-mask (byte 11): the target game's
+        # city code sends a citizen on a lane of a territory its faction manager doesn't know to
+        # sleep (citizen.gc enemy-common-post): Jak 3's Spargus lanes are territory 128
+        kind, mask = cfg["clock"]
+        branches = [patch(patch(b, 10, "<B", kind), 11, "<B", mask) for b in branches]
     w = data_blob.Writer()
     write_city(w, grid, cells, segments, nodes, branches,
                max(c["camera_ceiling"] for c in districts.values()), level.name)

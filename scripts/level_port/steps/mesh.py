@@ -53,9 +53,12 @@ def palettes(sun_directions, ambient, sun, shade, normal):
 
 
 def find_rip(port, level, etype):
+    """The rip of a class's model: its level's first, else any level's. The source game's
+    RIP_NAMES give the rips named after another art group than the class (Jak 3's Spargus props)."""
     rips = port.source.RIPS
+    name = getattr(port.source, "RIP_NAMES", {}).get(etype, etype)
     for src in level.sources + sorted(os.listdir(rips)):
-        path = os.path.join(rips, src, etype + "-lod0.glb")
+        path = os.path.join(rips, src, name + "-lod0.glb")
         if os.path.exists(path):
             return path
     return None

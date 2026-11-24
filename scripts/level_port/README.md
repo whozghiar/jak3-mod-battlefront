@@ -6,7 +6,11 @@ fixed cameras, particles, traffic navigation, models rebuilt for `build-actor`, 
 level-load-infos. A mod describes its port in a manifest; the tool writes every level file from it.
 
 What it knows today: **Jak 2 → Jak 3** (the Haven City: New Dawn mod,
-`custom_assets/jak3/ports/jak2-haven-city/port.jsonc`). The code is split so that another source
+`custom_assets/jak3/ports/jak2-haven-city/port.jsonc`), and **Jak 3 → Jak 3**: Jak 3's own levels
+merged into a custom level, with no actor, script, particle or region ported (the Battlefront mod's
+Spargus, `custom_assets/jak3/ports/battlefront-spargus/port.jsonc`; `games/jak3.py` reads Jak 3's
+continue points and level infos, `convert/jak3_jak3.py` keeps Jak 3's layouts, and the nav step's
+`clock` gives the merged lanes the territory the target city code knows). The code is split so that another source
 game, target game or game pair is added next to the existing ones (see
 [Adding a game](#adding-a-game-or-a-game-pair)).
 
@@ -39,7 +43,9 @@ It needs:
   level builder only (`goalc/build_level/jak3`).
 
 Then `(mi)` in `goalc` builds the levels. A generated file is only rewritten when its content
-changes, so `goalc` only rebuilds the levels that changed.
+changes, so `goalc` only rebuilds the levels that changed. Its navigation (`<level>-nav.json`) is
+not among a level build's inputs (`goalc/build_level/common/build_level.cpp`): after the nav step
+alone changed it, touch the level's `.jsonc` to rebuild the level.
 
 Options, all optional (without them it runs as above, from the repository root):
 
@@ -151,7 +157,7 @@ A level:
 | `continues` | Its continues, as source names; without it, all its source levels' but the title, intro, demo and cutscene ones |
 | `code`, `models` | Objects of its DGO after the art groups; models built for it besides its actors' |
 | `level_info` | Its level-load-info: `callbacks`, `draw_priority`, `part_engine_max`, `comment`, `mood`, `city_map_bits` (the squares of the city's minimap grid whose map it holds, a hex string), `borrow_sizes` (the sizes in KB of the borrow heaps it hosts, at most 5: where the game loads a borrow level, like Jak 3's Vin room for its power game) |
-| `water`, `mesh`, `ocean_source`, `nav` | [steps/water.py](steps/water.py), [steps/mesh.py](steps/mesh.py), [steps/ocean.py](steps/ocean.py), [steps/nav.py](steps/nav.py) (`nav.sources`: the source levels whose navigation it holds; one is kept as it is, several are merged; none: only the height map; sources with nav meshes but no traffic data: their nav meshes alone) |
+| `water`, `mesh`, `ocean_source`, `nav` | [steps/water.py](steps/water.py), [steps/mesh.py](steps/mesh.py), [steps/ocean.py](steps/ocean.py), [steps/nav.py](steps/nav.py) (`nav.sources`: the source levels whose navigation it holds; one is kept as it is, several are merged; none: only the height map; sources with nav meshes but no traffic data: their nav meshes alone; `nav.links`: a strip of polys and a nav-mesh-link across the gap between two merged nav meshes) |
 | `spawns` | One actor of the mod's class (`etype`) at the place of each source actor of some classes (`from`) of its sources, whatever the story state: `min_distance` (meters between two), `aid` (first actor id), `lumps` (copied from the source actor), `cycle` (`{lump: [kind, [values]]}`, the i-th actor gets `values[i % n]`) ([steps/levels.py](steps/levels.py) `spawn_actors`) |
 | `traffic` | The target game's traffic code taken from one of its DGOs (`code_from`, `skip`, `replace`), the level's own (`code`), the traffic's art groups (`art`) |
 | `props`, `custom_props` | [steps/props.py](steps/props.py) |

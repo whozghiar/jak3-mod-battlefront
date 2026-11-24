@@ -56,17 +56,30 @@ LEVEL_INFO = ROOT / "goal_src/jak3/engine/level/level-info.gc"
 TEXTURES = ROOT / "decompiler_out/jak3/textures"
 OUT = ROOT / "goal_src/jak3/pc/features/battlefront/battlefront-minimaps.gc"
 
-# The war zones in `*bf-zones*` order (battlefront-h.gc) and their levels; None for the whole city
-# (every cell with a minimap texture), the battlefield since round 17.
-ZONES = [
-    ("Haven City", None),
-]
-
+# The war zones in `*bf-zones*` order (battlefront-h.gc) and their maps: a START menu map (WORLD),
+# a list of levels (their minimap cells), or None for a zone whose map is made elsewhere (Jak 2's
+# city: the level port's, battlefront-havenj2-info.gc), which gets a black placeholder here.
 WOMAP = ROOT / "iso_data/jak3/STR/WOMAP.STR"
-WORLD_CORNER = (-2621440.0, -4456448.0)  # *bigmap-info-array* 0 (bigmap.gc): world x, z of texel 0
-WORLD_TEXEL = 16384.0                    # 4 m a texel
-WORLD_CROP = (32, 60, 464, 804)          # the city's outline in the map's texels: left, top, right, bottom
-WORLD_SIDE = 384                         # texels high of the city's map in the menu
+
+
+class World:
+    """A START menu map (WOMAP.STR, bigmap.gc): its bigmap-id, *bigmap-info-array* world x and z of
+    its texel 0 and world units a texel, the zone's outline in its texels (left, top, right,
+    bottom), and the texels high of the zone's map in the menu."""
+
+    def __init__(self, bigmap_id, corner, texel, crop, side):
+        self.bigmap_id, self.corner, self.texel, self.crop, self.side = (
+            bigmap_id, corner, texel, crop, side)
+
+
+ZONES = [
+    # Haven City: the whole city, the battlefield since round 17 (bigmap-id city, 4 m a texel)
+    ("Haven City", World(0, (-2621440.0, -4456448.0), 16384.0, (32, 60, 464, 804), 384)),
+    ("Haven City (Jak 2)", None),
+    # Spargus (round 50): bigmap-id wascity, 2.4 m a texel, down to the garage's door (the map's
+    # lettering and the garage left out)
+    ("Spargus", World(23, (5619712.0, -2914304.0), 9830.4, (8, 16, 504, 350), 280)),
+]
 
 # engine/ui/minimap.gc *minimap-texture-name-array*, 5 columns by 7 rows
 CELLS = [
@@ -116,11 +129,12 @@ def tex0(w: int, h: int) -> int:
     return 8 | ((w // 64) << 14) | (0x13 << 20) | (tw << 26) | (th << 30) | (1 << 61)
 
 
-def world_map():
-    """The whole city: the START menu's map of Haven City (WOMAP.STR, bigmap-id city), inside the
-    city's outline, WORLD_SIDE texels high: its image and the same tuple as `zone_map`."""
+def world_map(world):
+    """A START menu map (WOMAP.STR, WORLD's bigmap-id) inside the zone's outline, WORLD's side
+    texels high: its image (true colors: `main` makes one palette for every map) and the same tuple
+    as `zone_map`."""
     data = WOMAP.read_bytes()
-    base = struct.unpack_from("<I", data, 0)[0] * 2048
+    base = struct.unpack_from("<I", data, 4 * world.bigmap_id)[0] * 2048
     clut_off, img_off, w, h = struct.unpack_from("<4I", data, base)
     pal = [struct.unpack_from("<I", data, base + 16 + clut_off + 4 * swizzle(i))[0] for i in range(256)]
     src = Image.new("RGB", (w, h))
@@ -131,24 +145,26 @@ def world_map():
             for x in range(min(256, w - strip * 256)):
                 c = pal[data[row + x]]
                 px[strip * 256 + x, y] = (c & 255, (c >> 8) & 255, (c >> 16) & 255)
-    left, top, right, bottom = WORLD_CROP
-    h = WORLD_SIDE
-    texel = (bottom - top) * WORLD_TEXEL / h
-    w_valid = round((right - left) * WORLD_TEXEL / texel)
+    left, top, right, bottom = world.crop
+    h = world.side
+    texel = (bottom - top) * world.texel / h
+    w_valid = round((right - left) * world.texel / texel)
     w = math.ceil(w_valid / 64) * 64
-    city = src.crop(WORLD_CROP).resize((w_valid, h), Image.LANCZOS).quantize(colors=255).convert("RGB")
+    city = src.crop(world.crop).resize((w_valid, h), Image.LANCZOS)
     img = Image.new("RGBA", (w, h), BLACK)
     img.paste(Image.merge("RGBA", (*city.split(), Image.new("L", city.size, 128))), (0, 0))
-    x0 = WORLD_CORNER[0] + left * WORLD_TEXEL
-    z0 = WORLD_CORNER[1] + top * WORLD_TEXEL
+    x0 = world.corner[0] + left * world.texel
+    z0 = world.corner[1] + top * world.texel
     return img, (x0, z0, texel, w, h, w_valid, ["world-map"]), []
 
 
 def zone_map(levels):
-    """The map of a zone made of LEVELS (None: the whole city, `world_map`): its image and (x0, z0,
-    texel, width, height, valid width, texture names)."""
+    """The map of a zone made of LEVELS (a World: `world_map`; None: a black placeholder, 64 x 1):
+    its image and (x0, z0, texel, width, height, valid width, texture names)."""
+    if isinstance(levels, World):
+        return world_map(levels)
     if levels is None:
-        return world_map()
+        return Image.new("RGBA", (64, 1), BLACK), (0.0, 0.0, 4096.0, 64, 1, 64, []), []
     cells = sorted({c for lev in levels for c in level_cells(lev)})
     cols = [c % 5 for c in cells]
     rows = [c // 5 for c in cells]
@@ -196,11 +212,24 @@ def main() -> None:
         img, info, cells = zone_map(levels)
         images.append(img)
         infos.append(info)
-        print(f"{label}: levels {levels}, cells {cells}, {info[5]} x {info[4]} texels of "
+        print(f"{label}: cells {cells}, {info[5]} x {info[4]} texels of "
               f"{info[2] / 4096:.1f} m (stored {info[3]} wide), textures {info[6]}")
         if png_dir:
             img.convert("RGB").save(png_dir / f"zone-{label.replace(' ', '-').lower()}.png")
 
+    # one palette for every map: the maps side by side, reduced to 255 colors together (black, the
+    # padding, the 256th)
+    joint = Image.new("RGB", (sum(i.size[0] for i in images), max(i.size[1] for i in images)))
+    x = 0
+    for img in images:
+        joint.paste(img.convert("RGB"), (x, 0))
+        x += img.size[0]
+    joint = joint.quantize(colors=255).convert("RGB")
+    x = 0
+    for k, img in enumerate(images):
+        part = joint.crop((x, 0, x + img.size[0], img.size[1]))
+        images[k] = Image.merge("RGBA", (*part.split(), Image.new("L", part.size, 128)))
+        x += img.size[0]
     colors: list[tuple[int, int, int, int]] = []
     index = {}
     words = []
