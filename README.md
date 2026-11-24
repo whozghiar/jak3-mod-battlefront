@@ -68,7 +68,7 @@ Haven City or Spargus, up to 200 units at once, and you play a soldier of either
 | Robotguard | Both (blue or red) | 24 | R1 twin shots, L1 grenade (10), Square punch, Circle red shield for 5 s, R2 roll as a ball |
 | Spider robot | Both (blue or red) | 12 | X 11 m leap, Square shock headbutt on up to 3 foes, R2 blue eco sprint (the blue eco its kills drop refills it), L1 self-destruct blast once charged |
 | Baron Praxis (special character) | Krimzon Guard | 36 | Left stick run (pushed a little: walk; pushed back at a run: he turns about), X jump, Square overhead sword chop, Circle spinning slash, R2 yellow eco ball thrown with a diagonal cut (his yellow gauge), L2 a white barrier: foes thrown out, no damage, a slow walk. In the air: X then Square, he dives and plants his sword in the ground, a blow all around; X then Circle, a full spin of his sword |
-| Ashelin (special character) | Freedom League | 36 | Left stick run, X jump and X again in the air (a flip), Square both pistols in turn while walking (10 rounds a magazine, 150 carried), Triangle reload, L1 kneel, Circle spinning kick, R2 + left stick left or right side flip, R1 grenade thrown overhand, flying in an arc (10) |
+| Ashelin (special character) | Freedom League | 36 | Jak's moves. Left stick run, X jump and X again in the air (a flip), Square both pistols in turn with their recoil, while walking (10 rounds a magazine, 150 carried), Triangle reload, L1 crouch, L1 + left stick roll and X during the roll a long flip, Circle spinning kick, R2 + left stick left or right side flip, R1 grenade thrown overhand, flying in an arc (10) |
 
 | Blue guard | Blue jetpack guard |
 |---|---|

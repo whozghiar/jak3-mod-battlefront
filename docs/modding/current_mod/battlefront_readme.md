@@ -206,34 +206,49 @@ class page's fifth row with the setup's special characters on (as the Baron on t
   turned 216 degrees to the blue guards' blue, her hair and face kept. Her model has one pistol, on
   a `gun` joint the clips key into her right hand; `mirror_props` copies it into her left hand,
   mirrored through the grip read from her firing clip.
-- **Her clips** (round 54) are the author's Mixamo pistol motions (`third-party/animations/Ashelin`,
-  not in git) and the Baron's `great sword kick` (a spinning kick), put on her skeleton with the Jak
-  Animation Studio (`apply_mocap`, 30 keys a second), then cut and renamed by
+- **Her clips** (round 55, the author's wish: Jak's body moves on hers) are Jak's own clips of the
+  player's extraction (`jakb-lod0`: his idle, run, walk, jump, flip out of a roll, crouch, walk aside
+  with his gun, spinning kick, and roll with his gun in hand), each written into a glTF of its own and
+  put on her skeleton with the Jak Animation Studio (`apply_mocap`, 30 keys a second: the studio
+  reads Jak's joint names), then cut, chained, reversed and renamed by
   `scripts/battlefront/make_ashelin_clips.py` into `custom_assets/jak3/models/bf-ashelin-clips.glb`
-  (joint keys only, as the Baron's): the capture's hips' travel goes on `main` (kneeling, her legs
-  folded under a torso left standing), the loops are closed, the root's travel across dropped, her
-  jump cut to its part in the air with her height flat, her run's stride widened 1.6 times. At install
-  `mod_models.py` makes her clips from that file and from her rip (`made_from`, `made_clips`): her
-  fingers closed on her grips as in her own firing clip (`pose_from`, `mirror_limbs` for the left
-  hand), her right pistol kept in her right hand (`attach`); a tucked front flip from her jump's top;
-  her own cartwheel to the left and its mirror to the right; an overhand throw of her left hand (her
-  arm back and up, over her shoulder, down in front, her chest turning); her holstering and drawing
-  as her reload; her hit and her death. The mirror takes each joint's skinning matrix from the other
-  side's, mirrored across x (S K S), so it needs no knowledge of the joints' axes. Their order is
-  `battlefront-h.gc` `BF_ASHELIN_CLIP_*`.
-- **Her moves** (round 54, the author's buttons) are the Baron's (his collision, probes, stick,
-  acceleration and lean): she runs at 10 m/s, her run clip at 1.55 times its pace at most (16 m/s
-  looked sped up); X jumps 4.5 m, X again in the air 3.5 m more with her flip (0.2 s after the first
-  at the soonest: a press was read on two frames); Square held fires her two pistols in turn toward
-  the crosshair (a shot every 0.18 s, 4 points each, blue: the guards' shot), facing it and walking
-  at 3.5 m/s with her walk, her strafes or her walk backward by the way she goes; 10 rounds a
-  magazine (`*bf*` mag `BF_WEAPON_PISTOL`), 150 more carried (Jak's yellow ammo, the stock pickups
-  refill it), an empty magazine or Triangle reloading it (1.13 s); L1 held kneels (her kneel, then
-  her kneeling clip; let go, she stands up); Circle kicks all around her (14 points within 3.2 m,
-  `bf-baron-strike`); R2 with the stick to a side flips her 9.8 m that way across the camera's
-  heading; R1 throws a grenade overhand (`bf-lob`, the robotguard's red gun 3 grenade falling in an
-  arc, 10 a life). The gun HUD shows her magazine (10 yellow shells), her grenades (10 dark shells
-  beside them) and "magazine/carried".
+  (joint keys only, as the Baron's, the `jk-*` clips): the hips' travel goes on `main`, the loops are
+  closed, the root's travel across dropped. Jak runs and crouches on bent legs his short body hides:
+  on hers the feet floated 0.4 m over the ground, so her body is lowered until her lowest foot
+  touches it, and her run's bounce is halved. Her walk backward is his walk reversed, her standing up
+  his crouch reversed. At install `mod_models.py` makes her clips from that file and from her rip
+  (`made_from`, `made_clips`): her fingers closed on her grips as in her own firing clip
+  (`pose_from`, `mirror_limbs` for the left hand), her right pistol kept in her right hand (`attach`);
+  her own cartwheel to the left and its mirror to the right; her aside walk's mirror; an overhand
+  throw of her left hand; her holstering and drawing as her reload; her hit and her death; and her
+  firing (`fire`): her own shot and its recoil (`ashelin-standing-fire`, her pistol kicking up), her
+  left arm its mirror half a loop later (`mirror_limbs` with a `shift`). The mirror takes each joint's
+  skinning matrix from the other side's, mirrored across x (S K S), so it needs no knowledge of the
+  joints' axes. Their order is `battlefront-h.gc` `BF_ASHELIN_CLIP_*`. Round 54's Mixamo clips and
+  the Baron's kick stay in the studio creation, unused.
+- **Her firing on her arms alone.** A `top-anim-joint-control` (as the guard classes' weapon clips,
+  and Jak's gun clips on his arms) plays her firing clip over her legs' clip on her arms, pistol and
+  fingers (`BF_ASHELIN_UPPER`: a joint's bit is its node index minus 1). Her right pistol's shot
+  pushes it at 1.48 times its pace (two shots, 0.36 s, a loop), her left pistol's recoil coming with
+  her left pistol's shot; let go, her arms go back to her legs' clip. A move (kick, throw, reload,
+  roll, flip) takes it off.
+- **Her moves** (rounds 54 and 55, the author's buttons and Jak's) are the Baron's (his collision,
+  probes, stick, acceleration and lean): she runs at 9 m/s, Jak's run clip at 1.8 times its pace (Jak's
+  own: 10 m/s at 1.6), and every loop plays at the rate her feet cover the ground she covers
+  (`BF_ASH_*_GROUND`, printed by the script: no sliding, the author's wish); X jumps 4.5 m, X again
+  in the air 3.5 m more with her flip (0.2 s after the first at the soonest: a press was read on two
+  frames); Square held fires her two pistols in turn toward the crosshair (a shot every 0.18 s, 4
+  points each, blue: the guards' shot), facing it and walking at 3.5 m/s with her walk, her walk
+  aside or her walk backward by the way she goes; 10 rounds a magazine (`*bf*` mag
+  `BF_WEAPON_PISTOL`), 150 more carried (Jak's yellow ammo, the stock pickups refill it), an empty
+  magazine or Triangle reloading it (1.13 s); L1 held crouches (let go, she stands up); L1 with the
+  stick pushed rolls her that way as Jak rolls (11.5 m/s for 0.27 s, then slowing to a stop by 0.73
+  s), and X during the roll jumps far with her flip (3.5 m up, 15 m ahead; Jak's 3.52 and 17.3);
+  Circle kicks all around her (Jak's spinning kick, 14 points within 3.2 m, `bf-baron-strike`); R2
+  with the stick to a side flips her 9.8 m that way across the camera's heading; R1 throws a grenade
+  overhand (`bf-lob`, the robotguard's red gun 3 grenade falling in an arc, 10 a life). The gun HUD
+  shows her magazine (10 yellow shells), her grenades (10 dark shells beside them) and
+  "magazine/carried".
 - **As the champion** (`bf-ashelin-think`) she keeps 10 to 24 m from her foe, kicks one within 3 m,
   fires bursts within 36 m (her magazine reloading itself, without end), throws a grenade at a foe
   beyond 12 m every 4 s, flips aside every 2.5 to 4.5 s, and jumps twice, then goes around, when

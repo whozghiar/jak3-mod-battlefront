@@ -16693,7 +16693,9 @@
 (defbehavior smoke-r53-watch process ((secs float))
   "SECS seconds of the player's Ashelin: the clips she plays into `*smoke-r53-clips*`, her highest
    point over where she stood and her travel across the camera's right and heading into
-   `*smoke-r53-move*`."
+   `*smoke-r53-move*`. Her process is taken again each frame (`smoke-av`, by its handle): a heap
+   compaction moves it, and a pointer kept across frames read another place (round 55: 1.1 km
+   away, a stab-clip of 0)."
   (set! (-> *smoke-r53-clips* 0) 0)
   (let ((av (smoke-av)))
     (when av
@@ -16703,7 +16705,8 @@
             (t0 (smoke-now))
             )
         (set! (-> *smoke-r53-move* 0) 0.0)
-        (while (< (- (smoke-now) t0) (the int (* 300.0 secs)))
+        (while (and (< (- (smoke-now) t0) (the int (* 300.0 secs))) (smoke-av))
+          (set! av (smoke-av))
           (let ((a (-> av anim)))
             (if (and (>= a 0) (< a 32))
                 (logior! (-> *smoke-r53-clips* 0) (ash 1 a))
@@ -16712,6 +16715,9 @@
           (set! (-> *smoke-r53-move* 0) (fmax (-> *smoke-r53-move* 0) (- (-> av root trans y) (-> p0 y))))
           (suspend)
           )
+        (if (smoke-av)
+            (set! av (smoke-av))
+            )
         (let ((d (vector-! (new 'stack-no-clear 'vector) (-> av root trans) p0)))
           (set! (-> *smoke-r53-move* 1) (vector-dot d right))
           (set! (-> *smoke-r53-move* 2) (vector-dot d ahead))
@@ -16736,6 +16742,13 @@
 
 (define *smoke-r53-lob* (the-as process #f))
 
+(defun smoke-r55-firing? ((av bf-avatar))
+  "#t when AV's arms play her firing clip over her legs' (`top-anim`, round 55)."
+  (let ((top (-> av skel top-anim)))
+    (and top (< 0.0 (-> top interp)) (= (-> top frame-group) (-> av draw art-group data BF_ASHELIN_CLIP_FIRE)))
+    )
+  )
+
 (defun smoke-r53-lob ()
   "The first `bf-lob` flying, #f for none."
   (set! *smoke-r53-lob* #f)
@@ -16750,11 +16763,13 @@
 (defbehavior smoke-s139 process ()
   "Scenario 139 (`smoke-scenario-late`), round 53, Ashelin in Jak 2's city, special characters on:
    her picture for the class page (`smoke-portrait-9`); the Freedom League player as Ashelin (the
-   class page's fifth row), round 54's buttons: her run, her jump and her second jump in the air (a
-   flip), her side flips (R2 and the stick), her kneel (L1), her two pistols firing in turn (Square
-   held) until her magazine is empty, her reload and on (10 rounds, 150 carried), Triangle's
-   reload, her strafe and walk backward while she fires, her kick (Circle), her grenade thrown in an
-   arc (R1, one of her 10); then the Freedom League's losses set to its share: Ashelin comes as its
+   class page's fifth row), round 54's buttons and round 55's Jak moves: her run (its clip at the
+   rate her speed asks: no sliding), her jump and her second jump in the air (a flip), her side
+   flips (R2 and the stick), her crouch (L1), her roll (L1 and the stick) and its far flip (X during
+   it), her two pistols firing in turn (Square held, her firing clip on her arms) until her
+   magazine is empty, her reload and on (10 rounds, 150 carried), Triangle's reload, her strafe and
+   walk backward while she fires, her kick (Circle), her grenade thrown in an arc (R1, one of her
+   10); then the Freedom League's losses set to its share: Ashelin comes as its
    champion, put near the Krimzon Guard's units, 60 s watched: she moves, fires, flips, throws and
    reloads, the Krimzon Guard's units hurt her, her health bar shows."
   (set! (-> *bf-config* special) 1)
@@ -16788,12 +16803,14 @@
   (smoke-step "her run")
   (smoke-stick 128 0 128 128)
   (smoke-r53-watch 1.5)
-  (let ((av (smoke-av)))
-    (if av
-        (format 0 "SMOKE run speed ~M/s, clip rate ~f~%" (vector-xz-length (-> (the-as collide-shape-moving (-> av root)) transv))
-                (-> av skel root-channel 0 param 0)
-                )
-        )
+  (let* ((av (smoke-av))
+         (speed (if av (vector-xz-length (-> (the-as collide-shape-moving (-> av root)) transv)) 0.0))
+         (rate (if av (-> av skel root-channel 0 param 0) 0.0))
+         )
+    (format 0 "SMOKE run speed ~M/s, clip rate ~f, her feet's ~f~%" speed rate (/ speed BF_ASH_RUN_GROUND))
+    (smoke-check "her run clip at the rate her speed asks (no sliding, round 55)"
+                 (< (fabs (- rate (/ speed BF_ASH_RUN_GROUND))) 0.05)
+                 )
     )
   (smoke-neutral)
   (smoke-r53-line "run")
@@ -16814,7 +16831,8 @@
             (t0 (smoke-now))
             )
         (smoke-tap (pad-buttons x) 3)
-        (while (< (- (smoke-now) t0) (the int (* 300.0 2.2)))
+        (while (and (< (- (smoke-now) t0) (the int (* 300.0 2.2))) (smoke-av))
+          (set! av (smoke-av))
           ;; X again 0.4 s after the first, in the air
           (if (= (- (smoke-now) t0) 120)
               (smoke-tap (pad-buttons x) 3)
@@ -16837,6 +16855,8 @@
     )
   (smoke-wait 1.0)
   (smoke-step "her side flips")
+  ;; each flip stays within 15 m (round 55: a watch keeping her process's pointer across frames read
+  ;; her 1.1 km away once a heap compaction moved her; `smoke-r53-watch` takes her again each frame)
   (smoke-hold (pad-buttons r2))
   (smoke-stick 0 128 128 128)
   (smoke-wait 0.15)
@@ -16844,7 +16864,9 @@
   (smoke-r53-watch 1.0)
   (smoke-neutral)
   (smoke-r53-line "flip left")
-  (smoke-check "R2 and the stick left: a flip to the left, 6 m or more" (and (< (-> *smoke-r53-move* 1) (meters -6)) (smoke-r53-seen? BF_ASHELIN_CLIP_FLIP_LEFT)))
+  (smoke-check "R2 and the stick left: a flip to the left, 6 to 15 m"
+               (and (< (meters -15) (-> *smoke-r53-move* 1)) (< (-> *smoke-r53-move* 1) (meters -6)) (smoke-r53-seen? BF_ASHELIN_CLIP_FLIP_LEFT))
+               )
   (smoke-wait 0.6)
   (smoke-hold (pad-buttons r2))
   (smoke-stick 255 128 128 128)
@@ -16853,7 +16875,9 @@
   (smoke-r53-watch 1.0)
   (smoke-neutral)
   (smoke-r53-line "flip right")
-  (smoke-check "R2 and the stick right: a flip to the right, 6 m or more" (and (< (meters 6) (-> *smoke-r53-move* 1)) (smoke-r53-seen? BF_ASHELIN_CLIP_FLIP_RIGHT)))
+  (smoke-check "R2 and the stick right: a flip to the right, 6 to 15 m"
+               (and (< (meters 6) (-> *smoke-r53-move* 1)) (< (-> *smoke-r53-move* 1) (meters 15)) (smoke-r53-seen? BF_ASHELIN_CLIP_FLIP_RIGHT))
+               )
   (smoke-wait 0.6)
   (smoke-step "she kneels")
   (smoke-hold (pad-buttons l1))
@@ -16867,6 +16891,31 @@
   (smoke-r53-line "stand up")
   (smoke-check "L1 let go: she stands up" (smoke-r53-seen? BF_ASHELIN_CLIP_UNKNEEL))
   (smoke-wait 0.5)
+  ;; round 55: Jak's roll on Jak's buttons
+  (smoke-step "her roll")
+  (smoke-stick 128 0 128 128)
+  (smoke-wait 0.3)
+  (smoke-tap (pad-buttons l1) 3)
+  (smoke-wait 0.1)
+  (smoke-shot "r55-roll")
+  (smoke-r53-watch 0.7)
+  (smoke-neutral)
+  (smoke-r53-line "roll")
+  (smoke-check "L1 and the stick: her roll, 4 m or more ahead" (and (smoke-r53-seen? BF_ASHELIN_CLIP_ROLL) (< (meters 4) (-> *smoke-r53-move* 2))))
+  (smoke-wait 1.0)
+  (smoke-stick 128 0 128 128)
+  (smoke-wait 0.3)
+  (smoke-tap (pad-buttons l1) 3)
+  (smoke-wait 0.15)
+  (smoke-tap (pad-buttons x) 3)
+  (smoke-r53-watch 1.2)
+  (smoke-shot "r55-roll-flip")
+  (smoke-neutral)
+  (smoke-r53-line "roll and X")
+  (smoke-check "X during her roll: a flip, 2.5 m up and 10 m ahead or more"
+               (and (smoke-r53-seen? BF_ASHELIN_CLIP_FLIP) (< (meters 2.5) (-> *smoke-r53-move* 0)) (< (meters 10) (-> *smoke-r53-move* 2)))
+               )
+  (smoke-wait 1.0)
   (smoke-step "her pistols")
   (let ((av (smoke-av))
         (shots 0)
@@ -16874,13 +16923,15 @@
         (yellow0 (-> *game-info* gun-ammo BF_AMMO_YELLOW))
         (mag0 (-> *bf* mag BF_WEAPON_PISTOL))
         (reload? #f)
+        (arms? #f)
         )
     (when av
       (let ((last (-> av fire-time))
             (t0 (smoke-now))
             )
         (smoke-hold (pad-buttons square))
-        (while (< (- (smoke-now) t0) (the int (* 300.0 4.0)))
+        (while (and (< (- (smoke-now) t0) (the int (* 300.0 4.0))) (smoke-av))
+          (set! av (smoke-av))
           (when (!= last (-> av fire-time))
             (set! last (-> av fire-time))
             (+! shots 1)
@@ -16891,8 +16942,14 @@
           (if (= (-> av anim) BF_ASHELIN_CLIP_RELOAD)
               (set! reload? #t)
               )
+          (if (smoke-r55-firing? av)
+              (set! arms? #t)
+              )
           (if (= (- (smoke-now) t0) 150)
               (smoke-shot "r54-fire")
+              )
+          (if (= (- (smoke-now) t0) 160)
+              (smoke-shot "r55-recoil")
               )
           (if (= (- (smoke-now) t0) 630)
               (smoke-shot "r54-reload")
@@ -16907,6 +16964,7 @@
             )
     (format 0 "SMOKE carried ~f then ~f, reload seen ~A~%" yellow0 (-> *game-info* gun-ammo BF_AMMO_YELLOW) reload?)
     (smoke-check "Square held: both pistols in turn" (and (< 1 sides) (< sides shots)))
+    (smoke-check "her firing clip and its recoil on her arms (round 55)" arms?)
     (smoke-check "10 rounds, then a reload, then she fires on" (and (= mag0 10) (< 10 shots) reload?))
     (smoke-check "150 rounds carried, the reload took 10" (and (= yellow0 150.0) (= (-> *game-info* gun-ammo BF_AMMO_YELLOW) 140.0)))
     )
@@ -16923,7 +16981,12 @@
   (smoke-stick 0 128 128 128)
   (smoke-r53-watch 1.0)
   (smoke-r53-line "strafe left")
+  (smoke-shot "r55-strafe-fire")
+  (smoke-check "firing while she walks aside: her arms fire over her legs' clip"
+               (and (smoke-av) (smoke-r55-firing? (the-as bf-avatar (smoke-av))))
+               )
   (smoke-check "Square and the stick left: her strafe to the left, facing ahead" (and (smoke-r53-seen? BF_ASHELIN_CLIP_STRAFE_LEFT) (< (-> *smoke-r53-move* 1) (meters -1.5))))
+  (set! (-> *bf* mag BF_WEAPON_PISTOL) 10)
   (smoke-stick 128 255 128 128)
   (smoke-r53-watch 1.0)
   (smoke-r53-line "walk back")
@@ -16945,11 +17008,11 @@
         (seen? #f)
         )
     (smoke-tap (pad-buttons r1) 3)
-    (smoke-wait 0.3)
-    (smoke-shot "r54-throw")
-    (smoke-r53-watch 0.3)
     (let ((t0 (smoke-now)))
-      (while (< (- (smoke-now) t0) (the int (* 300.0 2.0)))
+      (while (< (- (smoke-now) t0) (the int (* 300.0 2.5)))
+        (if (= (- (smoke-now) t0) 90)
+            (smoke-shot "r54-throw")
+            )
         (let ((lob (the-as process-drawable (smoke-r53-lob))))
           (when lob
             (when (not seen?)
@@ -16966,7 +17029,8 @@
       )
     (format 0 "SMOKE grenade: ~D then ~D, its arc ~M over its start~%" n0 (-> *bf* rockets) (- top y0))
     (smoke-check "R1: a grenade thrown overhand, one of hers" (and seen? (= (-> *bf* rockets) (+ n0 -1))))
-    (smoke-check "it flies in an arc (1.5 m over its start or more)" (< (meters 1.5) (- top y0)))
+    ;; its arc lower for a nearer aim (round 55: she stands 25 m farther down the street by then)
+    (smoke-check "it flies in an arc (1 m over its start or more)" (< (meters 1.0) (- top y0)))
     )
   (format 0 "SMOKE her health ~f of ~f~%" (-> *target* fact health) (bf-class-health BF_CLASS_ASHELIN))
   ;; the Freedom League's champion
