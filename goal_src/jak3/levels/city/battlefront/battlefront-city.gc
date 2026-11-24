@@ -56,8 +56,17 @@
 ;; foot, spider. 1.5 for all until round 33; then the author's wish: guards 1.4 times as fast as
 ;; that, robotguards on foot 2 times, spiders 1.6 times (2.1, 3.0 and 2.4 times the stock); round
 ;; 35, the guards a little slower, 1.9; round 36, slower again, 1.6 (their legs keep pace, their
-;; clip grounds the stock ones).
+;; clip grounds the stock ones); round 49, the stock pace, 1.0: at 1.6 their walk and run clips
+;; played 1.6 times as fast and looked sped up (the author's report); round 50, 1.6 again (the
+;; author's wish: the speed of round 36, the clips calibrated, `*bf-unit-stride*`).
 (define *bf-unit-pace* (new 'static 'array float 4 1.6 1.5 3.0 2.4))
+
+;; The ground each kind's walk and run clips cover against the stock one, in `bf-unit-kind` order:
+;; the clips play at the kind's pace over its stride (`*bf-unit-pace*` / this). The guards' 1.3
+;; plays their clips 1.23 times as fast at 1.6 times the stock speed (1.6 times in round 36, which
+;; looked sped up; a stride of 1.6 plays them at the stock cadence, the feet sliding, round 34's
+;; complaint). Round 50.
+(define *bf-unit-stride* (new 'static 'array float 4 1.3 1.0 1.0 1.0))
 
 ;; The stock walk speed, run speed, walk clip ground and run clip ground of each kind (`bf-unit-kind`:
 ;; guard.gc, flying-turret.gc, roboguard-city.gc, spydroid.gc init-enemy!), in units.
@@ -85,7 +94,8 @@
 
 (defun bf-city-unit-pace ((proc process))
   "Unit PROC of the battle (a citizen) at its kind's pace (`*bf-unit-pace*`) times its kind's stock
-   walk and run speeds, its clip grounds the stock ones (`*bf-unit-stock-pace*`): written each time, so a unit woken again (its init
+   walk and run speeds, its clip grounds the stock ones times its kind's stride (`*bf-unit-stock-pace*`,
+   `*bf-unit-stride*`): written each time, so a unit woken again (its init
    sets the stock values back) is paced within half a second. A robotguard not marching gets its
    stock run clip back (a march's roll gives it the ball, `bf-city-roll!`)."
   (let ((k (bf-unit-kind proc))
@@ -97,8 +107,8 @@
             )
         (set! (-> unit speed-walk) (* pace (-> *bf-unit-stock-pace* base)))
         (set! (-> unit speed-run) (* pace (-> *bf-unit-stock-pace* (+ base 1))))
-        (set! (-> unit dist-walk-anim) (-> *bf-unit-stock-pace* (+ base 2)))
-        (set! (-> unit dist-run-anim) (-> *bf-unit-stock-pace* (+ base 3)))
+        (set! (-> unit dist-walk-anim) (* (-> *bf-unit-stride* k) (-> *bf-unit-stock-pace* (+ base 2))))
+        (set! (-> unit dist-run-anim) (* (-> *bf-unit-stride* k) (-> *bf-unit-stock-pace* (+ base 3))))
         )
       (if (and (= k BF_ROBOT_KIND) (not (bf-marching? unit)))
           (set! (-> unit anim-run) BF_ROBOT_RUN_CLIP)
@@ -126,7 +136,7 @@
 ;; stood and the armies' pushes died away (7 and 14 losses in 10 minutes, no point fought over).
 (deftype bf-engaged (structure)
   ((count  int32)
-   (unit   handle 128)
+   (unit   handle 512)
    )
   )
 
@@ -277,10 +287,10 @@
   "The foes walls hid from each attacker of Haven City's attack controller (4 slots for its
    attacker index), and when (`bf-city-hide!`); BLIND set when its last look found only hidden
    foes: it takes none until its next look (`bf-city-retarget`)."
-  ((foe   handle     512)
-   (time  time-frame 512)
-   (next  int8       128)
-   (blind int8       128)
+  ((foe   handle     2048)
+   (time  time-frame 2048)
+   (next  int8       512)
+   (blind int8       512)
    )
   )
 
@@ -310,7 +320,7 @@
 
 (defun bf-city-hide! ((k int) (foe handle))
   "Attacker K (its index in the controller) cannot see FOE: passed over for BF_SIGHT_HOLD."
-  (when (and (>= k 0) (< k 128))
+  (when (and (>= k 0) (< k 512))
     (let ((slot (+ (* 4 k) (-> *bf-sight* next k))))
       (set! (-> *bf-sight* foe slot) foe)
       (set-time! (-> *bf-sight* time slot))
@@ -326,7 +336,8 @@
    from it in the last BF_SIGHT_HOLD (`bf-city-hide!`), and for a
    robotguard none beyond BF_ROBOT_SIGHT (with the battle's 100 m sight the robotguards stood in
    'hostile-stand for minutes, 400 to 700 m from their point, on a foe they never reached). #f
-   drops the foe, anything else keeps it."
+   drops the foe, anything else keeps it. Every unit fights the foes it meets on its way to its
+   point, then goes on (round 45, the author's wish; round 44 let 40 % pass them by)."
   (let ((p (handle->process (-> foe proc)))
         (info (if (and me (type? me citizen))
                   (-> (the-as citizen me) attacker-info)
@@ -336,7 +347,7 @@
         )
     (when (and info (nonzero? info))
       (let ((k (-> info self-index)))
-        (when (and (>= k 0) (< k 128))
+        (when (and (>= k 0) (< k 512))
           (if (nonzero? (-> *bf-sight* blind k))
               (set! ok? #f)
               )
@@ -365,6 +376,15 @@
     )
   )
 
+;; The champions (round 49: the Krimzon Guard's; round 53: the Freedom League's), defined further down
+(define-extern *bf-city-boss-info* city-attacker-info)
+(define-extern *bf-city-boss-info-ff* city-attacker-info)
+;; Spargus's precursor artifact (round 54), defined further down
+(define-extern *bf-city-artifact-info* city-attacker-info)
+(define-extern bf-city-artifact-pull! (function mission-squad-control city-attacker-info vector none))
+(define-extern bf-city-boss-pull! (function mission-squad-control city-attacker-info city-attacker-info vector int none))
+(define-extern bf-city-set-foe! (function mission-squad-control city-attacker-info int none))
+
 (defun bf-city-retarget ()
   "Twice a second every unit of the battle looks again for a target (mission-squad-control-method-13,
    the controller's own choice: the battle's hatred scores a foe by its distance, 0 beyond
@@ -389,7 +409,7 @@
                      (>= (bf-ctt-team (-> info self-type)) 0)
                      )
             ;; a new look: the unit sees again (`bf-city-foe-ok?`)
-            (if (< i 128)
+            (if (< i 512)
                 (set! (-> *bf-sight* blind i) 0)
                 )
             (let* ((pos (-> ctrl attacker-cache data i pos))
@@ -433,7 +453,7 @@
                        ;; none left in sight: blind until the next look, unless it is in the middle
                        ;; of an attack (the stock's lock-focus); its foe gone then, the game crashed
                        ;; twice in three runs
-                       (if (and (= tries BF_SIGHT_TRIES) (< i 128) (type? me enemy)
+                       (if (and (= tries BF_SIGHT_TRIES) (< i 512) (type? me enemy)
                                 (not (logtest? (-> (the-as enemy me) enemy-flags) (enemy-flag lock-focus)))
                                 )
                            (set! (-> *bf-sight* blind i) 1)
@@ -447,10 +467,18 @@
                     )
                   )
                 )
+              ;; a side's champion (round 49: the Krimzon Guard's; round 53: the Freedom League's
+              ;; too): a unit of the other side within BF_ENGAGE_REACH of him, nearer him than its
+              ;; foe, turns onto him. The battle's hatred keeps a unit on its foe until it dies
+              ;; (chi1), so the units fighting around him never picked him (0 in 90 s)
+              (bf-city-boss-pull! ctrl info *bf-city-boss-info* pos BF_TEAM_FF)
+              (bf-city-boss-pull! ctrl info *bf-city-boss-info-ff* pos BF_TEAM_KG)
+              ;; Spargus's precursor artifact (round 54): the Krimzon Guard's units near it attack it
+              (bf-city-artifact-pull! ctrl info pos)
               ;; a foe in sight now: the unit fights it, no march (`bf-march-plan`)
               (let ((nf (-> info enemy-index)))
                 (when (and (>= nf 0)
-                           (< (-> *bf-engaged* count) 128)
+                           (< (-> *bf-engaged* count) 512)
                            (< (vector-vector-xz-distance pos (-> ctrl attacker-cache data nf pos)) BF_ENGAGE_REACH)
                            )
                   (set! (-> *bf-engaged* unit (-> *bf-engaged* count)) (-> info proc))
@@ -613,15 +641,19 @@
 
 (defun bf-city-transports ()
   "Twice a second, for each battle point in a loaded section (battlefront.gc `bf-point-live?`):
-   - not moved yet: onto the open ground nearest it (bf-transport.gc `bf-transport-spot`: ground,
-     a nav mesh, nothing above up to 60 m), so the point stands in the open and its ship hovers
-     right over it, through no roof or bridge;
+   - not moved yet: onto the open ground nearest it within 20 m, a base onto the most open within
+     30 m (round 45) (bf-transport.gc `bf-transport-spot`: ground, a nav mesh, nothing above up to
+     60 m), so the point stands in the open and its ship hovers right over it, through no roof or
+     bridge;
    - a base: its side's troop transport stationed over it, its side's place to bring units
      (bf-transport.gc: it drops them while the side lacks some, and stays); a control point gets no
      ship: its holder's units appear on the nav meshes around it (`bf-city-spawn-near`);
    - taken by the other side: its ship leaves (`'leave`), and the new holder's comes once it has
      gone (`old-ship`).
-   A point's ship leaves too when its section unloads. The ships are the director's children."
+   A point's ship leaves too when its section unloads, and for good once its side's units are all
+   brought (battlefront-h.gc `bf-ships-gone?`, round 44) or once it brought `*bf-ship-load*` units
+   itself (100: it rises into the sky and none comes to that base again, `ship-done?`, round 45, the
+   author's wish). The ships are the director's children."
   (let ((parent (the-as process (handle->process (-> *bf* director)))))
     (when (and parent *target* (bf-fighting?))
       (dotimes (i (-> *bf* point-count))
@@ -631,20 +663,37 @@
                )
           (when (and live? (not (-> pt snapped?)))
             (set! (-> pt snapped?) #t)
-            (when (bf-transport-spot (-> pt pos) *bf-city-spot*)
+            (when (if (-> pt base?)
+                      (bf-transport-spot (-> pt pos) *bf-city-spot* BF_SPOT_REACH #t)
+                      (bf-transport-spot (-> pt pos) *bf-city-spot* (meters 20) #f)
+                      )
               (format 0 "battlefront: point ~D moved ~M onto open ground~%" i (vector-vector-distance (-> pt pos) *bf-city-spot*))
               (vector-copy! (-> pt pos) *bf-city-spot*)
               )
             )
+          ;; its load brought: it leaves for good
+          (when (and ship (>= (-> (the-as bf-transport ship) count-units) (the-as uint *bf-ship-load*)))
+            (set! (-> pt ship-done?) #t)
+            (format 0 "battlefront: the ship over point ~D brought its ~D units~%" i *bf-ship-load*)
+            )
           (cond
-            ((and ship (or (not live?) (!= (-> (the-as bf-transport ship) team) (-> pt owner))))
+            ((and ship (or (not live?)
+                           (!= (-> (the-as bf-transport ship) team) (-> pt owner))
+                           (bf-ships-gone? (-> (the-as bf-transport ship) team))
+                           (-> pt ship-done?)
+                           )
+                  )
              (send-event ship 'leave)
              (set! (-> pt old-ship) (-> pt ship))
              (set! (-> pt ship) (the-as handle #f))
              (format 0 "battlefront: the ship over point ~D leaves~%" i)
              )
-            ((and (not ship) live? (-> pt base?) (>= (-> pt owner) 0) (not (handle->process (-> pt old-ship))))
-             (when (bf-transport-spot (-> pt pos) *bf-city-spot*)
+            ((and (not ship) live? (-> pt base?) (>= (-> pt owner) 0) (not (handle->process (-> pt old-ship)))
+                  (not (bf-ships-gone? (-> pt owner)))
+                  (not (-> pt ship-done?))
+                  )
+             ;; right over the point, which stands on the open spot found (`snapped?`)
+             (when (bf-transport-spot (-> pt pos) *bf-city-spot* 0.0 #f)
                (let* ((hatch (bf-city-hatch-dir *bf-city-spot*))
                       (new-ship (bf-transport-spawn parent *bf-city-spot* (-> pt owner) i hatch))
                       )
@@ -804,12 +853,13 @@
   )
 
 ;; Each unit keeps its goal (`bf-city-sticky-goal`) until its side holds it, or it is stuck.
-(defconstant BF_GOAL_SLOTS 256)            ;; units the goals keep, by process id
+(defconstant BF_GOAL_SLOTS 512)            ;; units the goals keep, by process id (256 until round 44)
 (defconstant BF_STUCK_TIME (seconds 10))   ;; a unit that has not moved BF_STUCK_MOVE in this long, away from its point and out of a fight, takes another goal
 (defconstant BF_STUCK_MOVE (meters 3))
 (defconstant BF_STUCK_HOP (seconds 4))        ;; a marching unit stuck this long near its waypoint is put onto it (`bf-march-apply`; 8 s until round 31: guards still piled up between the Industrial Zone and the Slums, the author's play)
 (defconstant BF_STUCK_HOP_REACH (meters 20))  ;; 15 m until round 31
 (define *bf-stuck-hops* (new 'static 'array int32 1 0)) ;; for the tests: units put onto their waypoint
+(define *bf-crossings* (new 'static 'array int32 1 0))  ;; for the tests: units onto their next mesh by its ground (`bf-march-cross!`)
 
 (deftype bf-goals (structure)
   "The units' goals (`bf-city-sticky-goal`), by process id (BF_GOAL_SLOTS)."
@@ -873,6 +923,34 @@
     )
   )
 
+(defconstant BF_HUNT_WEST (meters 1968)) ;; Spargus: a foe west of this stands on the west district's meshes (the pass's gap, 1958 to 1977 m)
+
+(defun bf-city-hunt ((proc process) (out vector))
+  "Spargus's destruction of an objective (round 55, the author's wish: the Freedom League's units do
+   not wait around the artifact, they hunt every Krimzon Guard unit): OUT, the place of the unit of
+   the Krimzon Guard (or its player) nearest PROC (`*bf-unit-dots*`), else the Krimzon Guard's camp.
+   Returns the point the march routes by, the one of the district OUT stands in: the artifact's
+   (west of BF_HUNT_WEST) or the Krimzon Guard's camp (east). No side effect but OUT."
+  (let ((dots *bf-unit-dots*)
+        (from (-> (the-as process-drawable proc) root trans))
+        (best -1)
+        (best-d 0.0)
+        )
+    (dotimes (d (-> dots count))
+      (when (= (-> dots team d) BF_TEAM_KG)
+        (let ((dist (vector-vector-xz-distance (-> dots pos d) from)))
+          (when (or (< best 0) (< dist best-d))
+            (set! best d)
+            (set! best-d dist)
+            )
+          )
+        )
+      )
+    (vector-copy! out (if (>= best 0) (-> dots pos best) (-> *bf* points 1 pos)))
+    (if (< (-> out x) BF_HUNT_WEST) BF_ARTIFACT_POINT 1)
+    )
+  )
+
 (defun bf-city-unit-goal ((proc process) (team int))
   "The point unit PROC of side TEAM heads for, as Star Wars Battlefront's units take the command
    posts: a contested point near it first (`bf-city-contested-point`), to clear it of the other
@@ -884,7 +962,11 @@
    by its process id and the points' owners (`bf-city-owners-key`): the units spread over the
    objectives (the author's wish, rounds 27 and 42: before, all went for the nearest but 3 in 10); kept until its side holds it, or drawn
    again when the unit is stuck (`bf-city-sticky-goal`, round 29); with every control point held,
-   the one nearest it (`bf-city-guard-point`). -1 for none."
+   the one nearest it (`bf-city-guard-point`). In Spargus's destruction of an objective the Freedom
+   League's units hunt instead (`bf-city-hunt`, round 55). -1 for none."
+  (if (and (= team BF_TEAM_FF) (bf-objective?))
+      (return (bf-city-hunt proc (new 'stack-no-clear 'vector)))
+      )
   (let* ((pos (-> (the-as process-drawable proc) root trans))
          (contest (bf-city-contested-point team pos))
          (post (bf-post-point proc))
@@ -985,7 +1067,7 @@
 ;; none; a citizen at a lane's dead end jumps to any lane 20 to 120 m behind it (citizen-method-208).
 ;; The lanes alone kept the units 140 to 290 m from a point next door. The meshes join the sections:
 ;; a nav-enemy standing on a mesh's link poly moves onto the next mesh (nav-enemy-method-188).
-(defconstant BF_MARCH_MAX 256)          ;; units marching at once, at most (100 a side since round 41)
+(defconstant BF_MARCH_MAX 512)          ;; units marching at once, at most (200 a side since round 44)
 (defconstant BF_MARCH_NEAR (meters 12)) ;; a unit this close to its point walks the lanes around it
 (defconstant BF_WAY_MESHES 768)         ;; nav meshes of the active levels the ways know, at most
 
@@ -1043,7 +1125,7 @@
 (defconstant BF_DECK_RISE (meters 8))
 (defconstant BF_DECK_SHARE 3)
 (defconstant BF_DECK_DETOUR 1.6)
-(defconstant BF_DECK_DONE_MAX 256) ;; 100 units a side at most since round 41
+(defconstant BF_DECK_DONE_MAX 512) ;; 200 units a side at most since round 44
 
 (deftype bf-deck-done (structure)
   "The guards that have been on a mesh's upper deck on their way: each one's handle and that mesh."
@@ -1645,12 +1727,18 @@
    zone, it marches at the nearest of them (`bf-city-zone-foe`) instead of the point's middle: sent
    to the middle, the defenders of a point stood there out of sight of the foe that held them
    (round 27's tests). A unit walking its lanes near where it goes walks again (its walking speed: a
-   march runs)."
-  (let ((w *bf-march*)
-        (goal (bf-city-unit-goal unit team))
-        (to (new 'stack-no-clear 'vector))
-        )
-    (if (and (>= goal 0) (not (bf-city-zone-foe team goal (-> unit root trans) to)))
+   march runs). In Spargus the Freedom League's units march at the Krimzon Guard unit nearest them
+   (`bf-city-hunt`, round 55)."
+  (let* ((w *bf-march*)
+         (to (new 'stack-no-clear 'vector))
+         (hunt? (and (= team BF_TEAM_FF) (bf-objective?)))
+         (goal (if hunt?
+                   (bf-city-hunt unit to)
+                   (bf-city-unit-goal unit team)
+                   )
+               )
+         )
+    (if (and (not hunt?) (>= goal 0) (not (bf-city-zone-foe team goal (-> unit root trans) to)))
         (vector-copy! to (-> *bf* points goal pos))
         )
     ;; a unit with a foe in sight fights it (the stock guard's own attack), no march
@@ -1721,6 +1809,70 @@
   (none)
   )
 
+;; A marching unit this close to its waypoint looks whether it already stands on its next mesh
+;; (`bf-march-cross!`), that mesh's poly under it at most BF_CROSS_RISE above or below its feet
+;; (2.5 m in round 47's first runs: units 2.8 and 3.3 m under a link poly's middle, on a slope, stood
+;; for their stuck hop; the city's upper decks lie 8 m and more over its streets).
+(defconstant BF_CROSS_REACH (meters 12))
+(defconstant BF_CROSS_RISE (meters 4))
+
+(defun bf-mesh-covers? ((m nav-mesh) (pos vector) (rise float))
+  "#t when a poly of nav mesh M lies under POS: its outline holds POS across (`point-in-poly?`, in
+   the mesh's own frame) and its middle is within RISE of POS's height."
+  (let ((local (vector-! (new 'stack-no-clear 'vector) pos (the-as vector (-> m bounds))))
+        (c (new 'stack-no-clear 'vector))
+        )
+    (dotimes (i (-> m poly-count))
+      (let ((poly (-> m poly-array i)))
+        (when (point-in-poly? m poly local)
+          (poly-centroid m poly c)
+          (if (< (fabs (- (-> c y) (-> pos y))) rise)
+              (return #t)
+              )
+          )
+        )
+      )
+    )
+  #f
+  )
+
+(defun bf-march-cross! ((unit citizen) (i int))
+  "In `bf-march-apply`: marching unit UNIT (`*bf-march*` entry I), within BF_CROSS_REACH of the link
+   it heads for, onto the mesh that link leads to as soon as it stands on that mesh's ground
+   (`bf-mesh-covers?`). Jak 2's city meshes overlap where they link, a link poly inside the other
+   mesh's ground: a unit coming from that side stood 3.5 to 5 m short of its waypoint (2 m past the
+   link poly), never stepped on the link poly (nav-enemy-method-188 changes meshes there alone), and
+   waited for its stuck hop, 63 times in a run at one link (round 47's tests). Standing there on the
+   new mesh's own link poly back, the stock change of meshes sent it back at once: no link poly
+   sends it back to the mesh it left for a second (battlefront.gc `bf-link-hold!`). Returns #t when
+   it changed meshes: the next frame gives it its waypoint on the new one."
+  (let* ((w *bf-march*)
+         (m (-> unit nav state mesh))
+         (pt (-> w point i))
+         )
+    (when (and m (>= pt 0) (< (-> w hop i) 100)
+               (< (vector-vector-xz-distance (-> unit root trans) (-> w to i)) BF_CROSS_REACH)
+               )
+      (let* ((k (bf-ways-index m))
+             (nx (if (>= k 0) (-> *bf-ways* next (+ (* pt BF_WAY_MESHES) k)) -1))
+             )
+        (when (and (>= nx 0) (< nx 100))
+          (let ((dest (-> m link-array (bf-march-link m k pt (-> unit pid) nx) dest-mesh)))
+            (when (and dest (!= dest m) (bf-mesh-covers? dest (-> unit root trans) BF_CROSS_RISE))
+              (change-to dest unit)
+              (when (= (-> unit nav state mesh) dest)
+                ;; no link poly of its new mesh sends it back at once (battlefront.gc)
+                (bf-link-hold! unit m)
+                #t
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+
 (defun bf-march-apply ()
   "Every frame of the fight: each marching unit (`*bf-march*`), still walking its lanes (`bf-city-walking?`),
    runs to its waypoint: its controller's dest-point, which the citizen's 'active post gives its nav
@@ -1767,11 +1919,17 @@
                (set! (-> w unit i) (the-as handle #f))
                )
              )
+            ;; standing on its next mesh's ground near the link: onto that mesh
+            ((bf-march-cross! unit i)
+             (+! (-> *bf-crossings* 0) 1)
+             )
             ;; stuck BF_STUCK_HOP near its waypoint (a seam its nav does not cross: two units stood 55
             ;; and 90 s at (760, 1206), between the Port and the Industrial Zone, round 29's tests):
-            ;; put onto the waypoint, on its mesh
+            ;; put onto the waypoint, on its mesh. Not on its point's own mesh: no seam to cross there,
+            ;; it stands at its point (round 47: units 4 to 12 m from their point were put onto it)
             ((let ((k (logand (-> unit pid) (+ BF_GOAL_SLOTS -1))))
-               (and (= (-> *bf-goals* unit k) (process->handle unit))
+               (and (!= (-> unit nav state mesh) (-> w goal (-> w point i)))
+                    (= (-> *bf-goals* unit k) (process->handle unit))
                     (< BF_STUCK_HOP (- (-> *display* game-clock frame-counter) (-> *bf-goals* time k)))
                     (< (vector-vector-xz-distance (-> unit root trans) (-> w to i)) BF_STUCK_HOP_REACH)
                     )
@@ -1812,11 +1970,18 @@
    finds its way across them; at its point it keeps turning back across it, where a capture counts
    it (within 20 m it used to wander at random, and its point's 15 m seldom held a defender). With
    no point, or marching over the meshes (`bf-marching?`: its waypoint, not a lane, leads it; the
-   post asks for a lane every frame near it), the stock random lane (vehicle-controller method 15)."
+   post asks for a lane every frame near it), the stock random lane (vehicle-controller method 15).
+   #f, no lane, for a unit on none or on a lane leading out of the loaded graph: Spargus's few
+   lanes (233, Haven City's 8955) left a guard out of a ship with no lane, whose guard code asked
+   for the next one all the same, and the game crashed reading it (round 50's tests)."
   (let* ((proc (the-as process unit))
          (team (bf-unit-team proc))
+         (br (-> ctrl branch))
          (goal (if (and (bf-fighting?) (>= team 0) (not (bf-marching? proc))) (bf-city-unit-goal proc team) -1))
          )
+    (if (or (not br) (zero? br) (not (-> br dest-node)) (zero? (-> br dest-node)))
+        (return (the-as nav-branch #f))
+        )
     (if (< goal 0)
         (vehicle-controller-method-15 ctrl)
         (let ((first (bf-city-route (-> ctrl branch dest-node) (-> *bf* points goal pos))))
@@ -1827,6 +1992,25 @@
           )
         )
     )
+  )
+
+(defconstant BF_LANE_REACH (meters 150)) ;; a unit on no lane takes the nearest within this
+
+(defun bf-city-give-lane! ((unit citizen))
+  "In `bf-city-steer`, twice a second: battle unit UNIT, on no lane, onto the pedestrian lane
+   nearest it within BF_LANE_REACH (the stock search, `find-segment`, then citizen method 199, as
+   its flight does within 20 m). Out of a ship far from Spargus's few lanes (233; Haven City's
+   8955), a unit found none within the stock 20 m and stayed on none, and the guard code read its
+   lane anyway (round 50's crashes: `bf-city-choose-branch`, flee-info method 13)."
+  (let ((at (vector-copy! (new 'stack-no-clear 'vector) (-> unit root trans))))
+    (set! (-> at w) BF_LANE_REACH)
+    (let ((seg (find-segment unit at (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> unit root quat)))))
+      (if seg
+          (citizen-method-199 unit seg)
+          )
+      )
+    )
+  (none)
   )
 
 (defun bf-city-unit-minimap ((proc process))
@@ -1844,13 +2028,18 @@
    (`bf-city-foe-ok?`), standing in its hostile states with no foe left ('hostile, 'hostile-stand,
    'reposition), walks its lanes again ('active, `go-process`): its focus kept it there, on a foe
    it no longer had. So does one rolling after no foe ('roll-chase): a robotguard falling from the
-   sky as a ball lands in it (`bf-city-spawn-near`)."
+   sky as a ball lands in it (`bf-city-spawn-near`). A spider robot too, idle in its
+   'wait-for-vulnerable or 'wait-for-vulnerable-close with no foe left: it leaves them only for a
+   foe it has (spydroid.gc), and 95 of the round 45 census's units standing 30 s were spiders
+   there (the author's report of stuck units)."
   (let ((info (-> unit attacker-info)))
     (when (and info (nonzero? info))
       (when (and (not (handle->process (-> info enemy)))
                  (-> unit next-state)
                  (let ((st (-> unit next-state name)))
-                   (or (= st 'hostile) (= st 'hostile-stand) (= st 'reposition) (= st 'roll-chase))
+                   (or (= st 'hostile) (= st 'hostile-stand) (= st 'reposition) (= st 'roll-chase)
+                       (= st 'wait-for-vulnerable) (= st 'wait-for-vulnerable-close)
+                       )
                    )
                  )
         (set! (-> unit focus handle) (the-as handle #f))
@@ -1928,8 +2117,8 @@
                         )
                     )
                   )
-                ;; roboguard-city is CTYPESC's type, unknown here: told by its name
-                (if (= (-> proc type symbol) 'roboguard-city)
+                ;; roboguard-city is CTYPESC's type, unknown here: told by its name (the spiders too)
+                (if (or (= (-> proc type symbol) 'roboguard-city) (= (-> proc type symbol) 'spydroid))
                     (bf-city-robot-free (the-as citizen proc))
                     )
                 )
@@ -1937,6 +2126,9 @@
                 (let ((ctrl (-> (the-as citizen proc) controller)))
                   (if (!= (-> ctrl choose-branch-callback) bf-city-choose-branch)
                       (set! (-> ctrl choose-branch-callback) bf-city-choose-branch)
+                      )
+                  (if (zero? (-> ctrl branch))
+                      (bf-city-give-lane! (the-as citizen proc))
                       )
                   )
                 (bf-march-plan (the-as citizen proc) (bf-unit-team proc))
@@ -1976,14 +2168,72 @@
   (none)
   )
 
+;; The units drawn at once, at most (round 44): each one drawn writes about 6.5 KB into the frame's
+;; global DMA buffer, which the engine never checks (display.gc, 2560 KB since round 43); a view of
+;; 200 units filled 1.3 MB. The farthest from the camera past this many are hidden (no-draw-temp,
+;; `bf-city-draw-cap`).
+(defconstant BF_DRAW_MAX 240)
+(defconstant BF_DRAW_STEP (meters 16)) ;; the distance's steps the cap counts the units by
+(define *bf-draw-count* (new 'static 'array int32 64))
+
+(defun bf-city-draw-cap ()
+  "Every frame of the fight, after `bf-city-dots`: the units awake counted by their distance to the
+   camera in steps of BF_DRAW_STEP, the nearest BF_DRAW_MAX drawn, the others hidden (no-draw-temp:
+   the unit's own code never sets it, the draw skips it). Off a fight's end, the next battle's pools
+   are new processes."
+  (let ((dots *bf-unit-dots*)
+        (cam (math-camera-pos))
+        (cut 64)
+        (sum 0)
+        )
+    (when (< BF_DRAW_MAX (-> dots count))
+      (dotimes (k 64)
+        (set! (-> *bf-draw-count* k) 0)
+        )
+      (dotimes (d (-> dots count))
+        (+! (-> *bf-draw-count* (min 63 (the int (/ (vector-vector-distance (-> dots pos d) cam) BF_DRAW_STEP)))) 1)
+        )
+      (set! cut 0)
+      (while (and (< cut 64) (< (+ sum (-> *bf-draw-count* cut)) BF_DRAW_MAX))
+        (+! sum (-> *bf-draw-count* cut))
+        (+! cut 1)
+        )
+      )
+    ;; the units in steps below CUT drawn, the others hidden
+    (let ((te *traffic-engine*))
+      (when (and te (nonzero? te))
+        (dotimes (ti 2)
+          (let ((tr (-> te tracker-array ti)))
+            (dotimes (i (-> tr active-object-count))
+              (let ((proc (the-as process-drawable (handle->process (-> tr active-object-list i)))))
+                (when (and proc (>= (bf-unit-team proc) 0) (nonzero? (-> proc draw)))
+                  (if (< (the int (/ (vector-vector-distance (-> proc root trans) cam) BF_DRAW_STEP)) cut)
+                      (logclear! (-> proc draw status) (draw-control-status no-draw-temp))
+                      (logior! (-> proc draw status) (draw-control-status no-draw-temp))
+                      )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-city-dots ()
   "Every frame of the fight: the units awake into `*bf-unit-dots*`, their places, headings and sides,
    for the maps (battlefront.gc `bf-draw-city-map`: the respawn page, R3, the START page), and each
-   one's mark on the game's minimap in its side's color."
+   one's mark on the game's minimap in its side's color; the units awake of each kind
+   (battlefront-h.gc `*bf-awake-kinds*`, round 44)."
   (let ((te *traffic-engine*)
         (dots *bf-unit-dots*)
         )
     (set! (-> dots count) 0)
+    (dotimes (k 4)
+      (set! (-> *bf-awake-kinds* k) 0)
+      )
     (when (and te (nonzero? te))
       (dotimes (ti 2)
         (let ((tr (-> te tracker-array ti)))
@@ -2005,6 +2255,11 @@
                   (set! (-> dots yaw k) (vector-y-angle (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> proc root quat))))
                   (set! (-> dots team k) (bf-unit-team proc))
                   (+! (-> dots count) 1)
+                  )
+                (let ((kind (bf-unit-kind proc)))
+                  (if (>= kind 0)
+                      (+! (-> *bf-awake-kinds* kind) 1)
+                      )
                   )
                 )
               )
@@ -2404,6 +2659,65 @@
   (none)
   )
 
+(define *bf-stuck-shown* (new 'static 'array int32 1 0)) ;; for the tests: `bf-city-stuck-report` lines printed
+
+(defun bf-city-stuck-report ((after time-frame) (most int))
+  "For the tests: each marching unit (`*bf-march*`) that has not moved BF_STUCK_MOVE for AFTER, within
+   BF_STUCK_HOP_REACH of its waypoint, up to MOST lines in all (`*bf-stuck-shown*`): its process id,
+   kind, mesh, current poly (id, pat, link), place, waypoint and how far (across and up), its nav
+   state's flags, then the link of its way (`bf-march-link`): the link poly's middle, the next mesh
+   and its own link poly's middle, and the gap between the two."
+  (let ((w *bf-march*))
+    (dotimes (i (-> w count))
+      (let* ((unit (the-as citizen (handle->process (-> w unit i))))
+             (k (if unit (logand (-> unit pid) (+ BF_GOAL_SLOTS -1)) 0))
+             )
+        (when (and unit
+                   (< (-> *bf-stuck-shown* 0) most)
+                   (-> unit nav)
+                   (-> unit nav state mesh)
+                   (= (-> *bf-goals* unit k) (process->handle unit))
+                   (< after (- (-> *display* game-clock frame-counter) (-> *bf-goals* time k)))
+                   (< (vector-vector-xz-distance (-> unit root trans) (-> w to i)) BF_STUCK_HOP_REACH)
+                   )
+          (+! (-> *bf-stuck-shown* 0) 1)
+          (let* ((m (-> unit nav state mesh))
+                 (mk (bf-ways-index m))
+                 (poly (-> unit nav state current-poly))
+                 (pt (-> w point i))
+                 (nx (if (>= mk 0) (-> *bf-ways* next (+ (* pt BF_WAY_MESHES) mk)) -1))
+                 (pos (-> unit root trans))
+                 )
+            (format 0 "SMOKE stuck ~D ~A mesh ~D poly ~D pat ~D link ~D" (-> unit pid) (bf-unit-kind-name unit) mk
+                    (if poly (-> poly id) -1) (if poly (-> poly pat) -1) (if poly (-> poly link) -1))
+            (format 0 " at ~M ~M ~M to ~M ~M ~M" (-> pos x) (-> pos y) (-> pos z) (-> w to i x) (-> w to i y) (-> w to i z))
+            (format 0 " off ~M up ~M flags ~X next ~D hop ~D" (vector-vector-xz-distance pos (-> w to i)) (- (-> w to i y) (-> pos y))
+                    (-> unit nav state flags) nx (-> w hop i))
+            (when (and (>= mk 0) (>= nx 0) (< nx 100))
+              (let* ((l (bf-march-link m mk pt (-> unit pid) nx))
+                     (lk (-> m link-array l))
+                     (dest (-> lk dest-mesh))
+                     (a (new 'stack-no-clear 'vector))
+                     (b (new 'stack-no-clear 'vector))
+                     )
+                (when (bf-march-link-poly m l a)
+                  (format 0 " link ~D at ~M ~M ~M" l (-> a x) (-> a y) (-> a z))
+                  (when (and dest (< (-> lk dest-link-poly-id) (-> dest poly-count)))
+                    (poly-centroid dest (-> dest poly-array (-> lk dest-link-poly-id)) b)
+                    (format 0 " into ~D at ~M ~M ~M gap ~M" (bf-ways-index dest) (-> b x) (-> b y) (-> b z) (vector-vector-distance a b))
+                    )
+                  )
+                )
+              )
+            (format 0 "~%")
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-ways-gap ((a int) (b int))
   "Print the two polys of meshes A and B (`*bf-ways*` indices) whose centroids are nearest, and
    their distance, for the tests."
@@ -2514,6 +2828,34 @@
     )
   )
 
+(defun bf-city-own-side-foes ()
+  "For the tests: the battle's units whose foe (the attack controller's) is a unit of their own side.
+   Blue robotguards and spider robots registered as the Krimzon Guard's types until round 47: they
+   and the blue guards fought each other at no damage, all battle long."
+  (let ((n 0))
+    (when (bf-city-controller?)
+      (let ((ctrl *cty-attack-controller*))
+        (dotimes (i (-> ctrl attackers length))
+          (let* ((info (-> ctrl attackers data i))
+                 (nf (-> info enemy-index))
+                 )
+            (when (and (logtest? (-> info flags) (city-attacker-info-flag cai0)) (>= nf 0))
+              (let ((me (handle->process (-> info proc)))
+                    (them (handle->process (-> ctrl attackers data nf proc)))
+                    )
+                (if (and me them (>= (bf-unit-team me) 0) (= (bf-unit-team me) (bf-unit-team them)))
+                    (+! n 1)
+                    )
+                )
+              )
+            )
+          )
+        )
+      )
+    n
+    )
+  )
+
 (defun bf-city-guard-pace ((out vector))
   "For the tests: the first awake guard of the battle's run speed into OUT x and its run clip's
    ground into y (units; `bf-city-unit-pace`). Returns #t when there is one."
@@ -2604,6 +2946,237 @@
   )
 
 ;; ---------------------------------------------------------------------------------------------
+;; The champions in the attack controller (round 49; round 53: one a side)
+;; ---------------------------------------------------------------------------------------------
+
+;; Each champion's place in the attack controller (`bf-city-boss-attacker!`), #f for none: the other
+;; side's units near him turn onto him (`bf-city-retarget`). The Krimzon Guard's, then the Freedom
+;; League's.
+(define *bf-city-boss-info* (the-as city-attacker-info #f))
+(define *bf-city-boss-info-ff* (the-as city-attacker-info #f))
+
+(defun bf-city-set-foe! ((ctrl mission-squad-control) (info city-attacker-info) (k int))
+  "Attacker INFO's foe set to attacker K, as mission-squad-control-method-13 sets the one it picks:
+   the old foe's count of attackers down one, K's up one."
+  (when (!= k (-> info enemy-index))
+    (if (>= (-> info enemy-index) 0)
+        (+! (-> ctrl attackers data (-> info enemy-index) num-current-attackers) -1)
+        )
+    (logior! (-> info flags) (city-attacker-info-flag cai2))
+    (set! (-> info enemy-index) k)
+    (set! (-> info enemy) (-> ctrl attackers data k proc))
+    (set! (-> info enemy-type) (-> ctrl attackers data k self-type))
+    (+! (-> ctrl attackers data k num-current-attackers) 1)
+    )
+  (none)
+  )
+
+(defun bf-city-boss-attacker! ((body process) (info structure) (team int))
+  "Called by battlefront-baron.gc (GAME) for the body of side TEAM's champion (Baron Praxis, Ashelin):
+   with INFO #f, a place in the attack controller for BODY as a unit of that side (type 9, a Krimzon
+   Guard robotguard; type 4, a Freedom League rifle guard: the other side's units hate it and pick
+   it as a foe), returned, #f when the controller has none left; with INFO, that place given back
+   (its foes' foe cleared), #f returned."
+  (cond
+    ((zero? *cty-attack-controller*)
+     (the-as structure #f)
+     )
+    (info
+     (remove-attacker *cty-attack-controller* (the-as city-attacker-info info))
+     (if (= team BF_TEAM_KG)
+         (set! *bf-city-boss-info* #f)
+         (set! *bf-city-boss-info-ff* #f)
+         )
+     (the-as structure #f)
+     )
+    (else
+      (let ((a (allocate-attacker *cty-attack-controller*)))
+        (if a
+            (init! a body (if (= team BF_TEAM_KG) 9 4))
+            )
+        (if (= team BF_TEAM_KG)
+            (set! *bf-city-boss-info* a)
+            (set! *bf-city-boss-info-ff* a)
+            )
+        (the-as structure a)
+        )
+      )
+    )
+  )
+
+(defun bf-city-boss-pull! ((ctrl mission-squad-control) (info city-attacker-info) (b city-attacker-info) (pos vector) (team int))
+  "Attacker INFO at POS, a unit of side TEAM, turns onto champion B (the other side's, #f for none)
+   when it stands within BF_ENGAGE_REACH of him, nearer him than its foe (`bf-city-retarget`)."
+  (when (and b
+             (= (bf-ctt-team (-> info self-type)) team)
+             (>= (-> b self-index) 0)
+             (!= (-> info enemy-index) (-> b self-index))
+             )
+    (let ((bd (vector-vector-xz-distance pos (-> ctrl attacker-cache data (-> b self-index) pos)))
+          (nf (-> info enemy-index))
+          )
+      (if (and (< bd BF_ENGAGE_REACH)
+               (or (< nf 0) (< bd (vector-vector-xz-distance pos (-> ctrl attacker-cache data nf pos))))
+               )
+          (bf-city-set-foe! ctrl info (-> b self-index))
+          )
+      )
+    )
+  (none)
+  )
+
+(define *bf-city-artifact-info* (the-as city-attacker-info #f))
+
+(defconstant BF_ARTIFACT_KEEP (meters 10)) ;; the Krimzon Guard's units over the pass attack the artifact unless their foe is this close
+(defconstant BF_ARTIFACT_WEST (meters 1990)) ;; over the pass: west of this (the Freedom League's drops' limit too)
+;; Round 54's tests: within 45 m, then 150 m of it, the Freedom League's defenders held the attackers
+;; 130 m off and none of them ever fired at it (a Freedom League sent to meet them held them at the
+;; pass instead); from anywhere on the map, they stood at the pass's east end (x 1977 m): a unit with
+;; a foe chases it with its stock moves, which stop at the end of its nav mesh, and the march alone
+;; crosses the pass (`bf-march-cross!`). So the attackers go for it once over the pass, in its
+;; district, fighting only the foes at their feet.
+
+(defun bf-city-artifact-attacker! ((body process) (info structure))
+  "Called by battlefront-artifact.gc (GAME) for Spargus's precursor artifact (round 54): with INFO
+   #f, a place in the attack controller for BODY as a unit of the Freedom League (type 4, a rifle
+   guard: the Krimzon Guard's units hate it and pick it as a foe), returned, #f when the controller
+   has none left; with INFO, that place given back, #f returned."
+  (cond
+    ((zero? *cty-attack-controller*)
+     (the-as structure #f)
+     )
+    (info
+     (remove-attacker *cty-attack-controller* (the-as city-attacker-info info))
+     (set! *bf-city-artifact-info* #f)
+     (the-as structure #f)
+     )
+    (else
+      (let ((a (allocate-attacker *cty-attack-controller*)))
+        (when a
+          (init! a body 4)
+          ;; its cache entry at once (mission-squad-control-method-12 fills it on its next pass): read
+          ;; by `bf-city-retarget` the same frame, a new entry's place was a stale pointer (round 54's
+          ;; test: access violation in vector-vector-xz-distance)
+          (let ((c (-> *cty-attack-controller* attacker-cache data (-> a self-index))))
+            (set! (-> c proc) body)
+            (set! (-> c pos) (-> (the-as process-drawable body) root trans))
+            (set! (-> c attackable?) #t)
+            )
+          )
+        (set! *bf-city-artifact-info* a)
+        (the-as structure a)
+        )
+      )
+    )
+  )
+
+(defun bf-city-artifact-pull! ((ctrl mission-squad-control) (info city-attacker-info) (pos vector))
+  "Attacker INFO at POS, a Krimzon Guard unit over the pass (west of BF_ARTIFACT_WEST, the artifact's
+   district), turns onto it unless its foe stands within BF_ARTIFACT_KEEP of it (`bf-city-retarget`):
+   the attackers go for the objective, fighting only the defenders at their feet."
+  (let ((b *bf-city-artifact-info*))
+    (when (and b
+               (= (bf-ctt-team (-> info self-type)) BF_TEAM_KG)
+               (>= (-> b self-index) 0)
+               (!= (-> info enemy-index) (-> b self-index))
+               )
+      (let ((nf (-> info enemy-index)))
+        (if (and (< (-> pos x) BF_ARTIFACT_WEST)
+                 (or (< nf 0) (< BF_ARTIFACT_KEEP (vector-vector-xz-distance pos (-> ctrl attacker-cache data nf pos))))
+                 )
+            (bf-city-set-foe! ctrl info (-> b self-index))
+            )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-city-nearest-poly ((pt vector) (out vector))
+  "OUT: the middle of the nav poly of the loaded meshes (`*bf-ways*`) nearest PT, the link polys
+   aside (Spargus's artifact stands on the ground the units walk, round 54). #f for none, else #t."
+  (let ((w *bf-ways*)
+        (best -1.0)
+        (c (new 'stack-no-clear 'vector))
+        )
+    (dotimes (k (-> w count))
+      (let ((m (-> w mesh k)))
+        (when m
+          (dotimes (i (-> m poly-count))
+            (let ((poly (-> m poly-array i)))
+              (when (not (logtest? (-> poly pat) 4))
+                (poly-centroid m poly c)
+                (let ((d (vector-vector-distance c pt)))
+                  (when (or (< best 0.0) (< d best))
+                    (set! best d)
+                    (vector-copy! out c)
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    (<= 0.0 best)
+    )
+  )
+
+(defun bf-city-foes-of ((proc process))
+  "For the tests: the attackers of the attack controller whose foe is PROC."
+  (let ((n 0))
+    (when (nonzero? *cty-attack-controller*)
+      (let ((ctrl *cty-attack-controller*))
+        (dotimes (i (-> ctrl attackers length))
+          (if (= (handle->process (-> ctrl attackers data i enemy)) proc)
+              (+! n 1)
+              )
+          )
+        )
+      )
+    n
+    )
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Deaths out of view (round 48)
+;; ---------------------------------------------------------------------------------------------
+
+;; A unit knocked to 0 hit points by another than Jak, out of view or over 110 m from the camera,
+;; skips its death: enemy's knocked state (enemy-states.gc) sends it to die-fast at once. enemy's
+;; die-fast does nothing, so a guard there stood frozen for good, deaf to every event, and stayed
+;; in its side's count (round 47: no guard of either side died in 150 s). kg-squad-member's (the
+;; robotguards', spiders' and jetpacks') goes inactive without a word to the traffic engine, so
+;; their side lost nothing for them. During a battle both report the death (citizen
+;; `cleanup-for-death`: 'child-killed to the traffic engine, whose set-process-to-killed calls
+;; `bf-unit-killed`) and go inactive, as the protect missions' guards do (assault-enemies.gc).
+;; roboguard-city, spydroid and flying-turret (CTYPESC, loaded after CWI) copy kg-squad-member's
+;; state at their deftype.
+
+;; A guard's die-fast. During a battle: its death reported, the guard inactive. Otherwise the stock
+;; state (no enter, its code does nothing).
+(defstate die-fast (crimson-guard)
+  :virtual #t
+  :enter (behavior ()
+    (if (bf-active?)
+        (cleanup-for-death self)
+        )
+    )
+  )
+
+;; A robotguard's, spider's or jetpack's die-fast. During a battle: its death reported, the unit
+;; inactive. Otherwise inactive at once, as the stock state.
+(defstate die-fast (kg-squad-member)
+  :virtual #t
+  :enter (behavior ()
+    (if (bf-active?)
+        (cleanup-for-death self)
+        (go-inactive self)
+        )
+    )
+  )
+
+;; ---------------------------------------------------------------------------------------------
 ;; Force fields: the ruins of the old town and the Metal Head nest closed (round 19)
 ;; ---------------------------------------------------------------------------------------------
 
@@ -2644,8 +3217,8 @@
         (b (new 'stack-no-clear 'vector))
         )
     ;; Jak 3's city only: its walls are its own places, and spawn-security-wall is its ctywide-obs.o,
-    ;; which Jak 2's city's DGO leaves out
-    (when (and parent (!= (-> *bf* zone) BF_ZONE_JAK2))
+    ;; which the ported war zones' DGOs leave out (Jak 2's city, Spargus)
+    (when (and parent (not (bf-zone-ported? (-> *bf* zone))))
       (dotimes (i BF_FIELD_COUNT)
         (when (not (handle->process (-> *bf-city-fields* wall i)))
           (let ((e (* i 7)))
@@ -2821,9 +3394,17 @@
 ;; When each side may bring units in at a control point again (`bf-city-spawn-tick`).
 (define *bf-spawn-time* (new 'static 'array time-frame 2))
 
+;; Spargus's objective (round 54): the drops of a side anywhere on the map (`bf-city-spawn-spot` PT
+;; #f) keep to x between these (its district: the Freedom League's west of the pass, wascityb with
+;; the precursor game, the Krimzon Guard's east of it, wascitya). Set by `bf-city-spawn-tick`.
+(define *bf-spawn-x* (new 'static 'array float 2 -1000000000.0 1000000000.0))
+(defconstant BF_SPARGUS_FF_EAST (meters 1990))  ;; the Freedom League's drops west of this
+(defconstant BF_SPARGUS_KG_WEST (meters 2110))  ;; the Krimzon Guard's east of this (the pass, 2078 m, between)
+
 (defun bf-city-spawn-spot ((pt vector) (out vector) (reach float) (low? symbol))
   "OUT: the middle of a nav poly drawn at random among those of the loaded meshes (`*bf-ways*`)
-   within REACH of PT across and 20 m up or down, the link polys aside: a street, a platform; LOW?:
+   within REACH of PT across and 20 m up or down (PT #f: anywhere, REACH unused; Spargus's drops,
+   round 52), the link polys aside: a street, a platform; LOW?:
    no poly of an upper deck (`*bf-ways*` deck-y, the Industrial Zone's walkways): a jetpack guard
    brought down there stayed stuck on them (the author's play, round 27). Returns its mesh, #f for
    none.
@@ -2836,13 +3417,14 @@
         )
     (dotimes (k (-> w count))
       (let ((m (-> w mesh k)))
-        (when (and m (< (vector-vector-xz-distance (the-as vector (-> m bounds)) pt) (+ (-> m bounds r) reach)))
+        (when (and m (or (not pt) (< (vector-vector-xz-distance (the-as vector (-> m bounds)) pt) (+ (-> m bounds r) reach))))
           (dotimes (i (-> m poly-count))
             (let ((poly (-> m poly-array i)))
               (when (not (logtest? (-> poly pat) 4))
                 (poly-centroid m poly c)
-                (when (and (< (vector-vector-xz-distance c pt) reach)
-                           (< (fabs (- (-> c y) (-> pt y))) (meters 20))
+                (when (and (or (and (not pt) (< (-> *bf-spawn-x* 0) (-> c x)) (< (-> c x) (-> *bf-spawn-x* 1)))
+                               (and pt (< (vector-vector-xz-distance c pt) reach) (< (fabs (- (-> c y) (-> pt y))) (meters 20)))
+                               )
                            (or (not low?) (< (-> c y) (-> w deck-y k)))
                            )
                   (+! n 1)
@@ -2864,7 +3446,7 @@
 ;; The guards and jetpacks woken at a control point wait for their first frame awake before they go
 ;; up (`bf-city-sky-tick`): an event sent to a unit just woken reaches its sleeping state, and a
 ;; guard sent the 'jump at once stayed in the air, still walking.
-(defconstant BF_SKY_WAIT_MAX 16)
+(defconstant BF_SKY_WAIT_MAX 64) ;; 16 until round 45: past them a falling unit went untracked
 (defconstant BF_SKY_JET_MAX (meters 15)) ;; a jetpack goes up this far at most: its flight holds it 18 m above the ground at most
 
 (deftype bf-sky-wait (structure)
@@ -2894,13 +3476,43 @@
 
 (define *bf-sky-fall* (new 'static 'bf-sky-fall))
 
+(defconstant BF_FLOOR_ABOVE (meters 4)) ;; the floor a falling unit lands on lies at most this far over its nav poly's middle
+
+(defun bf-city-floor ((pos vector) (ground float))
+  "The floor under POS's place across: a probe of the scenery from BF_FLOOR_ABOVE over GROUND (a nav
+   poly's middle) down to as far under it. A poly's middle lies under the floor (up to 1.4 m in the
+   streets, meters on a stair: the Palace HQ of Jak 2's city), and a unit falling through
+   everything got its collision back only BF_FALL_FREE over the middle: already under the floor,
+   which has no underside, it fell 6 km under the city (the author's report of stuck units, round
+   45). Higher scenery (pipes, walkways) is left out, as it should be. Returns GROUND when the probe
+   meets nothing."
+  (let ((cq (new 'stack-no-clear 'collide-query)))
+    (set-vector! (-> cq start-pos) (-> pos x) (+ ground BF_FLOOR_ABOVE) (-> pos z) 1.0)
+    (set-vector! (-> cq move-dist) 0.0 (* -2.0 BF_FLOOR_ABOVE) 0.0 1.0)
+    (set! (-> cq radius) (meters 0.4))
+    (set! (-> cq collide-with) (collide-spec backgnd))
+    (set! (-> cq ignore-process0) #f)
+    (set! (-> cq ignore-process1) #f)
+    (set! (-> cq ignore-pat) (new 'static 'pat-surface :noentity #x1 :nojak #x1 :probe #x1 :noendlessfall #x1 :board #x1))
+    (set! (-> cq action-mask) (collide-action solid))
+    (let ((u (fill-and-probe-using-line-sphere *collide-cache* cq)))
+      (if (>= u 0.0)
+          (- (+ ground BF_FLOOR_ABOVE) (* u 2.0 BF_FLOOR_ABOVE))
+          ground
+          )
+      )
+    )
+  )
+
 (defun bf-city-fall-through! ((proc process) (ground float))
   "A robotguard or a spider robot falling from the sky or out of a ship's hatch (exit-transport,
-   enemy-falling-post) onto a nav poly at height GROUND meets nothing until BF_FALL_FREE over it,
-   then the scenery only, until it leaves that state (`*bf-sky-fall*`, `bf-city-sky-tick`): over a
-   control point they landed on the jetpacks hovering there; under the Krimzon Guard's ship, at its
-   base, the spiders met the scenery 13 and 22 m up (6 m and 14 m over the street), stood there and
-   walked in the air (the author's play and the tests, round 26)."
+   enemy-falling-post) onto a nav poly at height GROUND meets nothing until BF_FALL_FREE over the
+   floor there (`bf-city-floor`), then the scenery only, until it leaves that state
+   (`*bf-sky-fall*`, `bf-city-sky-tick`): over a control point they landed on the jetpacks hovering
+   there; under the Krimzon Guard's ship, at its base, the spiders met the scenery 13 and 22 m up (6
+   m and 14 m over the street), stood there and walked in the air (the author's play and the tests,
+   round 26)."
+  (set! ground (bf-city-floor (-> (the-as process-drawable proc) root trans) ground))
   (when (< (-> *bf-sky-fall* count) BF_SKY_WAIT_MAX)
     (let ((n (-> *bf-sky-fall* count))
           (cs (the-as collide-shape (-> (the-as process-drawable proc) root)))
@@ -2920,6 +3532,8 @@
     )
   (none)
   )
+
+(define-extern bf-city-land! (function nav-enemy float collide-spec none))
 
 (defun bf-city-sky-tick ()
   "Every frame of the fight: each unit waiting to go up (`*bf-sky-wait*`), once in its 'active (its
@@ -2983,6 +3597,13 @@
                         )
                    (set! (-> cs root-prim prim-core collide-with) (collide-spec backgnd))
                    )
+               ;; past its floor with no scenery to stop it: landed there (`bf-city-land!`)
+               (when (and (-> p next-state) (= (-> p next-state name) 'exit-transport)
+                          (< (-> p root trans y) (- (-> f ground i) (meters 1)))
+                          )
+                 (bf-city-land! (the-as nav-enemy p) (-> f ground i) (-> f collide i))
+                 (set! (-> f frames i) 600)
+                 )
                )
              (when (!= n i)
                (set! (-> f unit n) (-> f unit i))
@@ -3015,8 +3636,9 @@
    guard then jumps onto the poly, the jetpack flies down. A robotguard and a spider are woken in
    their way out of a ship (behavior 6, exit-transport, which needs no ship), up there: the
    robotguard falls as a ball, the spider tumbling (its jump has no clips: a 'jump would read none).
-   One in four is posted on the point; each is logged for the tests (`*bf-sky-log*`). Returns how
-   many came."
+   One in four is posted on the point; each is logged for the tests (`*bf-sky-log*`). POINT -1:
+   anywhere on the map's meshes, none posted (Spargus, `bf-city-spawn-tick`). Returns how many
+   came."
   (let ((done 0))
     (dotimes (k BF_TRANSPORT_BURST)
       (when (= k done)
@@ -3025,13 +3647,14 @@
                (sky (new 'stack-no-clear 'vector))
                ;; a jetpack guard never over the walkways (`bf-city-spawn-spot` LOW?)
                (low? (= kind (the-as int (traffic-type flying-turret))))
-               (mesh (if (>= kind 0) (bf-city-spawn-spot (-> *bf* points point pos) at BF_SPAWN_REACH low?)))
+               (around (if (>= point 0) (-> *bf* points point pos) (the-as vector #f)))
+               (mesh (if (>= kind 0) (bf-city-spawn-spot around at BF_SPAWN_REACH low?)))
                (h (if mesh (bf-sky-height at) 0.0))
                )
           ;; up to 3 polys drawn for one under the open sky
           (dotimes (try 2)
             (when (and mesh (< h (meters 6)))
-              (let ((m2 (bf-city-spawn-spot (-> *bf* points point pos) sky BF_SPAWN_REACH low?)))
+              (let ((m2 (bf-city-spawn-spot around sky BF_SPAWN_REACH low?)))
                 (when m2
                   (let ((h2 (bf-sky-height sky)))
                     (when (< h h2)
@@ -3103,8 +3726,11 @@
                       (vector-copy! (-> (the-as citizen proc) dest-point) at)
                       )
                   ;; one unit in four guards the point (bf-transport.gc `bf-post-set!`)
-                  (bf-post-set! proc (if (zero? (rand-vu-int-count 4)) point -1))
-                  (+! (-> *bf-drops-at* (+ (* BF_POINT_MAX team) point)) 1)
+                  (bf-post-set! proc (if (and (>= point 0) (zero? (rand-vu-int-count 4))) point -1))
+                  (if (>= point 0)
+                      (+! (-> *bf-drops-at* (+ (* BF_POINT_MAX team) point)) 1)
+                      )
+                  (bf-unit-brought! team)
                   (+! done 1)
                   )
                 )
@@ -3124,9 +3750,20 @@
   "Twice a second in a fight, for each side whose next units come down at a control point
    (bf-transport.gc `bf-transport-drop-point`; at its base its ship brings them): `bf-city-spawn-near`,
    then the next units a second later, half a second after none (the point passed over once, as a
-   ship's)."
+   ship's).
+   In Spargus every unit comes down anywhere in its side's district instead (`bf-city-spawn-near`,
+   point -1, `*bf-spawn-x*`), its ships bringing none (bf-transport.gc `bf-transport-my-turn?`): the
+   Freedom League's west of the pass, where the precursor game and the artifact it defends stand,
+   the Krimzon Guard's east of it (the author's wish, round 54; round 52 dropped both anywhere)."
   (dotimes (team 2)
-    (when (>= (current-time) (-> *bf-spawn-time* team))
+    (when (and (= (-> *bf* zone) BF_ZONE_SPARGUS) (>= (current-time) (-> *bf-spawn-time* team)))
+      (set! (-> *bf-spawn-x* 0) (if (= team BF_TEAM_FF) -1000000000.0 BF_SPARGUS_KG_WEST))
+      (set! (-> *bf-spawn-x* 1) (if (= team BF_TEAM_FF) BF_SPARGUS_FF_EAST 1000000000.0))
+      (set! (-> *bf-spawn-time* team) (+ (current-time) (if (> (bf-city-spawn-near team -1) 0) (seconds 1) (seconds 0.5))))
+      (set! (-> *bf-spawn-x* 0) -1000000000.0)
+      (set! (-> *bf-spawn-x* 1) 1000000000.0)
+      )
+    (when (and (!= (-> *bf* zone) BF_ZONE_SPARGUS) (>= (current-time) (-> *bf-spawn-time* team)))
       (let ((turn (bf-transport-drop-point team)))
         ;; a held control point: a base's drops come from its ship
         (when (and (>= turn 0) (not (-> *bf* points turn base?)) (= (-> *bf* points turn owner) team))
@@ -3215,9 +3852,58 @@
     )
   )
 
+(defconstant BF_UNDER_CITY (meters -100)) ;; a unit lower than this fell through the city
+
+(defun bf-city-land! ((u nav-enemy) (floor float) (collide collide-spec))
+  "Falling unit U (exit-transport) passed FLOOR, its landing's height, with nothing under it: Jak 2's
+   city, ported, has nav meshes where its scenery's collision is missing, and a robotguard or a
+   spider falling there never touched ground, the only way out of its fall (spydroid.gc
+   exit-transport), fell 6 km and kept its side's place (the author's report of stuck units,
+   round 45). Put on FLOOR, still, its collision COLLIDE back, and walking ('active, as
+   `bf-city-robot-free` sends it)."
+  (set! (-> u root trans y) floor)
+  (vector-reset! (-> u root transv))
+  (set! (-> u root root-prim prim-core collide-with) collide)
+  (go-process u (method-of-object u active))
+  (none)
+  )
+
+(defun bf-city-rescue! ((u nav-enemy))
+  "Unit U fell under the city in its way out of a ship or the sky (exit-transport), which no sleep
+   takes it out of: back onto the floor of the nav poly of its mesh nearest across (`bf-city-floor`)
+   and landed there (`bf-city-land!`). A robotguard put back to sleep there each frame stayed listed
+   awake, 7368 times in a run (round 45). Returns #t when put back."
+  (let ((mesh (if (and (nonzero? (-> u nav)) (-> u nav)) (-> u nav state mesh))))
+    (when mesh
+      (let ((at (vector-copy! (new 'stack-no-clear 'vector) (-> u root trans)))
+            (c (new 'stack-no-clear 'vector))
+            )
+        (if (bf-nan? (-> at x))
+            (vector-copy! at (the-as vector (-> mesh bounds)))
+            )
+        (set! (-> at y) (-> mesh bounds y))
+        (let ((poly (nav-mesh-method-10 mesh at at (the-as nav-poly #f))))
+          (when poly
+            (poly-centroid mesh poly c)
+            (set! (-> c y) (bf-city-floor c (-> c y)))
+            (move-to-point! (-> u root) c)
+            (bf-city-land! u (-> c y) (if (zero? (-> u root root-prim prim-core collide-with))
+                                          (collide-spec backgnd)
+                                          (-> u root root-prim prim-core collide-with)
+                                          )
+                           )
+            #t
+            )
+          )
+        )
+      )
+    )
+  )
+
 (defun bf-city-nan-sweep ()
   "Every frame of the fight: each unit of the battle awake whose place, velocity or turn is not a
-   number goes back to its pool (`bf-transport-sleep`), its place free for the next one (round 32). The
+   number, or that fell under the city (lower than BF_UNDER_CITY: through a floor, which has no
+   underside, round 45), goes back to its pool (`bf-transport-sleep`), its place free for the next one (round 32). The
    stock unit code was written against the player alone, and in unit against unit fights it made a
    unit's place NaN now and then: a jetpack guard's turn went NaN (`bf-hover-turn-fix!` mends it
    since), so did its bones and its shots, and each guard such a shot knocked flew off at NaN. Such a unit never died, kept its side's place (its side stopped
@@ -3241,6 +3927,7 @@
                   (cond
                     ((or (bf-nan? (-> u root trans x)) (bf-nan? (-> u root trans y)) (bf-nan? (-> u root trans z))
                          (bf-nan? (-> u root transv x)) (bf-nan? (-> u root transv z)) (bf-nan? (-> u root quat x))
+                         (< (-> u root trans y) BF_UNDER_CITY)
                          )
                      (set! (-> bad n) (the-as uint (-> tr active-object-list i)))
                      (+! n 1)
@@ -3256,11 +3943,20 @@
             )
           )
         )
-      ;; put to sleep once the lists are read: a sleep takes the unit out of its list
+      ;; put to sleep once the lists are read: a sleep takes the unit out of its list; one under the
+      ;; city on its way out of a ship or the sky, which no sleep takes out of it, put back on the
+      ;; ground instead (`bf-city-rescue!`)
       (dotimes (k n)
         (let ((p (handle->process (the-as handle (-> bad k)))))
+          (when (and p (-> p next-state) (= (-> p next-state name) 'exit-transport)
+                     (not (bf-nan? (-> (the-as nav-enemy p) root trans y)))
+                     (bf-city-rescue! (the-as nav-enemy p))
+                     )
+            (format 0 "battlefront: unit ~D (~A) under the city in exit-transport, put back on the ground~%" (-> p pid) (-> p type symbol))
+            (set! p #f)
+            )
           (when p
-            (format 0 "battlefront: unit ~D (~A) at NaN in ~A, put back to sleep~%" (-> p pid) (-> p type symbol)
+            (format 0 "battlefront: unit ~D (~A) at NaN or under the city in ~A, put back to sleep~%" (-> p pid) (-> p type symbol)
                     (if (-> p next-state) (-> p next-state name) '-)
                     )
             (bf-unit-bones-at! (the-as nav-enemy p) *null-vector* 0.0)
@@ -3299,6 +3995,7 @@
      (bf-march-apply)
      (bf-city-sky-tick)
      (bf-city-dots)
+     (bf-city-draw-cap)
      ;; a death reset (ctywide activates again) or a task change restores the stock faction
      ;; state: apply the battle's every 2 seconds
      (when (and *cty-faction-manager*
@@ -3339,7 +4036,7 @@
 (defun bf-city-throw-grenade ((from vector) (to vector))
   "`*bf-city-grenade*`: the player throws a guard grenade from FROM onto TO, the projectile and arc
    of the grenade guards (guard-grenade.gc crimson-guard-method-264). Jak owns it and it skips him;
-   with no charge it bursts where it lands."
+   with no charge it bursts where it lands, BF_GRENADE_BLAST wide (the AI grenadiers keep 4 m)."
   (let ((traj (new 'stack-no-clear 'traj3d-params)))
     (vector-copy! (-> traj src) from)
     (vector-copy! (-> traj dest) to)
@@ -3364,7 +4061,12 @@
           (set! (-> params attack-id) id)
           )
         (set! (-> params timeout) (seconds 4))
-        (spawn-projectile vehicle-grenade-deflect params *target* *default-dead-pool*)
+        ;; its blast twice the stock 4 m across (round 44, the author's wish: twice its circumference)
+        (let ((proj (spawn-projectile vehicle-grenade-deflect params *target* *default-dead-pool*)))
+          (if proj
+              (set! (-> (the-as vehicle-grenade (ppointer->process proj)) blast-radius) BF_GRENADE_BLAST)
+              )
+          )
         )
       )
     )

@@ -699,7 +699,7 @@
        (let* ((v1-45 (the-as msg-get-num-inactive (-> arg3 param 0)))
               (a1-37 (-> v1-45 obj-type))
               )
-         (set! (-> v1-45 num-inactive-out) (-> self traffic-engine object-type-info-array a1-37 inactive-count))
+         (set! (-> v1-45 num-inactive-out) (the int (-> self traffic-engine object-type-info-array a1-37 inactive-count))) ;; MOD battlefront -- unsigned since round 44
          )
        )
       (('get-inactive-object-list)

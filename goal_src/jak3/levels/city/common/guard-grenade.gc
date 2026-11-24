@@ -7,6 +7,9 @@
 
 ;; MOD battlefront -- the battle's rule for the reload (pc/features/battlefront/battlefront-h.gc, GAME)
 (define-extern bf-reload-break-ok? (function process-drawable symbol))
+(define-extern bf-guard-hold? (function process int symbol))
+;; MOD battlefront -- no blows in a battle (round 52)
+(define-extern bf-melee-ok? (function process symbol))
 
 ;; DECOMP BEGINS
 
@@ -128,7 +131,8 @@
       ((>= (-> self target-self-xz-dist) (* 1.2 (-> self grenade-guard-min-player-dist)))
        (go-virtual grenade-throw-post-reloading)
        )
-      ((< (-> self target-self-xz-dist) 16384.0)
+      ;; MOD battlefront -- no rifle butt for a battle's guard (bf-melee-ok?)
+      ((and (< (-> self target-self-xz-dist) 16384.0) (bf-melee-ok? self))
        (go-virtual close-attack)
        )
       )
@@ -515,7 +519,10 @@
       )
     (when (< (vector-vector-xz-distance (-> self root trans) (-> self move-position)) 8192.0)
       (crimson-guard-method-289 self (-> self last-quick-target-spot-angle))
-      (go-virtual grenade-throw-post-reloading)
+      ;; MOD battlefront -- at its spot a battle's guard with a grenade left keeps it (bf-guard-hold?)
+      (if (not (bf-guard-hold? self (-> self ammo-count)))
+          (go-virtual grenade-throw-post-reloading)
+          )
       )
     )
   :code (behavior ()

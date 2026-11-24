@@ -79,6 +79,14 @@
   )
 
 (defmethod flee-info-method-13 ((this flee-info) (arg0 citizen))
+  ;; MOD battlefront -- a citizen on no lane (or on one leading out of the loaded graph) has no
+  ;; lane to flee along: nothing to do. Spargus's few lanes left guards out of a ship on none, and
+  ;; their flight from a grenade crashed the game reading it (round 50)
+  (let ((br (-> arg0 controller branch)))
+    (if (or (not br) (zero? br) (not (-> br dest-node)) (zero? (-> br dest-node)))
+        (return (the-as none 0))
+        )
+    )
   (let* ((s5-0 (-> arg0 controller))
          (s2-0 (-> s5-0 branch dest-node))
          (s4-0 (the-as nav-branch #f))

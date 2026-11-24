@@ -5,6 +5,9 @@
 ;; name in dgo: guard-states
 ;; dgos: CWI
 
+;; MOD battlefront -- no blows in a battle (pc/features/battlefront/battlefront-h.gc, GAME, round 52)
+(define-extern bf-melee-ok? (function process symbol))
+
 ;; DECOMP BEGINS
 
 (defstate knocked-recover (crimson-guard)
@@ -461,7 +464,8 @@
                  )
              )
             (else
-              (if (crimson-guard-method-269 this s5-0)
+              ;; MOD battlefront -- no rifle butt for a battle's guard (bf-melee-ok?)
+              (if (and (bf-melee-ok? this) (crimson-guard-method-269 this s5-0))
                   (go (method-of-object this close-attack))
                   )
               )

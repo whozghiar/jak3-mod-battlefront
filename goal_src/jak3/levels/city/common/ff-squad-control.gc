@@ -183,7 +183,13 @@
       (case (-> this traffic tracker1 active-object-type-list s3-0)
         (((traffic-type guard-a))
          (let ((s2-0 (the-as crimson-guard (handle->process (-> this traffic tracker1 active-object-list s3-0)))))
-           (when (and s2-0 (not (focus-test? s2-0 dead inactive)) (= (-> s2-0 target-status handle) (-> arg2 handle)))
+           ;; MOD battlefront -- at most 16, the arrays' size: in a battle more than 16 guards aim at one
+           ;; foe, and the 17th wrote past the stack arrays (round 51: a crash in this method, Spargus)
+           (when (and s2-0
+                      (< sv-184 16)
+                      (not (focus-test? s2-0 dead inactive))
+                      (= (-> s2-0 target-status handle) (-> arg2 handle))
+                      )
              (set! (-> sv-176 sv-184) s2-0)
              (set! (-> sv-180 sv-184) (vector-vector-distance (-> s2-0 root trans) (-> arg2 position)))
              ;; og:preserve-this only add guard to the list if their distance isn't NaN

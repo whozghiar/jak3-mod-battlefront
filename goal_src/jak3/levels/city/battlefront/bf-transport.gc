@@ -319,18 +319,82 @@
     )
   )
 
+(defun bf-transport-attacked ((team int))
+  "A control point side TEAM holds that the other side takes from it now (its neutralization under
+   way: `*bf*` points prog-team and progress), drawn at random among several. -1 for none."
+  (let ((n 0)
+        (pick -1)
+        )
+    (dotimes (i (-> *bf* point-count))
+      (let ((pt (-> *bf* points i)))
+        (if (and (not (-> pt base?)) (= (-> pt owner) team) (>= (-> pt prog-team) 0) (!= (-> pt prog-team) team)
+                 (< 0.0 (-> pt progress))
+                 )
+            (+! n 1)
+            )
+        )
+      )
+    (when (> n 0)
+      (let ((k (rand-vu-int-count n)))
+        (dotimes (i (-> *bf* point-count))
+          (let ((pt (-> *bf* points i)))
+            (when (and (< pick 0) (not (-> pt base?)) (= (-> pt owner) team) (>= (-> pt prog-team) 0)
+                       (!= (-> pt prog-team) team) (< 0.0 (-> pt progress))
+                       )
+              (if (zero? k)
+                  (set! pick i)
+                  )
+              (+! k -1)
+              )
+            )
+          )
+        )
+      )
+    pick
+    )
+  )
+
+(defun bf-transport-nearest-ok ((team int) (from vector) (skip int))
+  "The point nearest FROM where side TEAM's units can come down (`bf-transport-point-ok?`), SKIP
+   passed over. -1 for none."
+  (let ((best -1)
+        (best-d 0.0)
+        )
+    (dotimes (i (-> *bf* point-count))
+      (when (and (!= i skip) (bf-transport-point-ok? team i))
+        (let ((d (vector-vector-xz-distance from (-> *bf* points i pos))))
+          (when (or (< best 0) (< d best-d))
+            (set! best i)
+            (set! best-d d)
+            )
+          )
+        )
+      )
+    best
+    )
+  )
+
 (defun bf-transport-draw ((team int))
-  "The point where side TEAM's next units come down (`bf-transport-point-ok?`), drawn at random
-   among all those it can use: its headquarters, under their ships, and the control points it holds
-   (round 42, the author's wish: every unit came down at the most advanced point, or at an attacked
-   one half the time). The point in `*bf-drop-skip*` is passed over while another one is there. -1
-   for none."
+  "The point where side TEAM's next units come down (`bf-transport-point-ok?`). While the other
+   side takes one of its control points (`bf-transport-attacked`), the one nearest it: the attacked
+   point itself, its side's until it turns neutral (round 44, the author's wish). Otherwise drawn
+   at random among all those it can use: its headquarters, under their ships, and the control
+   points it holds (round 42, the author's wish: every unit came down at the most advanced point,
+   or at an attacked one half the time). The point in `*bf-drop-skip*` is passed over while another
+   one is there. -1 for none."
   (let ((skip (-> *bf-drop-skip* team))
         (n 0)
         (others 0)
         (pick -1)
+        (hot (bf-transport-attacked team))
         )
     (set! (-> *bf-drop-skip* team) -1)
+    (if (>= hot 0)
+        (set! pick (bf-transport-nearest-ok team (-> *bf* points hot pos) skip))
+        )
+    (if (>= pick 0)
+        (return pick)
+        )
     (dotimes (i (-> *bf* point-count))
       (when (bf-transport-point-ok? team i)
         (+! n 1)
@@ -370,8 +434,9 @@
 
 (defun bf-transport-my-turn? ((this bf-transport))
   "#t when ship THIS (over one of its side's headquarters) is where its side's next units come down
-   (`bf-transport-drop-point`)."
-  (= (bf-transport-drop-point (-> this team)) (-> this point))
+   (`bf-transport-drop-point`). Never in Spargus, where every unit comes down anywhere on the map
+   (battlefront-city.gc `bf-city-spawn-tick`, round 52)."
+  (and (!= (-> *bf* zone) BF_ZONE_SPARGUS) (= (bf-transport-drop-point (-> this team)) (-> this point)))
   )
 
 ;; The kind the last `bf-transport-wake` wanted, -1 for none.
@@ -381,6 +446,33 @@
 (define *bf-burst-max* (new 'static 'array int32 1 0))
 
 (define-extern bf-city-fall-through! (function process float none))
+
+(defun bf-transport-hatch-ground ((nav nav-mesh) (pos vector) (ground float))
+  "The ground a robotguard or a spider dropped at the hatch's end POS falls onto: the height of the
+   middle of the nav poly of NAV under it, when the nearest poly reaches within 3 m of POS across;
+   -1 m under the city (none) else: no such unit drops there then. Under the Krimzon Guard's ship at
+   the Palace HQ of Jak 2's city the hatch's end is over ground higher than the ship's: the units,
+   falling through everything down to the ship's ground, went through that floor, which has no
+   underside, and fell 6 km under the city, their places in the battle kept (the author's report
+   of stuck units, round 45: 12 spiders at one census). The fall itself lands on the floor over
+   that height (battlefront-city.gc `bf-city-floor`)."
+  (let ((at (vector-copy! (new 'stack-no-clear 'vector) pos))
+        (c (new 'stack-no-clear 'vector))
+        )
+    (set! (-> at y) ground)
+    (let ((poly (nav-mesh-method-10 nav at at (the-as nav-poly #f))))
+      (cond
+        ((and poly (< (vector-vector-xz-distance at pos) (meters 3)))
+         (poly-centroid nav poly c)
+         (-> c y)
+         )
+        (else
+          (meters -1000)
+          )
+        )
+      )
+    )
+  )
 
 (defun bf-transport-wake ((this bf-transport))
   "One unit of ship THIS's side, of the kind it lacks most (`bf-transport-next-kind`), woken with
@@ -395,7 +487,9 @@
         )
     (set! *bf-wake-kind* kind)
     (set! (-> params proc) #f)
-    (let ((nav (find-nearest-nav-mesh (bf-transport-ground-point this (new 'stack-no-clear 'vector)) 8192.0)))
+    (let ((nav (find-nearest-nav-mesh (bf-transport-ground-point this (new 'stack-no-clear 'vector)) 8192.0))
+          (ground (-> this y-ground))
+          )
       (when (and nav *traffic-manager* (>= kind 0) (bf-transport-mesh-room? nav kind))
         (set! (-> params object-type) (the-as traffic-type kind))
         (set! (-> params behavior) (the-as uint 6))
@@ -416,7 +510,7 @@
            (+! (-> params position y) 8192.0)
            )
           (else
-            ;; the hatch's end, in the ship's frame
+            ;; the hatch's end, in the ship's frame, over the nav poly nearest under it
             (let ((out (vector-orient-by-quat! (new 'stack-no-clear 'vector)
                                                (new 'static 'vector :y 12288.0 :z -49152.0 :w 1.0)
                                                (-> this root quat)
@@ -425,16 +519,23 @@
                   )
               (vector+! (-> params position) (-> this root trans) out)
               )
+            (set! ground (bf-transport-hatch-ground nav (-> params position) ground))
+            ;; no nav poly under the hatch's end: no robotguard or spider out of it this time
+            (if (< ground (meters -500))
+                (set! (-> params object-type) (the-as traffic-type -1))
+                )
             )
           )
-        (send-event *traffic-manager* 'activate-object params)
+        (if (>= (the-as int (-> params object-type)) 0)
+            (send-event *traffic-manager* 'activate-object params)
+            )
         ;; a robotguard or a spider falls through everything down to the ground under the ship
         ;; (battlefront-city.gc): under the Krimzon Guard's ship the spiders stopped on the scenery
         ;; 6 and 14 m over the street and walked in the air
         (if (and (-> params proc)
                  (or (= kind (the-as int (traffic-type roboguard))) (= kind (the-as int (traffic-type spydroid))))
                  )
-            (bf-city-fall-through! (-> params proc) (-> (bf-transport-ground-point this (new 'stack-no-clear 'vector)) y))
+            (bf-city-fall-through! (-> params proc) ground)
             )
         )
       )
@@ -468,6 +569,7 @@
                 (format 0 "battlefront: side ~D unit dropped to guard control point ~D~%" (-> this team) (-> this point))
                 )
             (+! (-> *bf-drops-at* (+ (* BF_POINT_MAX (-> this team)) (-> this point))) 1)
+            (bf-unit-brought! (-> this team))
             (let ((slot (mod (the-as int (-> this count-units)) BF_TRANSPORT_MAX_UNITS)))
               (set! (-> this drops slot) (process->handle proc))
               (set-time! (-> this drop-at slot))
@@ -591,15 +693,46 @@
     )
   )
 
-(defun bf-transport-spot ((pos vector) (out vector))
-  "Where a troop transport serving the point at POS comes down: POS itself, or the first spot 10 m
-   then 20 m around it (eight ways each) with ground within 3 m of POS's height
-   (`bf-transport-ground`), a nav mesh within 2 m and nothing above (`bf-transport-sky?`). OUT gets
-   that spot on the ground. #f when none."
+(defconstant BF_SPOT_REACH (meters 30)) ;; how far an open spot is looked for around a point
+(defconstant BF_SPOT_CLEAR (meters 30)) ;; the free ground counted in each way around a spot
+
+(defun bf-transport-openness ((at vector))
+  "How open the ground around AT is: the free distance in eight ways, 4 m over AT (over the units'
+   heads, under most awnings), up to BF_SPOT_CLEAR each, added up (the scenery's walls stop it)."
+  (let ((cq (new 'stack-no-clear 'collide-query))
+        (sum 0.0)
+        )
+    (dotimes (k 8)
+      (set-vector! (-> cq start-pos) (-> at x) (+ (-> at y) (meters 4)) (-> at z) 1.0)
+      (set-vector! (-> cq move-dist) 0.0 0.0 BF_SPOT_CLEAR 1.0)
+      (vector-rotate-around-y! (-> cq move-dist) (-> cq move-dist) (* (degrees 45) (the float k)))
+      (set! (-> cq radius) (meters 1))
+      (set! (-> cq collide-with) (collide-spec backgnd))
+      (set! (-> cq ignore-process0) #f)
+      (set! (-> cq ignore-process1) #f)
+      (set! (-> cq ignore-pat) (new 'static 'pat-surface :noentity #x1 :nojak #x1 :probe #x1 :noendlessfall #x1 :board #x1))
+      (set! (-> cq action-mask) (collide-action solid))
+      (let ((u (fill-and-probe-using-line-sphere *collide-cache* cq)))
+        (+! sum (if (< u 0.0) 1.0 u))
+        )
+      )
+    sum
+    )
+  )
+
+(defun bf-transport-spot ((pos vector) (out vector) (reach float) (open? symbol))
+  "Where a troop transport serving the point at POS comes down: of POS and the spots every 10 m up
+   to REACH around it (eight ways each; REACH 0: POS alone) with ground within 3 m of POS's height
+   (`bf-transport-ground`), a nav mesh within 2 m and nothing above (`bf-transport-sky?`), the first
+   from POS out, or with OPEN? the most open one (`bf-transport-openness`; the nearer on a tie). OUT
+   gets that spot on the ground. #f when none. Round 45 (the author's wish): the first such spot put
+   the ships of the Palace, Slums and Stadium HQs of Jak 2's city in cramped corners; a base looks
+   for the most open."
   (let ((at (new 'stack-no-clear 'vector))
         (dir (new 'stack-no-clear 'vector))
+        (best -1.0)
         )
-    (dotimes (ring 3)
+    (dotimes (ring (+ (the int (/ reach (meters 10))) 1))
       (dotimes (k (if (zero? ring) 1 8))
         (set-vector! dir 0.0 0.0 (meters (* 10.0 (the float ring))) 1.0)
         (vector-rotate-around-y! dir dir (* (degrees 45) (the float k)))
@@ -610,13 +743,20 @@
                    (find-nearest-nav-mesh at 8192.0)
                    (bf-transport-sky? at)
                    )
-          (vector-copy! out at)
-          (return #t)
+          (let ((open (if open? (bf-transport-openness at) 1.0)))
+            (when (< best open)
+              (set! best open)
+              (vector-copy! out at)
+              (if (not open?)
+                  (return #t)
+                  )
+              )
+            )
           )
         )
       )
+    (<= 0.0 best)
     )
-  #f
   )
 
 (defun bf-transport-landing? ((pos vector) (dir vector) (mesh nav-mesh))
@@ -935,6 +1075,10 @@
   (set-time! (-> self turn-time))
   (set! (-> self level) lev)
   (initialize-skeleton self (if (= team BF_TEAM_FF) *bf-transport-blue-sg* *bf-transport-red-sg*) (the-as pair 0))
+  ;; the blue ship shines blue, not build-actor's orange (round 49)
+  (if (= team BF_TEAM_FF)
+      (bf-blue-shine! *bf-transport-blue-sg* *bf-blue-shine*)
+      )
   (set! (-> self y-ground) (-> self root trans y))
   (set! (-> self y-dest)
         (fmax (+ (-> self y-ground) BF_TRANSPORT_HOVER_MIN)

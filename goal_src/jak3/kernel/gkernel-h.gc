@@ -19,7 +19,11 @@
   (defconstant PROCESS_HEAP_MULT 4) ;; 4x actors
   (defconstant PROCESS_HEAP_MULT 1)
   )
-(defconstant PROCESS_HEAP_SIZE (* PROCESS_HEAP_MULT 1240 1024))
+;; MOD battlefront -- 3 MB more for the processes (round 44): a battle unit's process takes about
+;; 9.4 KB of this heap (measured: 2.6 MB for 280 units, 1.4 MB for the rest), so 200 units a side and
+;; their pools' spares would pass the stock 4960 KB; the level heap allocated after it still ends
+;; below 256 MB (#xfa... instead of #xf6eec00)
+(defconstant PROCESS_HEAP_SIZE (+ (* PROCESS_HEAP_MULT 1240 1024) (* 3 1024 1024)))
 (defconstant PROCESS_HEAP_MAX (* PROCESS_HEAP_MULT 768))
 
 (defconstant *tab-size* (the binteger 8))

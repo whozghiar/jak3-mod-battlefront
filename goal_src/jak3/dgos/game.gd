@@ -492,8 +492,12 @@
   "entity-debug.o" ;; added
   ;; MOD battlefront -- after the engine code they use (enemy, guard-projectile) and mods-menu.o
   "battlefront-havenj2-info.o" ;; the Jak 2 Haven City war zone's level-load-info, when scripts/level_port generated it
+  "battlefront-spargus-info.o" ;; the Spargus war zone's level-load-info, when scripts/level_port generated it
   "battlefront-h.o"
   "battlefront-player.o"
+  "battlefront-baron.o"
+  "battlefront-ashelin.o"    ;; Ashelin, the Freedom League's special character and champion (round 53)
+  "battlefront-artifact.o"   ;; Spargus's precursor artifact, the destruction of an objective (round 54)
   "battlefront-minimaps.o"
   "battlefront-portraits.o"
   "battlefront-icons.o"

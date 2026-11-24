@@ -185,7 +185,10 @@ block_11:
   call_addr = c->gprs[t9].du32[0];                  // function call:
   c->sll(v0, ra, 0);                                // sll v0, ra, 0
   // c->jalr(call_addr);                               // jalr ra, t9
-  printf("ERROR: Exceeded max number of collide-cache prims!\n");
+  // MOD battlefront -- no line: the cache keeps its 100 prims and skips the rest, the engine's own
+  // way; the PS2 printed this to its debug console only, and the PC log got a line for each prim
+  // skipped (2757 in four minutes of a 200-a-side battle's crowds, round 45)
+  // printf("ERROR: Exceeded max number of collide-cache prims!\n");
   //beq r0, r0, L92                                 // beq r0, r0, L92
   // nop                                            // sll r0, r0, 0
   goto block_18;                                    // branch always
@@ -309,7 +312,10 @@ block_2:
   // call_addr = c->gprs[t9].du32[0];                  // function call:
   c->sll(v0, ra, 0);                                // sll v0, ra, 0
   // c->jalr(call_addr);                               // jalr ra, t9
-  printf("ERROR: Exceeded max number of collide-cache prims!\n");
+  // MOD battlefront -- no line: the cache keeps its 100 prims and skips the rest, the engine's own
+  // way; the PS2 printed this to its debug console only, and the PC log got a line for each prim
+  // skipped (2757 in four minutes of a 200-a-side battle's crowds, round 45)
+  // printf("ERROR: Exceeded max number of collide-cache prims!\n");
 
 block_3:
   c->ld(ra, 0, sp);                                 // ld ra, 0(sp)
@@ -627,7 +633,10 @@ block_11:
   call_addr = c->gprs[t9].du32[0];                  // function call:
   c->sll(v0, ra, 0);                                // sll v0, ra, 0
   // c->jalr(call_addr);                               // jalr ra, t9
-  printf("ERROR: Exceeded max number of collide-cache prims!\n");
+  // MOD battlefront -- no line: the cache keeps its 100 prims and skips the rest, the engine's own
+  // way; the PS2 printed this to its debug console only, and the PC log got a line for each prim
+  // skipped (2757 in four minutes of a 200-a-side battle's crowds, round 45)
+  // printf("ERROR: Exceeded max number of collide-cache prims!\n");
   //beq r0, r0, L62                                 // beq r0, r0, L62
   // nop                                            // sll r0, r0, 0
   goto block_14;                                    // branch always
@@ -734,7 +743,10 @@ block_2:
   // call_addr = c->gprs[t9].du32[0];                  // function call:
   c->sll(v0, ra, 0);                                // sll v0, ra, 0
   // c->jalr(call_addr);                               // jalr ra, t9
-  printf("ERROR: Exceeded max number of collide-cache prims!\n");
+  // MOD battlefront -- no line: the cache keeps its 100 prims and skips the rest, the engine's own
+  // way; the PS2 printed this to its debug console only, and the PC log got a line for each prim
+  // skipped (2757 in four minutes of a 200-a-side battle's crowds, round 45)
+  // printf("ERROR: Exceeded max number of collide-cache prims!\n");
 
 block_3:
   c->ld(ra, 0, sp);                                 // ld ra, 0(sp)

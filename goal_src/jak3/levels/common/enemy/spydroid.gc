@@ -5,6 +5,12 @@
 ;; name in dgo: spydroid
 ;; dgos: CTYPESC
 
+;; MOD battlefront -- the Freedom League's blue spider robots (round 46, pc/features/battlefront/battlefront-h.gc, GAME)
+(define-extern bf-bot-skel-name (function symbol string))
+(define-extern bf-guard-clips (function process-drawable none))
+;; MOD battlefront -- its attack-controller type: a blue spider robot fights for the Freedom League (round 47)
+(define-extern bf-attacker-type (function process int int))
+
 ;; DECOMP BEGINS
 
 (defpart 4699
@@ -1284,9 +1290,12 @@
   "Typical place for shared init code. Runs from entity or process style init."
   (initialize-skeleton
     this
-    (the-as skeleton-group (art-group-get-by-name *level* "skel-spydroid" (the-as (pointer level) #f)))
+    ;; MOD battlefront -- "skel-spydroid", or the blue one for the Freedom League's spider robots
+    (the-as skeleton-group (art-group-get-by-name *level* (bf-bot-skel-name #t) (the-as (pointer level) #f)))
     (the-as pair 0)
     )
+  ;; MOD battlefront -- a blue spider robot plays the stock one's clips (spydroid-ag)
+  (bf-guard-clips this)
   (setup-enemy! this *spydroid-nav-enemy-info*)
   (call-parent-method this)
   (let ((v1-5 (-> this neck)))
@@ -1505,7 +1514,8 @@
     (set! (-> this mission-squad) *cty-attack-controller*)
     (when (not (-> this attacker-info))
       (set! (-> this attacker-info) (allocate-attacker (-> this mission-squad)))
-      (init! (-> this attacker-info) this 11)
+      ;; MOD battlefront -- spydroid (11), or a rifle guard (4) for a blue spider robot
+      (init! (-> this attacker-info) this (bf-attacker-type this 11))
       )
     )
   (none)

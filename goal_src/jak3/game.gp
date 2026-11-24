@@ -99,6 +99,10 @@
 (hash-table-set! *file-entry-map* "bf-hover-blue-ag.go" #f)
 (hash-table-set! *file-entry-map* "bf-transport-red-ag.go" #f)
 (hash-table-set! *file-entry-map* "bf-transport-blue-ag.go" #f)
+(hash-table-set! *file-entry-map* "bf-baron-ag.go" #f)
+(hash-table-set! *file-entry-map* "bf-ashelin-ag.go" #f)
+(hash-table-set! *file-entry-map* "bf-robot-blue-ag.go" #f)
+(hash-table-set! *file-entry-map* "bf-spider-blue-ag.go" #f)
 
 (cgo-file "game.gd" '("$OUT/obj/gcommon.o" "$OUT/obj/gstate.o" "$OUT/obj/gstring.o" "$OUT/obj/gkernel.o"))
 
@@ -429,6 +433,13 @@
     #f
     )
 
+;; MOD battlefront -- the Spargus war zone (bf-spargus, round 50): the same, generated from
+;; custom_assets/jak3/ports/battlefront-spargus/port.jsonc and the player's Jak 3 extraction
+(if (file-exists? "goal_src/jak3/levels/bf-spargus/bf-spargus.gp")
+    (load-file "goal_src/jak3/levels/bf-spargus/bf-spargus.gp")
+    #f
+    )
+
 ;; generate the art group for a custom actor.
 ;; requires a .glb model file in custom_assets/jak3/models/custom_levels
 ;; options:
@@ -457,6 +468,16 @@
 ;; the troop transports' rip runs at 60 frames per second, build-actor's default
 (build-actor "bf-transport-red")
 (build-actor "bf-transport-blue")
+;; Baron Praxis (round 44): Jak 2's cutscene model with the mod's own clips, keyed 15 times a second
+;; by the Jak Animation Studio, built 60 frames a second (scripts/battlefront/make_baron_clips.py)
+(build-actor "bf-baron")
+;; Ashelin (round 53): Jak 3's Ashelin with clips made from her own at install, keyed 30 times a
+;; second (mod_models.py "made_clips")
+(build-actor "bf-ashelin" :framerate 30.0)
+;; the Freedom League's robotguard and spider robot (round 46): Jak 3's own recolored, one clip each
+;; (they play the stock art groups' clips)
+(build-actor "bf-robot-blue" :framerate 15.0)
+(build-actor "bf-spider-blue" :framerate 15.0)
 
 ;;;;;;;;;;;;;;;;;;;;;
 ;; ANIMATIONS

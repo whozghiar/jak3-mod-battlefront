@@ -22,7 +22,9 @@
 
 (define *background-draw-engine* (new 'global 'engine 'draw 10 connection))
 
-(define *matrix-engine* (new 'global 'boxed-array handle 384))
+;; MOD battlefront -- 1024 animated processes a frame, not 384: a battle's 200 units a side are
+;; each one (round 44: 340 units and the rest filled it, its break! ended the game)
+(define *matrix-engine* (new 'global 'boxed-array handle 1024))
 
 (set! (-> *matrix-engine* length) 0)
 

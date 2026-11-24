@@ -204,11 +204,13 @@
 
 (deftype traffic-object-type-info (structure)
   ((flags                 traffic-type-flag)
-   (active-count          int8)
-   (inactive-count        int8)
+   ;; MOD battlefront -- the three counts unsigned (stock int8): a battle's 224 guards at 200 a side
+   ;; (round 44) wrapped past 127, the guard pool shrank and the guards stopped near 104 awake
+   (active-count          uint8)
+   (inactive-count        uint8)
    (reserve-count         uint16)
    (killed-count          uint16)
-   (want-count            int8)
+   (want-count            uint8)
    (tracker-index         uint8)
    (parking-spot-prob     uint8)
    (guard-type            uint8)
@@ -242,13 +244,14 @@
    (object-hash              spatial-hash)
    (rand                     float)
    (id                       uint8)
-   (active-object-count      uint8)
+   ;; MOD battlefront -- the awake count a uint16 (stock uint8, before the sleeping one), the lists
+   ;; 448 long (126 stock, 224 in round 41): a battle's 200 units a side are walkers, all on one
+   ;; tracker (round 44). The trackers grow by 5792 bytes together: traffic-engine's fields after
+   ;; them moved as much (their stock offsets in the comments)
    (inactive-object-count    int8)
-   ;; MOD battlefront -- 224 awake objects, not 126: a battle's 100 units a side are walkers, all on
-   ;; one tracker (round 41). The trackers grow by 1760 bytes together: traffic-engine's fields
-   ;; after them moved as much (their stock offsets in the comments)
-   (active-object-list       handle        224)
-   (active-object-type-list  traffic-type  224)
+   (active-object-count      uint16)
+   (active-object-list       handle        448)
+   (active-object-type-list  traffic-type  448)
    )
   (:methods
     (traffic-tracker-method-9 (_type_) none)
@@ -289,11 +292,11 @@
    (tracker-array           traffic-tracker           2 :inline)
    (tracker0                traffic-tracker           :inline :overlay-at (-> tracker-array 0))
    (tracker1                traffic-tracker           :inline :overlay-at (-> tracker-array 1))
-   (inactive-object-array   handle                    580     :offset 9216) ;; MOD battlefront -- stock 7456
+   (inactive-object-array   handle                    580     :offset 13248) ;; MOD battlefront -- stock 7456
    (suppressor              traffic-suppressor        :inline)
-   (danger-sphere-count     int8                              :offset 14416) ;; MOD battlefront -- stock 12656
+   (danger-sphere-count     int8                              :offset 18448) ;; MOD battlefront -- stock 12656
    (danger-sphere-array     traffic-danger-info       4 :inline)
-   (allow-spawning?         symbol                            :offset 14688) ;; MOD battlefront -- stock 12928
+   (allow-spawning?         symbol                            :offset 18720) ;; MOD battlefront -- stock 12928
    ;; MOD battlefront -- the street data of more sections, for a battle that loads every section of
    ;; the city at once (`traffic-level-data-ref`: entries 0 and 1 are level-data-array's)
    (level-data-extra        traffic-level-data        6 :inline)

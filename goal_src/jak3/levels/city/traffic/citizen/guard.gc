@@ -10,8 +10,11 @@
 (define-extern bf-attacker-type (function process int int))
 (define-extern bf-guard-activated (function process none))
 (define-extern bf-guard-weapon (function process int int))
+(define-extern bf-guard-reload-count (function process int int))
 (define-extern bf-guard-flags (function process uint uint uint))
 (define-extern bf-guard-clips (function process-drawable none))
+;; MOD battlefront -- no blows in a battle (round 52)
+(define-extern bf-melee-ok? (function process symbol))
 
 ;; DECOMP BEGINS
 
@@ -423,9 +426,12 @@
      (crimson-guard-method-267 this (the-as guard-type (-> arg3 param 0)) #f)
      )
     (('bouncing-off)
-     (when (or (and (-> this next-state) (= (-> this next-state name) 'active))
-               (and (-> this next-state) (= (-> this next-state name) 'wait))
-               )
+     ;; MOD battlefront -- no rifle butt for a battle's guard bumped (bf-melee-ok?)
+     (when (and (bf-melee-ok? this)
+                (or (and (-> this next-state) (= (-> this next-state name) 'active))
+                    (and (-> this next-state) (= (-> this next-state name) 'wait))
+                    )
+                )
        (speech-control-method-17 *speech-control* (speech-type guard-chatter) 0.3)
        (speech-control-method-17 *speech-control* (speech-type guard-chatter-jak) 0.3)
        (speech-control-method-13 *speech-control* this (speech-type guard-bumped-by-jak) (-> this traffic-id))
@@ -1026,7 +1032,8 @@
   )
 
 (defmethod crimson-guard-method-285 ((this crimson-guard) (arg0 int))
-  (+! (-> this ammo-count) arg0)
+  ;; MOD battlefront -- a battle's guard reloads its whole magazine (bf-guard-reload-count)
+  (+! (-> this ammo-count) (bf-guard-reload-count this arg0))
   (set! (-> this ammo-count) (max 0 (min (-> this ammo-count) (crimson-guard-method-286 this))))
   )
 

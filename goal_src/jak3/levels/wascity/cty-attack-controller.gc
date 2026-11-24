@@ -158,7 +158,8 @@
   ;; MOD battlefront -- 256 attackers, not 64: a battle's 200 units at most (100 a side since round 41;
   ;; 128 for its 80 before round 40), the player and the city's own (allocate-attacker found none
   ;; left past 64; the units without one corrupted memory)
-  (init! *cty-attack-controller* 256 17 22)
+  ;; MOD battlefront -- 512 since round 44: 200 units a side
+  (init! *cty-attack-controller* 512 17 22)
   (none)
   )
 

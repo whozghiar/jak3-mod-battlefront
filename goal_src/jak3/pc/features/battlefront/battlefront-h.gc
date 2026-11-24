@@ -35,10 +35,11 @@
 
 (defconstant BF_RESERVE 500)          ;; units in stock per side at the start of a battle
 (defconstant BF_TEAM_COUNT 2)
-(defconstant BF_CLASS_COUNT 8)
-(defconstant BF_ZONE_COUNT 2)          ;; Jak 3's Haven City, Jak 2's Haven City (`*bf-zones*`)
+(defconstant BF_CLASS_COUNT 9)
+(defconstant BF_ZONE_COUNT 3)          ;; Jak 3's Haven City, Jak 2's Haven City, Spargus (`*bf-zones*`)
 (defconstant BF_ZONE_FIRST 1)          ;; the first zone of the war zone page: Jak 3's city no longer offered (round 42, the author's wish)
 (defconstant BF_ZONE_JAK2 1)           ;; Jak 2's Haven City (bf-havenj2), when the player's discs built it
+(defconstant BF_ZONE_SPARGUS 2)        ;; Jak 3's Spargus (bf-spargus, round 50), when the level port built it
 
 ;; Teams. The values index `reserve` and `losses` in `bf-state`.
 (defconstant BF_TEAM_NONE -1)
@@ -46,7 +47,8 @@
 (defconstant BF_TEAM_KG 1)            ;; Krimzon Guard ("Grenagarde")
 
 ;; Classes. 0-3 Freedom League, 4-7 Krimzon Guard. Neither the Spargus Citizen (2) nor Jak (3) is
-;; playable any more: the Freedom League offers 0 and 1, and their entries only keep the indices.
+;; playable any more: their entries only keep the indices. Round 46: the Freedom League offers the
+;; robotguard and the spider robot too, classes 6 and 7 drawn blue (`bf-row-class`).
 (defconstant BF_CLASS_BLUE_GUARD 0)
 (defconstant BF_CLASS_BLUE_JETPACK 1)
 (defconstant BF_CLASS_WASTELANDER 2)
@@ -55,6 +57,36 @@
 (defconstant BF_CLASS_RED_JETPACK 5)
 (defconstant BF_CLASS_ROBOGUARD 6)
 (defconstant BF_CLASS_SPYDROID 7)
+(defconstant BF_CLASS_BARON 8)    ;; Baron Praxis, the Krimzon Guard's special character (round 44, battlefront-baron.gc)
+(defconstant BF_CLASS_ASHELIN 9)  ;; Ashelin, the Freedom League's special character (round 53, battlefront-ashelin.gc)
+(defconstant BF_CLASS_COUNT 10)
+
+(defun bf-row-class ((team int) (row int))
+  "The class on row ROW of side TEAM's class page: the Krimzon Guard's 4 on (Baron Praxis 8 on row
+   4), the Freedom League's 0 and 1, then the robotguard and the spider robot (6 and 7, round 46:
+   blue on that side), then Ashelin (9, round 53)."
+  (cond
+    ((and (= team BF_TEAM_FF) (= row 4)) BF_CLASS_ASHELIN)
+    ((and (= team BF_TEAM_FF) (>= row 2)) (+ row 4))
+    (else (+ (* 4 team) row))
+    )
+  )
+
+(defun bf-class-row ((team int) (class int))
+  "The row of CLASS on side TEAM's class page (`bf-row-class`'s reverse)."
+  (cond
+    ((= class BF_CLASS_ASHELIN) 4)
+    ((and (= team BF_TEAM_FF) (>= class 4)) (- class 4))
+    (else (- class (* 4 team)))
+    )
+  )
+
+(defun bf-own-mover? ((class int))
+  "#t for a special character's class, Baron Praxis (round 44) or Ashelin (round 53): it moves
+   itself (its own collision, gravity, jumps and attacks, battlefront-baron.gc and
+   battlefront-ashelin.gc), Jak standing hidden where it stands, its pad its own (`*bf-baron-pad*`)."
+  (or (= class BF_CLASS_BARON) (= class BF_CLASS_ASHELIN))
+  )
 
 ;; Battle phases.
 (defconstant BF_PHASE_OFF 0)          ;; no battle: every hook answers like the stock game
@@ -81,6 +113,7 @@
 (defconstant BF_WEAPON_GRENADE 2)
 (defconstant BF_WEAPON_ROCKET 3)   ;; the jetpack guards' rockets (L1, round 36), for the gun HUD
 (defconstant BF_WEAPON_BOT_GRENADE 4) ;; the robotguard's grenades (L1, round 38), for the gun HUD
+(defconstant BF_WEAPON_PISTOL 5)   ;; Ashelin's pistols (Square, round 54): her magazine in `*bf*` mag, the gun HUD
 
 ;; Indices of `*game-info*` gun-ammo. The class weapons spend Jak's own ammo, so the stock ammo
 ;; pickups refill them: yellow the rifles and guns, red the grenades, blue the tazer, dark the
@@ -100,23 +133,37 @@
 
 ;; Army caps: units per side on the street at once, the battle setup's choice (30 to 100, 100 by
 ;; default since round 43; round 41, the author's wish: 40 until round 39, 63 in round 40). `bf-caps-set!` splits it:
-;; Freedom League, 72 % blue guards, the rest blue jetpack guards; Krimzon Guard, a fifth each of red
-;; riflemen, red grenadiers, red jetpack guards, robotguards and spider robots. The traffic pools are
-;; capped to their sums (`*bf-pool-caps*`, `bf-want-count`), and each new guard or jetpack guard takes
-;; the look furthest below its share (`*bf-look-share*`). The four kinds are walkers of the traffic:
+;; each side two fifths of guards (the Krimzon Guard's three riflemen for one grenadier), a fifth
+;; each of jetpack guards and robotguards, the rest spider robots (round 46: the Freedom League's
+;; robotguards and spiders, blue; until then 72 % blue guards and the rest jetpack guards). The
+;; traffic pools are capped to their sums (`*bf-pool-caps*`, `bf-want-count`), and each new unit
+;; takes the look of its kind furthest below its share (`*bf-look-share*`). The four kinds are walkers of the traffic:
 ;; it wakes them on one tracker, which lists 224 awake objects since round 41 (traffic-engine-h.gc;
 ;; 126 stock, 63 a side). A traffic pool keeps its sleeping units in 20 slots (traffic-engine.gc
 ;; reset-and-init-from-manager): the guard pool and the flying turrets' get `*bf-guard-pool-slots*`
 ;; and `*bf-turret-pool-slots*` instead.
 (defconstant BF_AT_ONCE_MIN 30)
-(defconstant BF_AT_ONCE_MAX 100)
+(defconstant BF_AT_ONCE_MAX 200) ;; 100 until round 44
+;; The setup's units at once count the whole city, both sides (round 45, the author's wish: "200
+;; guards at once in the whole city"; rounds 41 to 44 counted a side): half of it each side.
+(defconstant BF_CITY_AT_ONCE_MIN 60)
+(defconstant BF_CITY_AT_ONCE_MAX 200)
 
 ;; The guard pool's sleeping units (traffic-engine.gc reset-and-init-from-manager points guard-a's
 ;; slots here): the most guards a battle has (72 + 40) and room to spare, where the stock 20 slots
 ;; would run into the next types' (guard-b, the Metal Heads).
-(define *bf-guard-pool-slots* (new 'static 'array uint64 128))
-;; The same for the flying turrets: the most a battle has (28 + 20) and room to spare (round 40).
-(define *bf-turret-pool-slots* (new 'static 'array uint64 64))
+(define *bf-guard-pool-slots* (new 'static 'array uint64 256))
+;; The same for the flying turrets: the most a battle has (56 + 40) and room to spare (round 40).
+(define *bf-turret-pool-slots* (new 'static 'array uint64 128))
+;; And for the robotguards and the spiders (round 44: 40 each at 200 a side, the stock 20 slots).
+(define *bf-robot-pool-slots* (new 'static 'array uint64 64))
+(define *bf-spider-pool-slots* (new 'static 'array uint64 64))
+
+;; The battle's units awake of each kind (guards, flying turrets, robotguards, spiders), counted by
+;; the Haven City side every frame (battlefront-city.gc `bf-city-dots`): the pools keep only
+;; BF_POOL_SPARE asleep above them (`bf-want-count`, round 44).
+(define *bf-awake-kinds* (new 'static 'array int32 4 0 0 0 0))
+(defconstant BF_POOL_SPARE 24)
 
 ;; The battle's unit kinds (traffic types: guard-a, flying-turret, roboguard, spydroid) and each
 ;; side's share of the caps above, Freedom League then Krimzon Guard, in that order: what its troop
@@ -141,7 +188,7 @@
    (desc-fr     string)
    (ff-continue string)    ;; Freedom League base
    (kg-continue string)    ;; Krimzon Guard base
-   (city        symbol)    ;; the level holding the battle's city code (Jak 3's ctywide, or bf-havenj2)
+   (city        symbol)    ;; the level holding the battle's city code (Jak 3's ctywide, bf-havenj2 or bf-spargus)
    (bases       int32)     ;; its headquarters: the first points of its table (`*bf-base-count*`)
    )
   )
@@ -168,26 +215,30 @@
 (defconstant BF_POINT_MAX 17)     ;; the most a war zone has: Jak 2's city, 4 bases and 13 control points
 ;; (Jak 3's city: 2 bases and 8 control points, two in each district). A zone's count is its table's
 ;; (`bf-control-count`).
-(defconstant BF_POINT_RADIUS (meters 35))      ;; units within it count for its capture (25 m until round 35, 15 m until round 30)
-(defconstant BF_CAPTURE_TIME 30.0)             ;; seconds a side's majority on it takes to capture it
-(defconstant BF_CAPTURE_MIN_TIME 10.0)         ;; a neutral point, at the fastest (round 42: the more units, the faster)
-(defconstant BF_CAPTURE_STEP 0.25)             ;; each unit of a majority past the first adds this to a neutral point's capture speed
+(defconstant BF_POINT_RADIUS (meters 50))      ;; units within it count for its capture (round 44, wider against crowds: 35 m until then, 25 m until round 35)
+(defconstant BF_NEUTRALIZE_TIME 20.0)          ;; seconds another side's majority takes to make a held point neutral (round 44)
+(defconstant BF_CAPTURE_TIME 15.0)             ;; seconds a side's majority takes to capture a neutral point (round 44; one 30 s step until then)
 
 (deftype bf-point (structure)
   "A battle point: a side's base, or a control point the sides capture (`bf-update-points`)."
   ((pos        vector :inline) ;; on the ground
    (owner      int32)          ;; BF_TEAM_FF, BF_TEAM_KG, or BF_TEAM_NONE: neutral
    (base?      symbol)         ;; a side's base: never changes hands
-   (prog-team  int32)          ;; the side capturing it, BF_TEAM_NONE for none
-   (progress   float)          ;; seconds of capture so far, up to BF_CAPTURE_TIME
+   (prog-team  int32)          ;; the side taking it (neutralizing it from its holder, or capturing it neutral), BF_TEAM_NONE for none
+   (progress   float)          ;; seconds of that so far, up to BF_NEUTRALIZE_TIME held, BF_CAPTURE_TIME neutral
    (near       int32 2)        ;; units of each side within BF_POINT_RADIUS at the last count
    (ship       handle)         ;; the troop transport over it now (a base's), #f for none (battlefront-city.gc)
    (old-ship   handle)         ;; the one leaving it after a capture: the new holder's waits for it to go
    (fight      float)          ;; seconds of a fight away from the player since its last losses
    (snapped?   symbol)         ;; moved onto the open ground nearest it once its section loaded
    (icon       connection-minimap) ;; its mark on the game's minimap during a fight, #f for none
+   (ship-done? symbol)         ;; a base whose ship brought its `*bf-ship-load*` units and left: no ship comes there again this battle
    )
   )
+
+;; A troop transport leaves into the sky once it brought this many units (round 45, the author's
+;; wish: 100); the tests lower it.
+(define *bf-ship-load* 100)
 
 (deftype bf-point-def (basic)
   "Where a battle point stands: its name (English, French), the continue point whose levels a
@@ -218,7 +269,7 @@
    (redeploying?  symbol)         ;; the player's death is a redeploy: the class page at once
    (respawn-choice int32)         ;; the point the class page picked for the dead player's respawn, -1 for none (battlefront.gc `bf-target-death`)
    (respawn-point int32)          ;; the player's respawn point, kept from one death to the next (round 30): his base at a deployment
-   (reserve-max   int32)          ;; units per side at the battle's start (the configuration page, battlefront.gc `*bf-config*`)
+   (reserve-max   int32)          ;; units per side at the battle's start (the configuration page, battlefront.gc `*bf-config*`), 0 unlimited
    (time-limit    int32)          ;; minutes the fight lasts at most, 0 for no limit
    (victory       int32)          ;; BF_WIN_POINTS or BF_WIN_UNITS
    (hold-team     int32)          ;; the side holding every control point now, BF_TEAM_NONE for none
@@ -234,7 +285,7 @@
    (director      handle)         ;; the process running the battle (battlefront.gc)
    (spectate      handle)         ;; the unit the camera follows while the player waits to respawn
    (weapon        int32)          ;; BF_WEAPON_* in the hands of a guard class
-   (mag           int32 3)        ;; shots left in each guard weapon's magazine, by BF_WEAPON_*
+   (mag           int32 6)        ;; shots left in each weapon's magazine, by BF_WEAPON_* (Ashelin's pistols 5, round 54)
    (rockets       int32)          ;; a jetpack guard's rockets, or a robotguard's grenades, left this life (battlefront-player.gc BF_ROCKETS)
    (nova-kills    int32)          ;; foes the spider's last blast struck (`bf-avatar-nova`), for the tests
    (redraw?       symbol)         ;; the class model must be drawn again (red guard weapon change)
@@ -282,6 +333,7 @@
    (land-time     time-frame)     ;; when he landed (game clock), 0 none: his class model's landing clip
    (drop-collide  collide-spec)   ;; what Jak collides with, kept while he falls (he meets the scenery only)
    (still-until   time-frame)     ;; the player stands still until then (game clock): a grenade throw, a tazer stab (`bf-pad-lock!`)
+   (spawned       int32 2)        ;; units each side brought onto the field this battle, ships and sky (`bf-unit-brought!`, round 44)
    )
   )
 
@@ -320,11 +372,12 @@
   (set! (-> *bf* points i old-ship) (the-as handle #f))
   (set! (-> *bf* points i snapped?) #f)
   (set! (-> *bf* points i icon) #f)
+  (set! (-> *bf* points i ship-done?) #f)
   )
 
 ;; The units awake, for the maps (battlefront.gc `bf-draw-city-map`): their places, headings and
 ;; sides, written every frame of a fight by the Haven City side (battlefront-city.gc `bf-city-dots`).
-(defconstant BF_DOT_MAX 256) ;; 200 units at most (100 a side) and the player
+(defconstant BF_DOT_MAX 512) ;; 400 units at most (200 a side since round 44) and the player
 
 (deftype bf-unit-dots (structure)
   ((count  int32)
@@ -410,6 +463,24 @@
       :kg-continue "bfh-stadium-start"
       :city 'bf-havenj2
       :bases 4
+      )
+    ;; Jak 3's Spargus (round 50, the author's wish), one level made from the player's Jak 3 disc at
+    ;; install (bf-spargus: battlefront-spargus-info.gc): its two districts with Haven City's traffic
+    ;; code, no Wastelander, its doors to the garage, the arena and the palace walled. Since round 54
+    ;; the destruction of an objective (battlefront-artifact.gc): the Freedom League defends a
+    ;; precursor artifact by the precursor game, in the west district, the Krimzon Guard comes from
+    ;; the east one to destroy it; no control point.
+    (new 'static 'bf-zone
+      :name "Spargus"
+      :desc "The desert city, the destruction of an objective: the Freedom League defends a precursor artifact by the precursor game, in the west district; the Krimzon Guard comes from the east district to destroy it."
+      :name-fr "Spargus"
+      :desc-fr "La cité du désert, destruction d'objectif : la Ligue défend un artefact précurseur près du jeu précurseur, dans le quartier ouest ; la Grenagarde vient du quartier est pour le détruire."
+      ;; round 54: the Freedom League at the west camp by the precursor game (the port's "kg-camp"),
+      ;; the Krimzon Guard at the east one (its "ff-camp"), as `*bf-point-defs-spargus*`
+      :ff-continue "bfs-kg-camp"
+      :kg-continue "bfs-ff-camp"
+      :city 'bf-spargus
+      :bases 2
       )
     )
   )
@@ -534,6 +605,35 @@
     )
   )
 
+;; Spargus (round 54, the destruction of an objective): each side's camp at one end of the city (the
+;; level port's continue points, on the nav mesh), then the precursor artifact's point, which no side
+;; takes (battlefront-artifact.gc; it moves onto the nav poly nearest the precursor game's door as
+;; the artifact stands, `bf-artifact-update`). The Freedom League's camp is the west one by the
+;; precursor game (the port's "kg-camp", its name of rounds 50 to 53), the Krimzon Guard's the east
+;; one (the port's "ff-camp"). Rounds 50 to 53 had 4 control points: wascityb's market (1775.9, 29.7,
+;; -367.7) and western heights (1763.4, 47.9, -224.5), the pass (2078.4, 26.9, -310.4) and
+;; wascitya's square (2262.4, 3.4, -171.2). The level port links the two districts' meshes at the
+;; pass with a strip of polys across their 17 to 19 m gap (port.jsonc's nav "links", round 51).
+(define *bf-point-defs-spargus*
+  (new 'static 'boxed-array :type bf-point-def
+    (new 'static 'bf-point-def :name "Freedom League camp" :name-fr "Camp de la Ligue" :continue "bfs-kg-camp")
+    (new 'static 'bf-point-def :name "Krimzon Guard camp" :name-fr "Camp de la Grenagarde" :continue "bfs-ff-camp")
+    (new 'static 'bf-point-def :name "Precursor artifact" :name-fr "Artefact précurseur" :continue "bfs-wascityb-start"
+      :x 1477.1 :y 28.2 :z -370.8)
+    )
+  )
+
+;; letters from the Krimzon Guard's side (the east) to the Freedom League's (the west): the one point
+(define *bf-point-order-spargus* (new 'static 'array int32 1 2))
+
+(define *bf-point-links-spargus*
+  (new 'static 'array uint32 3
+    #b100  ;; Freedom League camp: the artifact
+    #b100  ;; Krimzon Guard camp: the artifact
+    #b011  ;; the artifact: both camps
+    )
+  )
+
 ;; The current war zone's tables: the whole battle code reads these three and its base count, which
 ;; `bf-zone-select!` points at the zone's own (Jak 3's city until a zone is picked).
 (define *bf-point-defs* *bf-point-defs-jak3*)
@@ -545,7 +645,7 @@
   "Point the battle's tables (`*bf-point-defs*`, `*bf-point-order*`, `*bf-point-links*`,
    `*bf-base-count*`) at war zone ZONE's, and the units' levels (ctypesa, ctypesc) at its city level as their host: they load into
    its borrow heaps (level.gc level-find-borrow-slot: a borrow-city-small level borrows from its
-   master level only), Jak 3's ctywide's or bf-havenj2's."
+   master level only), Jak 3's ctywide's, bf-havenj2's or bf-spargus's."
   (let ((city (-> *bf-zones* zone city)))
     (set! *bf-base-count* (-> *bf-zones* zone bases))
     (cond
@@ -553,6 +653,11 @@
        (set! *bf-point-defs* *bf-point-defs-jak2*)
        (set! *bf-point-order* *bf-point-order-jak2*)
        (set! *bf-point-links* *bf-point-links-jak2*)
+       )
+      ((= zone BF_ZONE_SPARGUS)
+       (set! *bf-point-defs* *bf-point-defs-spargus*)
+       (set! *bf-point-order* *bf-point-order-spargus*)
+       (set! *bf-point-links* *bf-point-links-spargus*)
        )
       (else
         (set! *bf-point-defs* *bf-point-defs-jak3*)
@@ -575,24 +680,36 @@
   (- (-> *bf-point-defs* length) *bf-base-count*)
   )
 
+(defun bf-zone-ported? ((zone int))
+  "#t for a war zone that is one level made by the level port (Jak 2's city, Spargus): no street
+   section to load, no force field."
+  (or (= zone BF_ZONE_JAK2) (= zone BF_ZONE_SPARGUS))
+  )
+
 (defun bf-zone-open? ((zone int))
-  "#t when war zone ZONE can be played: one of `*bf-zones*`, Jak 2's only once the player's discs
-   built its level (`*bfh-built*`)."
-  (and (< zone BF_ZONE_COUNT) (or (!= zone BF_ZONE_JAK2) *bfh-built*))
+  "#t when war zone ZONE can be played: one of `*bf-zones*`, Jak 2's and Spargus only once the
+   level port built their level (`*bfh-built*`, `*bfs-built*`)."
+  (and (< zone BF_ZONE_COUNT)
+       (cond
+         ((= zone BF_ZONE_JAK2) *bfh-built*)
+         ((= zone BF_ZONE_SPARGUS) *bfs-built*)
+         (else #t)
+         )
+       )
   )
 
 (defun bf-zone-sections ((zone int))
   "The street sections a battle in war zone ZONE loads besides its city level: Jak 3's six
-   (`*bf-whole-city*`), none for Jak 2's city, one level."
-  (if (= zone BF_ZONE_JAK2)
+   (`*bf-whole-city*`), none for Jak 2's city and Spargus, one level each."
+  (if (bf-zone-ported? zone)
       '()
       *bf-whole-city*
       )
   )
 
 (defun bf-city-level ()
-  "The level holding the current battle's city code (its zone's `city`): Jak 3's ctywide or
-   bf-havenj2."
+  "The level holding the current battle's city code (its zone's `city`): Jak 3's ctywide,
+   bf-havenj2 or bf-spargus."
   (-> *bf-zones* (-> *bf* zone) city)
   )
 
@@ -699,6 +816,44 @@
                     "~Y<PAD_L1>~Z~+94H Exploser (jauge orange)"
                     )
          )
+    (new 'static 'bf-class-info :name "Baron Praxis" :team BF_TEAM_KG
+         :desc (new 'static 'boxed-array :type string
+                 "~Y<PAD_SQUARE>~Z~+94H Sword slash"
+                 "~Y<PAD_CIRCLE>~Z~+94H Sword spin"
+                 "~Y<PAD_X>~Z~+94H Jump"
+                 "~Y<PAD_L2>~Z~+94H White barrier, walking slowly"
+                 "~Y<PAD_R2>~Z~+94H Yellow eco ball (yellow gauge)"
+                 )
+         :name-fr "Baron Praxis"
+         :desc-fr (new 'static 'boxed-array :type string
+                    "~Y<PAD_SQUARE>~Z~+94H Coup d'épée"
+                    "~Y<PAD_CIRCLE>~Z~+94H Coup d'épée circulaire"
+                    "~Y<PAD_X>~Z~+94H Sauter"
+                    "~Y<PAD_L2>~Z~+94H Barrière blanche, marche lente"
+                    "~Y<PAD_R2>~Z~+94H Boule d'éco jaune (jauge jaune)"
+                    )
+         )
+    (new 'static 'bf-class-info :name "Ashelin" :team BF_TEAM_FF
+         :desc (new 'static 'boxed-array :type string
+                 "~Y<PAD_SQUARE>~Z~+94H Both pistols"
+                 "~Y<PAD_TRIANGLE>~Z~+94H Reload"
+                 "~Y<PAD_R1>~Z~+94H Grenade (10 a life)"
+                 "~Y<PAD_CIRCLE>~Z~+94H Spinning kick"
+                 "~Y<PAD_L1>~Z~+94H Kneel"
+                 "~Y<PAD_R2>~Z~+24H+~Z~+37H<PAD_ANALOG_LEFT_RIGHT>~Z~+57H Side flip"
+                 "~Y<PAD_X>~Z~+94H Jump, again: a flip"
+                 )
+         :name-fr "Ashelin"
+         :desc-fr (new 'static 'boxed-array :type string
+                    "~Y<PAD_SQUARE>~Z~+94H Les deux pistolets"
+                    "~Y<PAD_TRIANGLE>~Z~+94H Recharger"
+                    "~Y<PAD_R1>~Z~+94H Grenade (10 par vie)"
+                    "~Y<PAD_CIRCLE>~Z~+94H Coup de pied circulaire"
+                    "~Y<PAD_L1>~Z~+94H S'accroupir"
+                    "~Y<PAD_R2>~Z~+24H+~Z~+37H<PAD_ANALOG_LEFT_RIGHT>~Z~+57H Salto de côté"
+                    "~Y<PAD_X>~Z~+94H Sauter, encore : salto"
+                    )
+         )
     )
   )
 
@@ -729,6 +884,61 @@
 (defun bf-tr ((en string) (fr string))
   "EN, or FR when the game runs in French."
   (if (bf-fr?) fr en)
+  )
+
+;; The Controls page (battlefront.gc `bf-draw-controls-page`, round 44): what every class does, then
+;; each class's own buttons. The font has no L3 nor START icon: their names stand in their place, the
+;; text past them (+124H: START is wider than the class help's 94H column).
+(define *bf-controls-help*
+  (new 'static 'boxed-array :type string
+    "~Y<PAD_ANALOG_ANY>~Z~+124H Left stick: move"
+    "~Y<PAD_ANALOG_ANY>~Z~+124H Right stick: aim"
+    "~YL3 +~Z~+44H<PAD_ANALOG_UP_DOWN>~Z~+124H Camera closer / farther"
+    "~YL3~Z~+124H Kills, deaths, live map"
+    "~YSTART~Z~+124H Battle menu"
+    "~Y<PAD_X>~Z~+124H Dead: respawn"
+    "~Y<PAD_TRIANGLE>~Z~+124H Dead: class and point"
+    )
+  )
+
+(define *bf-controls-help-fr*
+  (new 'static 'boxed-array :type string
+    "~Y<PAD_ANALOG_ANY>~Z~+124H Stick gauche : se déplacer"
+    "~Y<PAD_ANALOG_ANY>~Z~+124H Stick droit : viser"
+    "~YL3 +~Z~+44H<PAD_ANALOG_UP_DOWN>~Z~+124H Caméra plus près / plus loin"
+    "~YL3~Z~+124H Éliminations, morts, carte"
+    "~YSTART~Z~+124H Menu de bataille"
+    "~Y<PAD_X>~Z~+124H Mort : réapparaître"
+    "~Y<PAD_TRIANGLE>~Z~+124H Mort : classe et point"
+    )
+  )
+
+;; The Controls page's classes, one per set of buttons (the guards' and the jetpacks' the same in
+;; both colors): BF_CLASS_* whose help it shows.
+(define *bf-help-kinds* (new 'static 'boxed-array :type int32 0 1 6 7 8 9))
+
+(defun bf-help-kind-of ((class int))
+  "The index in `*bf-help-kinds*` of the buttons of CLASS (a red guard's are the blue one's)."
+  (case class
+    ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK) 1)
+    ((BF_CLASS_ROBOGUARD) 2)
+    ((BF_CLASS_SPYDROID) 3)
+    ((BF_CLASS_BARON) 4)
+    ((BF_CLASS_ASHELIN) 5)
+    (else 0)
+    )
+  )
+
+(defun bf-help-kind-name ((class int))
+  "The Controls page's name for the buttons of CLASS (a BF_CLASS_*), the same for both colors."
+  (case class
+    ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK) (bf-tr "Jetpack guard" "Garde à jetpack"))
+    ((BF_CLASS_ROBOGUARD) (bf-tr "Robotguard" "Robotgarde"))
+    ((BF_CLASS_SPYDROID) (bf-tr "Spider robot" "Araignée robot"))
+    ((BF_CLASS_BARON) "Baron Praxis")
+    ((BF_CLASS_ASHELIN) "Ashelin")
+    (else (bf-tr "Guard" "Garde"))
+    )
   )
 
 (defun bf-team-name ((team int))
@@ -774,6 +984,79 @@
               :origin-joint-index 3
               )
 
+;; Baron Praxis (round 44): Jak 2's cutscene model, his clips the mod's own from 2 (custom_assets/jak3/
+;; models/models.jsonc, battlefront-baron.gc BF_BARON_CLIP_*).
+;; His clips in bf-baron-ag, from 2 in scripts/battlefront/make_baron_clips.py's order (none of the
+;; rip's: its one pose has morph keys build-actor refuses). Round 45: no crouch, a 180 degree turn.
+;; Round 46: the cast is a diagonal cut; his two combos in the air.
+(defconstant BF_BARON_CLIP_IDLE 2)
+(defconstant BF_BARON_CLIP_RUN 3)
+(defconstant BF_BARON_CLIP_WALK 4)
+(defconstant BF_BARON_CLIP_JUMP 5)
+(defconstant BF_BARON_CLIP_SLASH 6)
+(defconstant BF_BARON_CLIP_SPIN 7)
+(defconstant BF_BARON_CLIP_BLOCK 8)
+(defconstant BF_BARON_CLIP_CAST 9)
+(defconstant BF_BARON_CLIP_HIT 10)
+(defconstant BF_BARON_CLIP_DEATH 11)
+(defconstant BF_BARON_CLIP_TURN 12)
+(defconstant BF_BARON_CLIP_PLANT 13)   ;; round 46: X then Square, he plants his sword in the ground
+(defconstant BF_BARON_CLIP_AIRSPIN 14) ;; round 46: X then Circle, he spins a full turn in the air
+(def-art-elt bf-baron-ag bf-baron-lod0-jg 0)
+(def-art-elt bf-baron-ag bf-baron-lod0-mg 1)
+(def-art-elt bf-baron-ag bf-baron-idle-ja 2)
+
+(defskelgroup skel-bf-baron bf-baron bf-baron-lod0-jg bf-baron-idle-ja
+              ((bf-baron-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 2 0 4)
+              :origin-joint-index 3
+              )
+
+;; Ashelin (rounds 53 and 54): Jak 3's Ashelin, her red turned to the blue guards' blue, a second
+;; pistol in her left hand, and clips made at install (custom_assets/jak3/models/models.jsonc
+;; "made_clips", mod_models.py: Mixamo's pistol motions on her skeleton, and moves made from her own
+;; clips): in that order from 2.
+(defconstant BF_ASHELIN_CLIP_IDLE 2)        ;; pistol idle, aiming low
+(defconstant BF_ASHELIN_CLIP_RUN 3)         ;; pistol run, its stride widened
+(defconstant BF_ASHELIN_CLIP_WALK 4)        ;; pistol walk, aiming
+(defconstant BF_ASHELIN_CLIP_JUMP 5)        ;; pistol jump, its part in the air
+(defconstant BF_ASHELIN_CLIP_FLIP 6)        ;; her second jump: a front flip, tucked
+(defconstant BF_ASHELIN_CLIP_FLIP_LEFT 7)   ;; her cartwheel to the left
+(defconstant BF_ASHELIN_CLIP_FLIP_RIGHT 8)  ;; the same, mirrored
+(defconstant BF_ASHELIN_CLIP_THROW 9)       ;; an overhand throw of her left hand
+(defconstant BF_ASHELIN_CLIP_HIT 10)
+(defconstant BF_ASHELIN_CLIP_DEATH 11)
+(defconstant BF_ASHELIN_CLIP_KNEEL 12)      ;; pistol stand to kneel
+(defconstant BF_ASHELIN_CLIP_KNEEL_IDLE 13) ;; pistol kneeling idle
+(defconstant BF_ASHELIN_CLIP_UNKNEEL 14)    ;; pistol kneel to stand
+(defconstant BF_ASHELIN_CLIP_STRAFE_LEFT 15) ;; pistol strafe
+(defconstant BF_ASHELIN_CLIP_STRAFE_RIGHT 16)
+(defconstant BF_ASHELIN_CLIP_WALK_BACK 17)  ;; pistol walk backward
+(defconstant BF_ASHELIN_CLIP_KICK 18)       ;; a spinning kick (Mixamo's great sword kick)
+(defconstant BF_ASHELIN_CLIP_RELOAD 19)     ;; her pistols lowered and raised again
+(def-art-elt bf-ashelin-ag bf-ashelin-lod0-jg 0)
+(def-art-elt bf-ashelin-ag bf-ashelin-lod0-mg 1)
+(def-art-elt bf-ashelin-ag bf-ashelin-idle-ja 2)
+
+(defskelgroup skel-bf-ashelin bf-ashelin bf-ashelin-lod0-jg bf-ashelin-idle-ja
+              ((bf-ashelin-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 2 0 4)
+              :origin-joint-index 3
+              )
+
+;; The Baron's pad (battlefront.gc `bf-pad-lock!`): pad 0's buttons and left stick taken from Jak
+;; every frame he plays (Jak stands still where the Baron stands), with the frame before's buttons
+;; for the presses (battlefront-baron.gc `bf-baron-pressed?`).
+(deftype bf-baron-pad (structure)
+  ((buttons  uint32)
+   (last     uint32)
+   (leftx    uint8)
+   (lefty    uint8)
+   )
+  )
+
+(define *bf-baron-pad* (new 'static 'bf-baron-pad :leftx #x80 :lefty #x80))
+
 ;; Jetpack guards. Clip order (custom_assets/jak3/models/models.jsonc): the three the flying-turret code plays first
 ;; (2 idle, 3 hover, 4 fire), then the others.
 (def-art-elt bf-hover-red-ag bf-hover-red-lod0-jg 0)
@@ -793,6 +1076,25 @@
               ((bf-hover-blue-lod0-mg (meters 999999)))
               :bounds (static-spherem 0 0 0 4)
               :origin-joint-index 3
+              )
+
+;; The Freedom League's robotguard and spider robot (round 46): Jak 3's own, their red recolored
+;; blue (models.jsonc), drawn on the stock roboguard-city and spydroid code. One clip each: they play
+;; the stock art groups' (`bf-guard-clips`), the skeletons being the same.
+(def-art-elt bf-robot-blue-ag bf-robot-blue-lod0-jg 0)
+(def-art-elt bf-robot-blue-ag bf-robot-blue-lod0-mg 1)
+(def-art-elt bf-robot-blue-ag bf-robot-blue-idle0-ja 2)
+(defskelgroup skel-bf-robot-blue bf-robot-blue bf-robot-blue-lod0-jg bf-robot-blue-idle0-ja
+              ((bf-robot-blue-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 3)
+              :origin-joint-index 3
+              )
+(def-art-elt bf-spider-blue-ag bf-spider-blue-lod0-jg 0)
+(def-art-elt bf-spider-blue-ag bf-spider-blue-lod0-mg 1)
+(def-art-elt bf-spider-blue-ag bf-spider-blue-idle-ja 2)
+(defskelgroup skel-bf-spider-blue bf-spider-blue bf-spider-blue-lod0-jg bf-spider-blue-idle-ja
+              ((bf-spider-blue-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 4)
               )
 
 ;; Pace of the jetpack guards' clips, in clip frames per 60th of a second. They are the Jak 2 rip's
@@ -936,23 +1238,32 @@
    when its model has an effect-name lump (effect-control's new), and a build-actor model has none:
    it gets one, made like effect-control's new does. The method comes from the mod Haven City: New
    Dawn. Returns nothing. Side effects: the draw-control's art-group, the skeleton's effect-control
-   (process heap)."
-  (when (and (-> this level)
-             (let ((name (bf-art-name this)))
-               (or (string= name "bf-red-guard-lod0") (string= name "bf-red-guard-gl-lod0"))
-               )
-             )
-    (let ((ag (load-to-heap-by-name (-> this level art-group) "crimson-guard" 'test global 0)))
-      (when (and ag
-                 (= (-> ag type) art-group)
-                 (= (-> (the-as art-joint-geo (-> ag data 0)) length) (-> this draw jgeo length))
+   (process heap). Round 46: the blue robotguard and spider robot play the stock roboguard-city's
+   and spydroid's clips the same way."
+  (let ((stock (let ((name (bf-art-name this)))
+                 (cond
+                   ((or (string= name "bf-red-guard-lod0") (string= name "bf-red-guard-gl-lod0")) "crimson-guard")
+                   ;; round 46: the blue robotguard and spider play the stock ones' clips
+                   ((string= name "bf-robot-blue-lod0") "roboguard-city")
+                   ((string= name "bf-spider-blue-lod0") "spydroid")
+                   (else (the-as string #f))
+                   )
                  )
-        (set! (-> this draw art-group) ag)
-        (when (not (-> this skel effect))
-          (let ((ec (the-as effect-control ((method-of-type object new) 'process effect-control (the-as int (-> effect-control size))))))
-            (set! (-> ec process) this)
-            (set! (-> ec last-frame-group) #f)
-            (set! (-> this skel effect) ec)
+               )
+        )
+    (when (and (-> this level) stock)
+      (let ((ag (load-to-heap-by-name (-> this level art-group) stock 'test global 0)))
+        (when (and ag
+                   (= (-> ag type) art-group)
+                   (= (-> (the-as art-joint-geo (-> ag data 0)) length) (-> this draw jgeo length))
+                   )
+          (set! (-> this draw art-group) ag)
+          (when (not (-> this skel effect))
+            (let ((ec (the-as effect-control ((method-of-type object new) 'process effect-control (the-as int (-> effect-control size))))))
+              (set! (-> ec process) this)
+              (set! (-> ec last-frame-group) #f)
+              (set! (-> this skel effect) ec)
+              )
             )
           )
         )
@@ -1145,8 +1456,14 @@
    1, Rturbine) of the Jak 2 hover guard model, along the joint's -z axis, not from the turret's
    spots under its root (the mod Haven City: New Dawn's fix for the same model). POS, DIR: set to
    the joint's place and that axis. Returns #t when it set them, #f (both unchanged) for a stock
-   flying turret."
+   flying turret, 'hide for a model not drawn: its joints were not moved since it was last drawn
+   (no-draw: knocked down, or hidden as it wakes; no-draw-temp: past the units drawn at once,
+   battlefront-city.gc `bf-city-draw-cap`), and its flames stayed in the air alone where it was
+   (the author's report, round 45): no flame then."
   (cond
+    ((and (bf-hover-art? this) (logtest? (-> this draw status) (draw-control-status no-draw no-draw-temp)))
+     'hide
+     )
     ((bf-hover-art? this)
      (let ((joint (-> this node-list data (if (zero? side) 15 17))))
        (vector<-cspace! pos joint)
@@ -1162,6 +1479,15 @@
     )
   )
 
+(defun bf-blue-bot? ((proc process))
+  "#t when PROC draws the Freedom League's blue robotguard or spider robot (round 46)."
+  (let ((name (bf-art-name proc)))
+    (or (string= name "bf-robot-blue-lod0") (string= name "bf-spider-blue-lod0"))
+    )
+  )
+
+(define-extern bf-boss-team (function process int))
+
 (defun bf-unit-team ((proc process))
   "Side of a unit, BF_TEAM_NONE for anything that does not fight in the battle."
   (let ((sym (-> proc type symbol)))
@@ -1169,10 +1495,103 @@
       ((= proc *target*) (-> *bf* team))
       ((= sym 'crimson-guard) (if (bf-red-guard? proc) BF_TEAM_KG BF_TEAM_FF))
       ((= sym 'flying-turret) (if (string= (bf-art-name proc) "bf-hover-blue-lod0") BF_TEAM_FF BF_TEAM_KG))
-      ((or (= sym 'roboguard-city) (= sym 'spydroid)) BF_TEAM_KG)
+      ((or (= sym 'roboguard-city) (= sym 'spydroid)) (if (bf-blue-bot? proc) BF_TEAM_FF BF_TEAM_KG))
+      ;; a side's champion (round 49: Baron Praxis; round 53: Ashelin, battlefront-baron.gc)
+      ((or (= sym 'bf-boss-body) (= sym 'bf-boss)) (bf-boss-team proc))
       (else BF_TEAM_NONE)
       )
     )
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; The guards' reloads (round 46)
+;; ---------------------------------------------------------------------------------------------
+
+;; The stock rifle guard plays its reload between two bursts of 1 to 3 shots (guard-rifle.gc
+;; rifle-hostile, while its last shot is under 2.5 to 4.5 s old), loops it while its foe is dead,
+;; and gets 3 rounds back from each; the grenade guard plays its own each time it stands at its
+;; spot (guard-grenade.gc grenade-hostile). In a battle the guards were seen reloading most of the
+;; time (the author's report, round 46).
+
+(defun bf-guard-hold? ((this process) (ammo int))
+  "Called by guard-rifle.gc rifle-hostile and guard-grenade.gc grenade-hostile where the stock guard
+   THIS would reload with AMMO rounds left: #t when it keeps its ground instead, a battle's guard
+   with rounds left. Its next burst comes when the stock pause is over; it reloads once empty. #f
+   out of a battle. No side effects."
+  (and (bf-active?) (>= (bf-unit-team this) 0) (> ammo 0))
+  )
+
+(defun bf-guard-calm! ((this process) (full? symbol))
+  "Called by guard-rifle.gc rifle-hostile when rifle guard THIS has no foe left, where the stock
+   guard reloads, again and again until it gets one. #t when a battle's guard with its magazine
+   full (FULL?) walks its lanes again instead: its focus is cleared (the caller then goes to
+   'active, as `bf-city-robot-free` sends the robotguards). #f, nothing changed, out of a battle or
+   with rounds to reload."
+  (when (and full? (bf-active?) (>= (bf-unit-team this) 0))
+    (set! (-> (the-as enemy this) focus handle) (the-as handle #f))
+    #t
+    )
+  )
+
+(defun bf-melee-ok? ((this process))
+  "Called where a guard (guard-rifle.gc, guard-grenade.gc, guard-tazer.gc, guard-states.gc,
+   guard.gc) or a robotguard (roboguard-city.gc roboguard-city-method-236) THIS would deal a blow at
+   close range (a rifle butt, a robotguard's punch): #f for a battle's unit, which keeps to its gun
+   (the author's wish, round 52: no blows but the champion's and the spider robots'); #t, the stock
+   blow, otherwise. No side effects."
+  (not (and (bf-active?) (>= (bf-unit-team this) 0)))
+  )
+
+;; For the tests (docs/modding/current_mod/battlefront_smoke.gc): #t, the battle's guards fire as
+;; the stock ones (`bf-guard-drill?`), to compare.
+(define *bf-guard-stock-fire* #f)
+
+(defun bf-guard-drill? ((this process))
+  "Called by guard-rifle.gc gun-shoot and rifle-hostile: #t when rifle guard THIS fires by the
+   battle's drill (the author's report, round 52: the guards fired too often, and before their
+   rifle was up): a burst of one or two shots, not up to three; a pause of 4.5 to 6.5 s between two
+   bursts (`bf-guard-pause`), which the stock guard skips in its faction's war mode; before its
+   first shot it aims 0.3 s, its rifle shouldered, turning to face its foe, and holds each shot's
+   pose until the clip's blend is over; no shot at a foe more than 20 degrees off its way. #f out
+   of a battle (or `*bf-guard-stock-fire*`). No side effects."
+  (and (bf-active?) (>= (bf-unit-team this) 0) (not *bf-guard-stock-fire*))
+  )
+
+(defconstant BF_GUARD_PAUSE_MORE (seconds 2)) ;; a battle's guard waits this much longer between two bursts
+
+(defun bf-guard-pause ((this process) (stock time-frame))
+  "Called by guard-rifle.gc rifle-hostile: rifle guard THIS's pause between two bursts, STOCK (2.5
+   to 4.5 s) and BF_GUARD_PAUSE_MORE under the battle's drill (`bf-guard-drill?`), STOCK otherwise."
+  (if (bf-guard-drill? this)
+      (+ stock BF_GUARD_PAUSE_MORE)
+      stock
+      )
+  )
+
+;; For the tests: the battle's guards' shots, [0] all, [1] those fired more than 20 degrees off
+;; their foe's way (`bf-guard-shot!`).
+(define *bf-guard-shots* (new 'static 'array int32 2 0 0))
+
+(defun bf-guard-shot! ((this process) (angle float))
+  "Called by guard-rifle.gc gun-shoot as rifle guard THIS fires, ANGLE its foe's way off its
+   facing: counted in `*bf-guard-shots*` for a battle's guard. Returns nothing."
+  (when (and (bf-active?) (>= (bf-unit-team this) 0))
+    (+! (-> *bf-guard-shots* 0) 1)
+    (if (< (degrees 20) (fabs angle))
+        (+! (-> *bf-guard-shots* 1) 1)
+        )
+    )
+  (none)
+  )
+
+(defun bf-guard-reload-count ((this process) (n int))
+  "Called by guard.gc crimson-guard-method-285, which adds N rounds to guard THIS's magazine (N
+   negative for a shot): a battle's guard reloading (N positive) fills it, 3 rounds a reload for
+   the stock rifle guard. N otherwise."
+  (if (and (> n 0) (bf-active?) (>= (bf-unit-team this) 0))
+      100
+      n
+      )
   )
 
 ;; ---------------------------------------------------------------------------------------------
@@ -1184,15 +1603,18 @@
 ;; the stock damage of each weapon differ (a guard 4, a flying turret 1, a shot 1, a grenade 6).
 (defconstant BF_DMG_RIFLE 8.0)        ;; a rifle shot (the guards', the player guard's)
 (defconstant BF_DMG_GRENADE 20.0)     ;; a guard grenade's blast
+(defconstant BF_GRENADE_BLAST (meters 8)) ;; the player guard's grenade blast radius: twice the stock 4 m (round 44)
 (defconstant BF_DMG_TAZER 24.0)       ;; the player guard's tazer strike
 (defconstant BF_DMG_MELEE 10.0)       ;; a rifle butt, a robotguard's punch, a jetpack's dive kick
 (defconstant BF_DMG_BITE 12.0)        ;; a spider robot's bite
 (defconstant BF_DMG_ROBOT_SHOT 4.0)   ;; a robotguard's shot
+(defconstant BF_DMG_PISTOL 4.0)       ;; a shot of Ashelin's pistols (round 53, battlefront-ashelin.gc)
 (defconstant BF_DMG_JET_SHOT 6.0)     ;; a jetpack guard's shot
+(defconstant BF_DMG_ECO_BALL 24.0)    ;; the Baron's yellow eco ball and its burst (round 44): a whole guard
 (defconstant BF_DMG_NOVA 24.0)        ;; the player spider's blast (L1, round 38): a whole unit, as the Super Nova kills
 
 ;; Full health of each class, indexed by BF_CLASS_*: guards and robotguard 24, jetpacks 18, spider 12.
-(define *bf-class-hp* (new 'static 'array float 8 24.0 18.0 24.0 24.0 24.0 18.0 24.0 12.0))
+(define *bf-class-hp* (new 'static 'array float 10 24.0 18.0 24.0 24.0 24.0 18.0 24.0 12.0 36.0 36.0))
 
 (defun bf-class-health ((class int))
   "Jak's health for CLASS's full health: his whole health bar (fact health-max, the health ring's
@@ -1225,15 +1647,24 @@
 (defun bf-shot-damage ((owner process))
   "Damage of a guard-shot fired for OWNER: the player's class's gun (rifle, robotguard, jetpack:
    the avatar fires guard-shots for all three), a guard's rifle for any unit."
-  (if (= owner *target*)
-      (case (-> *bf* class)
-        ((BF_CLASS_ROBOGUARD) BF_DMG_ROBOT_SHOT)
-        ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK) BF_DMG_JET_SHOT)
-        (else BF_DMG_RIFLE)
-        )
-      BF_DMG_RIFLE
-      )
+  (cond
+    ((= owner *target*)
+     (case (-> *bf* class)
+       ((BF_CLASS_ROBOGUARD) BF_DMG_ROBOT_SHOT)
+       ((BF_CLASS_BLUE_JETPACK BF_CLASS_RED_JETPACK) BF_DMG_JET_SHOT)
+       ((BF_CLASS_ASHELIN) BF_DMG_PISTOL)
+       (else BF_DMG_RIFLE)
+       )
+     )
+    ;; the Freedom League's champion's pistols (round 53); the Baron fires none
+    ((and owner (= (-> owner type symbol) 'bf-boss-body)) BF_DMG_PISTOL)
+    (else BF_DMG_RIFLE)
+    )
   )
+
+;; The points of the Krimzon Guard's champion's blow being sent (battlefront-baron.gc
+;; `bf-boss-send-attack`, round 49), read by `bf-attack-damage`.
+(define *bf-boss-attack* 0.0)
 
 (defconstant BF_PLAYER_DAMAGE 2.0) ;; the player's shots and blows on units deal this many times a unit's (`damage-enemy-from-attack!`)
 
@@ -1252,18 +1683,41 @@
       ((or (= sym 'explosion) (= sym 'vehicle-grenade) (= sym 'vehicle-grenade-deflect)) BF_DMG_GRENADE)
       ;; a jetpack guard's rocket, its hit and its blast (battlefront-player.gc `bf-rocket`)
       ;; and a robotguard's grenade (round 38, `bf-grenade`)
-      ((or (= sym 'bf-rocket) (= sym 'bf-grenade)) BF_DMG_GRENADE)
+      ((or (= sym 'bf-rocket) (= sym 'bf-grenade) (= sym 'bf-lob)) BF_DMG_GRENADE)
+      ;; the Baron's yellow eco ball (round 44, battlefront-baron.gc `bf-eco-ball`)
+      ((= sym 'bf-eco-ball) BF_DMG_ECO_BALL)
       ((= sym 'spydroid) BF_DMG_BITE)
+      ;; the Krimzon Guard's champion's sword (round 49)
+      ((= sym 'bf-boss-body) *bf-boss-attack*)
       ((or (= sym 'crimson-guard) (= sym 'roboguard-city) (= sym 'flying-turret)) BF_DMG_MELEE)
       (else -1.0)
       )
     )
   )
 
+;; Stock ground snap of the enemies, kept the same way.
+(define-perm *bf-stock-move-to-ground* (function enemy meters meters symbol collide-spec symbol)
+             (method-of-type enemy move-to-ground)
+             )
+
+(defmethod move-to-ground ((this enemy) (arg0 meters) (arg1 meters) (arg2 symbol) (arg3 collide-spec))
+  "Every enemy's snap to the ground under it (enemy.gc; a city unit's wake, citizen.gc
+   'traffic-activate). The stock step, which prints a warning when it finds no ground within ARG0 up
+   and ARG1 down with ARG2: during a fight, never for a unit of the battle. The robotguards and the
+   spiders wake in the sky over their nav poly, up to 30 m, or in a ship's hatch, and fall from
+   there (battlefront-city.gc `bf-city-spawn-near`): 317 such lines in a five-minute battle of 200
+   a side (round 45, the author's report of the log). Returns #t when it found the ground. Defined
+   on enemy: GAME links with method-set propagation on, and the level code's units copy it at their
+   creation (Lisp wiki jak3 4.10)."
+  (*bf-stock-move-to-ground* this arg0 arg1 (and arg2 (not (and (bf-fighting?) (>= (bf-unit-team this) 0)))) arg3)
+  )
+
 ;; Stock damage step of the city's units, kept across REPL reloads of this file (Lisp wiki jak3 4.10).
 (define-perm *bf-stock-damage-enemy* (function nav-enemy object event-message-block float)
              (method-of-type nav-enemy damage-enemy-from-attack!)
              )
+
+(define-extern bf-hit-note! (function process process none))
 
 (defmethod damage-enemy-from-attack! ((this nav-enemy) (arg0 object) (arg1 event-message-block))
   "Every attack on a nav-enemy takes its hit points here (enemy.gc enemy-event-handler; the guards'
@@ -1287,6 +1741,10 @@
       (else
         (if (and owner (>= (bf-unit-team owner) 0) (= (bf-unit-team owner) (bf-unit-team this)))
             (set! dmg 0.0)
+            )
+        ;; a foe's hit, kept (`bf-hit-note!`): a spider's kill leaves blue eco (`bf-queue-drop`)
+        (if (and owner (< 0.0 dmg))
+            (bf-hit-note! this owner)
             )
         ;; the player's shots and blows deal BF_PLAYER_DAMAGE times a unit's (the author's wish, round 29)
         (if (= owner *target*)
@@ -1321,36 +1779,66 @@
     )
   )
 
+;; Stock reaction step of the city's units, kept across REPL reloads of this file (Lisp wiki jak3 4.10).
+(define-perm *bf-stock-attack-msg* (function nav-enemy process event-message-block float symbol)
+             (method-of-type nav-enemy msg-for-incoming-attack)
+             )
+
+(defmethod msg-for-incoming-attack ((this nav-enemy) (arg0 process) (arg1 event-message-block) (arg2 float))
+  "The reaction to an attack (enemy.gc enemy event handler, after `damage-enemy-from-attack!`): during
+   a fight, a unit of the battle hit by its own side (the attacker the handler has just found,
+   `incoming attacker-handle`) does not react at all (#f): its damage was already none, but the hit
+   still knocked it, and a knocked flying turret explodes (flying-turret.gc 'knocked): the Freedom
+   League's jetpack guards all died that way, 74 in 90 s (round 46, scenario 132: blue guards'
+   shots and blue robots' and spiders' blasts). Otherwise the stock reaction. Defined on nav-enemy
+   as the damage step is: citizen and roboguard-city (level code) call it as their parent method."
+  (let ((owner (handle->process (-> this incoming attacker-handle))))
+    (if (and (bf-fighting?) owner (>= (bf-unit-team this) 0) (= (bf-unit-team owner) (bf-unit-team this)))
+        #f
+        (*bf-stock-attack-msg* this arg0 arg1 arg2)
+        )
+    )
+  )
+
 (defun bf-guard-weapon ((proc process) (want int))
   "Called by guard.gc crimson-guard-method-267 (every weapon change of a guard) and -270 (its
    off-screen change): the guard-type a guard of a battle gets for WANT. No unit of the battle has
    the tazer: a red guard carries its model's weapon (the rifle, or the launcher of
-   bf-red-guard-gl), a blue guard the rifle or the launcher it was given, in place of the tazer the
-   rifle or the launcher by its pid (one or the other for good; the squads give the blue guards the
-   tazer mostly, and the launcher alone left no rifle among them, seen in game), and the rifle in
-   place of a vehicle gunner's type (Lisp wiki jak3 4.37: a guard on foot with another type
-   deactivates itself). WANT out of a battle."
+   bf-red-guard-gl), a blue guard the rifle or, one in four by a hash of its pid (for good), the launcher, in
+   place of the tazer, the rifle or the launcher the squads give it (mostly the tazer; the launcher
+   alone left no rifle among them, seen in game; one in two by pid gave launchers to most of them,
+   the author's report, round 46), and the rifle in place of a vehicle gunner's type (Lisp wiki jak3
+   4.37: a guard on foot with another type deactivates itself). WANT out of a battle."
   (let ((name (bf-art-name proc)))
     (cond
       ((not (bf-active?)) want)
       ((string= name "bf-red-guard-lod0") (the-as int (guard-type rifle)))
       ((string= name "bf-red-guard-gl-lod0") (the-as int (guard-type grenade)))
-      ((= want (the-as int (guard-type tazer)))
-       (the-as int (if (logtest? (-> proc pid) 1) (guard-type rifle) (guard-type grenade)))
+      ((or (= want (the-as int (guard-type tazer)))
+           (= want (the-as int (guard-type rifle)))
+           (= want (the-as int (guard-type grenade)))
+           )
+       ;; one in four by a hash of its pid (its two low bits gave a third, scenario 130: the pids of
+       ;; a pool's guards do not run one by one)
+       (the-as int (if (zero? (shr (logand (* (-> proc pid) #x9e3779b1) #xffffffff) 30)) (guard-type grenade) (guard-type rifle)))
        )
-      ((or (= want (the-as int (guard-type rifle))) (= want (the-as int (guard-type grenade)))) want)
       (else (the-as int (guard-type rifle)))
       )
     )
   )
 
+(defun bf-unlimited? ()
+  "#t when the battle's units per side are unlimited (the setup's Unlimited, round 44: `*bf*`
+   reserve-max 0): no reserve runs out, losses are only counted."
+  (zero? (-> *bf* reserve-max))
+  )
+
 (defun bf-count-loss ((team int))
-  "One unit of TEAM is lost: take it from the reserve, and end the battle when the reserve is empty.
-   No-op outside the fight phase."
+  "One unit of TEAM is lost: take it from the reserve, and end the battle when the reserve is empty
+   (with unlimited units, `bf-unlimited?`, only counted). No-op outside the fight phase."
   (when (and (bf-fighting?) (>= team 0) (< team BF_TEAM_COUNT))
-    (set! (-> *bf* reserve team) (max 0 (+ (-> *bf* reserve team) -1)))
     (+! (-> *bf* losses team) 1)
-    (when (zero? (-> *bf* reserve team))
+    (when (and (not (bf-unlimited?)) (zero? (set! (-> *bf* reserve team) (max 0 (+ (-> *bf* reserve team) -1)))))
       (set! (-> *bf* winner) (bf-other-team team))
       (bf-set-phase! BF_PHASE_OVER)
       )
@@ -1358,11 +1846,82 @@
   (none)
   )
 
+(defun bf-unit-brought! ((team int))
+  "One unit of side TEAM came onto the field (a ship's drop, a fall from the sky at a control point):
+   counted in `*bf*` spawned (`bf-ships-gone?`)."
+  (if (and (>= team 0) (< team BF_TEAM_COUNT))
+      (+! (-> *bf* spawned team) 1)
+      )
+  (none)
+  )
+
+(defun bf-ships-gone? ((team int))
+  "#t once side TEAM's troop transports brought as many units as it has (the setup's units per side,
+   `*bf*` reserve-max; never with unlimited units): its ships leave for good, and its headquarters
+   are no longer a place to come down, its units and its player coming down only at the control
+   points it holds (round 44, the author's wish)."
+  (and (>= team 0) (< team BF_TEAM_COUNT)
+       (not (bf-unlimited?))
+       (>= (-> *bf* spawned team) (-> *bf* reserve-max))
+       )
+  )
+
+(defun bf-point-spawn-ok? ((i int) (team int))
+  "#t when side TEAM may come down at point I: it holds it, and a headquarters only while its ships
+   come (`bf-ships-gone?`) and its own ship has not left for good (`ship-done?`, round 45)."
+  (and (>= i 0) (< i (-> *bf* point-count))
+       (= (-> *bf* points i owner) team)
+       (or (not (-> *bf* points i base?))
+           (and (not (bf-ships-gone? team)) (not (-> *bf* points i ship-done?)))
+           )
+       )
+  )
+
+;; The foe that last hit each unit (round 44): a unit a spider killed leaves blue eco
+;; (`bf-queue-drop`). By process id; a slot shared by two units holds the last one hit.
+(defconstant BF_HIT_SLOTS 512)
+
+(deftype bf-hits (structure)
+  ((unit  handle     BF_HIT_SLOTS)
+   (by    handle     BF_HIT_SLOTS)
+   (time  time-frame BF_HIT_SLOTS)
+   )
+  )
+
+(define *bf-hits* (new 'static 'bf-hits))
+;; no unit yet: a 0 handle names process 0 (Lisp wiki common.md)
+(dotimes (i BF_HIT_SLOTS)
+  (set! (-> *bf-hits* unit i) (the-as handle #f))
+  (set! (-> *bf-hits* by i) (the-as handle #f))
+  )
+
+(defun bf-hit-note! ((unit process) (by process))
+  "UNIT was just hit by BY: kept in `*bf-hits*` with the game clock."
+  (let ((k (logand (-> unit pid) (+ BF_HIT_SLOTS -1))))
+    (set! (-> *bf-hits* unit k) (process->handle unit))
+    (set! (-> *bf-hits* by k) (process->handle by))
+    (set! (-> *bf-hits* time k) (-> *display* game-clock frame-counter))
+    )
+  (none)
+  )
+
+(defun bf-hit-by ((unit process) (within time-frame))
+  "The foe that hit UNIT last, if within WITHIN of the game clock and still there; #f for none."
+  (let ((k (logand (-> unit pid) (+ BF_HIT_SLOTS -1))))
+    (if (and (= (-> *bf-hits* unit k) (process->handle unit))
+             (< (- (-> *display* game-clock frame-counter) (-> *bf-hits* time k)) within)
+             )
+        (handle->process (-> *bf-hits* by k))
+        )
+    )
+  )
+
 ;; ---------------------------------------------------------------------------------------------
 ;; Functions called by stock level code (each a `;; MOD battlefront` line in the stock file)
 ;; ---------------------------------------------------------------------------------------------
 
-;; Live units of each look: blue guard, red rifleman, red grenadier, blue jetpack, red jetpack.
+;; Live units of each look: blue guard, red rifleman, red grenadier, blue jetpack, red jetpack, and
+;; since round 46 blue and red robotguard, blue and red spider robot.
 ;; Counted by the director every frame of a battle (`bf-count-looks!`, in its own process), and
 ;; raised by the two functions below for each unit they hand a look to, so that a pool spawning
 ;; several units in one frame stays balanced.
@@ -1371,20 +1930,25 @@
 (defconstant BF_LOOK_RED_GL 2)
 (defconstant BF_LOOK_JET_BLUE 3)
 (defconstant BF_LOOK_JET_RED 4)
-(define *bf-looks* (new 'static 'array int32 5 0 0 0 0 0))
+(defconstant BF_LOOK_ROBOT_BLUE 5)
+(defconstant BF_LOOK_ROBOT_RED 6)
+(defconstant BF_LOOK_SPIDER_BLUE 7)
+(defconstant BF_LOOK_SPIDER_RED 8)
+(defconstant BF_LOOK_COUNT 9)
+(define *bf-looks* (new 'static 'array int32 9 0 0 0 0 0 0 0 0 0))
 
 (defun bf-count-looks! ()
   "Count the live guards and jetpack guards of each look into `*bf-looks*`. Called by the director,
    never from a unit's init: a unit is set up on the small stack of the traffic manager, and a walk
    of the whole process tree there crashed the game (illegal instruction while a zone loaded)."
-  (dotimes (i 5)
+  (dotimes (i BF_LOOK_COUNT)
     (set! (-> *bf-looks* i) 0)
     )
   (iterate-process-tree
     *active-pool*
     (lambda ((p process))
       (let ((sym (-> p type symbol)))
-        (when (or (= sym 'crimson-guard) (= sym 'flying-turret))
+        (when (or (= sym 'crimson-guard) (= sym 'flying-turret) (= sym 'roboguard-city) (= sym 'spydroid))
           (let ((name (bf-art-name p)))
             (cond
               ((string= name "crimson-guard-lod0") (+! (-> *bf-looks* BF_LOOK_BLUE) 1))
@@ -1392,6 +1956,10 @@
               ((string= name "bf-red-guard-gl-lod0") (+! (-> *bf-looks* BF_LOOK_RED_GL) 1))
               ((string= name "bf-hover-blue-lod0") (+! (-> *bf-looks* BF_LOOK_JET_BLUE) 1))
               ((string= name "bf-hover-red-lod0") (+! (-> *bf-looks* BF_LOOK_JET_RED) 1))
+              ((string= name "bf-robot-blue-lod0") (+! (-> *bf-looks* BF_LOOK_ROBOT_BLUE) 1))
+              ((string= name "roboguard-city-lod0") (+! (-> *bf-looks* BF_LOOK_ROBOT_RED) 1))
+              ((string= name "bf-spider-blue-lod0") (+! (-> *bf-looks* BF_LOOK_SPIDER_BLUE) 1))
+              ((string= name "spydroid-lod0") (+! (-> *bf-looks* BF_LOOK_SPIDER_RED) 1))
               )
             )
           )
@@ -1404,37 +1972,39 @@
   )
 
 ;; Share of each look in its pool (`bf-caps-set!`): blue guards, red riflemen, red grenadiers, blue
-;; jetpack guards, red jetpack guards.
-(define *bf-look-share* (new 'static 'array int32 5 43 12 12 17 12))
+;; jetpack guards, red jetpack guards, blue and red robotguards, blue and red spider robots.
+(define *bf-look-share* (new 'static 'array int32 9 40 30 10 20 20 20 20 20 20))
 
 (defun bf-caps-set! ((n int))
-  "Each side's army cap from N units at once (the battle setup's, BF_AT_ONCE_MIN to BF_AT_ONCE_MAX):
-   the Freedom League 72 % blue guards and the rest blue jetpack guards, the Krimzon Guard a fifth each
-   of red riflemen, red grenadiers, red jetpack guards and robotguards, the rest spider robots; into
-   `*bf-team-caps*`, `*bf-look-share*` and the pools' `*bf-pool-caps*`."
+  "Each side's army cap from N units at once (the battle setup's, BF_AT_ONCE_MIN to BF_AT_ONCE_MAX),
+   the same for both sides since round 46 (the author's wish: blue robotguards and spiders for the
+   Freedom League): two fifths of guards (the Krimzon Guard's three riflemen for one grenadier), a
+   fifth each of jetpack guards and robotguards, the rest spider robots; into `*bf-team-caps*`,
+   `*bf-look-share*` and the pools' `*bf-pool-caps*`. Until round 46 the Freedom League had 72 %
+   blue guards and the rest blue jetpack guards."
   (let* ((n (max BF_AT_ONCE_MIN (min BF_AT_ONCE_MAX n)))
-         (ff-guards (/ (+ (* n 72) 50) 100))
-         (ff-jets (- n ff-guards))
          (k (/ n 5))
          (spiders (- n (* 4 k)))
          )
-    (set! (-> *bf-team-caps* 0) ff-guards)
-    (set! (-> *bf-team-caps* 1) ff-jets)
-    (set! (-> *bf-team-caps* 2) 0)
-    (set! (-> *bf-team-caps* 3) 0)
-    (set! (-> *bf-team-caps* 4) (* 2 k))
-    (set! (-> *bf-team-caps* 5) k)
-    (set! (-> *bf-team-caps* 6) k)
-    (set! (-> *bf-team-caps* 7) spiders)
-    (set! (-> *bf-look-share* 0) ff-guards)
-    (set! (-> *bf-look-share* 1) k)
-    (set! (-> *bf-look-share* 2) k)
-    (set! (-> *bf-look-share* 3) ff-jets)
-    (set! (-> *bf-look-share* 4) k)
-    (set! (-> *bf-pool-caps* 0) (+ ff-guards (* 2 k)))
-    (set! (-> *bf-pool-caps* 1) (+ ff-jets k))
-    (set! (-> *bf-pool-caps* 2) k)
-    (set! (-> *bf-pool-caps* 3) spiders)
+    (dotimes (team 2)
+      (set! (-> *bf-team-caps* (* 4 team)) (* 2 k))
+      (set! (-> *bf-team-caps* (+ (* 4 team) 1)) k)
+      (set! (-> *bf-team-caps* (+ (* 4 team) 2)) k)
+      (set! (-> *bf-team-caps* (+ (* 4 team) 3)) spiders)
+      )
+    (set! (-> *bf-look-share* BF_LOOK_BLUE) (* 2 k))
+    (set! (-> *bf-look-share* BF_LOOK_RED) (- (* 2 k) (/ k 2)))
+    (set! (-> *bf-look-share* BF_LOOK_RED_GL) (/ k 2))
+    (set! (-> *bf-look-share* BF_LOOK_JET_BLUE) k)
+    (set! (-> *bf-look-share* BF_LOOK_JET_RED) k)
+    (set! (-> *bf-look-share* BF_LOOK_ROBOT_BLUE) k)
+    (set! (-> *bf-look-share* BF_LOOK_ROBOT_RED) k)
+    (set! (-> *bf-look-share* BF_LOOK_SPIDER_BLUE) spiders)
+    (set! (-> *bf-look-share* BF_LOOK_SPIDER_RED) spiders)
+    (set! (-> *bf-pool-caps* 0) (* 4 k))
+    (set! (-> *bf-pool-caps* 1) (* 2 k))
+    (set! (-> *bf-pool-caps* 2) (* 2 k))
+    (set! (-> *bf-pool-caps* 3) (* 2 spiders))
     )
   (none)
   )
@@ -1452,8 +2022,8 @@
 
 (defun bf-guard-skel-name ()
   "Skeleton for a new crimson-guard process (guard.gc init-enemy!). During a battle the guard-a
-   pool holds 14 blue guards (Freedom League) and 8 red Jak 2 Krimzon Guards, half riflemen, half
-   grenadiers: the new guard takes the look furthest below its share. An alternation was not
+   pool holds the blue guards (Freedom League) and the red Jak 2 Krimzon Guards, three riflemen for
+   one grenadier (`bf-caps-set!`): the new guard takes the look furthest below its share. An alternation was not
    enough: the traffic kills and spawns guards all the time (trims, section changes), and in game
    the pool drifted to no blue guard at all."
   (if (not (bf-active?))
@@ -1473,6 +2043,30 @@
           )
         )
       )
+  )
+
+(defun bf-bot-skel-name ((spider? symbol))
+  "Skeleton for a new roboguard-city process (roboguard-city.gc init-enemy!), or with SPIDER? a
+   spydroid (spydroid.gc init-enemy!). During a battle the robots of each kind are blue (the Freedom
+   League's, round 46) or red: the new one takes the color furthest below its share (see
+   `bf-guard-skel-name`)."
+  (let ((blue (if spider? BF_LOOK_SPIDER_BLUE BF_LOOK_ROBOT_BLUE))
+        (red (if spider? BF_LOOK_SPIDER_RED BF_LOOK_ROBOT_RED))
+        )
+    (cond
+      ((not (bf-active?))
+       (if spider? "skel-spydroid" "skel-roboguard-city")
+       )
+      ((< (bf-look-gap blue) (bf-look-gap red))
+       (bf-take-look red)
+       (if spider? "skel-spydroid" "skel-roboguard-city")
+       )
+      (else
+        (bf-take-look blue)
+        (if spider? "skel-bf-spider-blue" "skel-bf-robot-blue")
+        )
+      )
+    )
   )
 
 (defun bf-turret-skel-name ()
@@ -1496,19 +2090,104 @@
       )
   )
 
+;; ---------------------------------------------------------------------------------------------
+;; The Freedom League models' shine (round 49)
+;; ---------------------------------------------------------------------------------------------
+
+;; A build-actor model's envmap shine is tinted by the merc extra info build-actor writes for each
+;; of its effects: always (255 161 102), orange (goalc/build_actor/jak3/build_actor.cpp
+;; gen_dummy_extra_info; foreground.gc multiplies it by the time of day's env color). The blue
+;; robotguard, spider robot, jetpack and troop transport, recolored from red, shone orange (the
+;; author's report, round 49). Their shine takes the same tint mirrored to blue.
+(define *bf-blue-shine* (new 'static 'rgba :r #x66 :g #xa1 :b #xff :a #x80))
+
+;; The blue robotguard's tint: the stock robotguard's own, a dim grey (55 55 55 in most of the
+;; effects of roboguard-city's art, read in game, round 52). With `*bf-blue-shine*` it shone about
+;; three times as bright as the red one (the author's report, round 52).
+(define *bf-robot-shine* (new 'static 'rgba :r #x55 :g #x55 :b #x55 :a #x80))
+
+(defun bf-blue-shine! ((sg skeleton-group) (tint rgba))
+  "The envmap tint of every mesh of SG's model (its levels of detail, in its loaded art group) set to
+   TINT (`*bf-blue-shine*`, `*bf-robot-shine*`). No-op while the art group is not loaded. Writes the
+   art data itself: every process drawing that model shines so."
+  (let ((ag (art-group-get-by-name *level* (-> sg art-group-name) (the-as (pointer level) #f))))
+    (when ag
+      (dotimes (lod (+ (-> sg max-lod) 1))
+        (let ((k (-> sg mgeo lod)))
+          (when (and (>= k 0) (< k (-> ag length)))
+            (let ((geo (the-as merc-ctrl (-> ag data k))))
+              (when (and geo (= (-> geo type) merc-ctrl))
+                (dotimes (e (the-as int (-> geo header effect-count)))
+                  (let ((ei (-> geo effect e extra-info)))
+                    (when (and ei (nonzero? ei) (nonzero? (-> ei envmap-tint-offset)))
+                      (set! (-> (the-as mei-envmap-tint (+ (the-as uint ei) (* (-> ei envmap-tint-offset) 16))) tint)
+                            tint
+                            )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun bf-blue-shine-all! ()
+  "Called once a second during a battle (battlefront.gc `bf-director-update`): the blue
+   robotguard's, spider robot's and jetpack's shine blue (`bf-blue-shine!`), whenever their level
+   has loaded. The blue transport's is set as each one starts (bf-transport.gc)."
+  (bf-blue-shine! skel-bf-robot-blue *bf-robot-shine*)
+  (bf-blue-shine! skel-bf-spider-blue *bf-blue-shine*)
+  (bf-blue-shine! skel-bf-hover-blue *bf-blue-shine*)
+  ;; Ashelin (round 53): the robots' dim grey, not build-actor's orange
+  (bf-blue-shine! skel-bf-ashelin *bf-robot-shine*)
+  (none)
+  )
+
+(defconstant BF_NAV_USERS 200) ;; units on one nav mesh of a ported war zone's level at most (64 stock, round 44)
+
+(defun bf-nav-max-users ((stock int))
+  "Users of a nav mesh the level being loaded holds (nav-mesh.gc init-from-entity, at its login):
+   BF_NAV_USERS in the Battlefront's ported war zones' levels, bf-havenj2 and bf-spargus (round
+   50), STOCK in every other level. Each user takes 288 bytes of the level's heap."
+  (let ((lev (-> *level* loading-level)))
+    (if (and lev (or (= (-> lev name) 'bf-havenj2) (= (-> lev name) 'bf-spargus)))
+        (max stock BF_NAV_USERS)
+        stock
+        )
+    )
+  )
+
+(defun bf-pool-size ((k int))
+  "The size of the pool of the battle's kind K (an index of `*bf-pool-caps*`): its cap, and during a
+   battle (its deployment too: a redeploy's reset spawns the pools again) no more than its units
+   awake (`*bf-awake-kinds*`) and BF_POOL_SPARE."
+  (if (bf-active?)
+      (min (-> *bf-pool-caps* k) (+ (-> *bf-awake-kinds* k) BF_POOL_SPARE))
+      (-> *bf-pool-caps* k)
+      )
+  )
+
 (defun bf-want-count ((kind int) (stock int))
   "Army cap of traffic type KIND during a battle, STOCK otherwise. Asked twice:
    * the pool size (traffic-manager.gc traffic-manager-method-22, every frame): a pool spawns its
      units up to it and deactivates the sleeping ones above it (traffic-manager-method-18);
    * how many units of the type may be awake (traffic-engine.gc activate-one-vehicle), in place
      of the squad controls' count for the territory, which they rewrite with their alert level:
-     at the Port it allowed 7 guards, 1 flying turret and no roboguard, and the battle starved."
+     at the Port it allowed 7 guards, 1 flying turret and no roboguard, and the battle starved.
+   During a fight a pool is no bigger than its units awake and BF_POOL_SPARE asleep (round 44): every
+   unit a pool spawns holds one of the engine's default nav mesh's 255 nav-controls until it is
+   first woken, and 200 a side would hold more."
   (if (bf-active?)
       (case (the-as traffic-type kind)
-        (((traffic-type guard-a)) (-> *bf-pool-caps* 0))
-        (((traffic-type flying-turret)) (-> *bf-pool-caps* 1))
-        (((traffic-type roboguard)) (-> *bf-pool-caps* 2))
-        (((traffic-type spydroid)) (-> *bf-pool-caps* 3))
+        (((traffic-type guard-a)) (bf-pool-size 0))
+        (((traffic-type flying-turret)) (bf-pool-size 1))
+        (((traffic-type roboguard)) (bf-pool-size 2))
+        (((traffic-type spydroid)) (bf-pool-size 3))
         ;; no citizen on a battlefield: walkers, pilots, and their bikes and cars (the faction
         ;; commands leave some civilians to the faction manager's levels)
         (((traffic-type civilian-male)
@@ -1556,12 +2235,13 @@
 
 (defun bf-attacker-type ((proc process) (stock int))
   "Haven City attack-controller type a unit registers with (city-target-type). The red guard
-   registers as a roboguard (9) and the blue jetpack as a rifle guard (4), so the stock hatred
-   table sends each side against the other."
+   registers as a roboguard (9) and the blue jetpack, robotguard and spider robot (round 46) as a
+   rifle guard (4), so the stock hatred table sends each side against the other."
   (cond
     ((not (bf-active?)) stock)
     ((bf-red-guard? proc) 9)
     ((string= (bf-art-name proc) "bf-hover-blue-lod0") 4)
+    ((bf-blue-bot? proc) 4)
     (else stock)
     )
   )
@@ -1660,6 +2340,13 @@
     )
   )
 
+(defconstant BF_BLUE_ECO_DROP 0.75) ;; a spider's kill leaves blue eco this often (round 44, the author's "high share")
+
+(defun bf-spider? ((proc process))
+  "#t for a spider robot: an AI one, or the player playing one."
+  (or (= (-> proc type symbol) 'spydroid) (and (= proc *target*) (= (-> *bf* class) BF_CLASS_SPYDROID)))
+  )
+
 (defun bf-queue-drop ((proc process))
   "Maybe leave a pickup where PROC died: 6 of every 10 fallen units leave one, in a random order (a
    bag of 10 deaths holding 6, where a chance at each death gave less in two long battles): dark eco
@@ -1670,7 +2357,23 @@
    A jetpack guard (a flying-turret) also leaves its rockets, one in 10 (`*bf-rocket-bag*`, the
    author's 10 %, round 37), and a robotguard its grenades, one in 10 too (`*bf-grenade-bag*`,
    round 38): the stock dark ammo pickup, purple as their icons, which a jetpack player takes as
-   rockets and a robotguard player as grenades (battlefront-player.gc BF_ROCKET_PICKUP)."
+   rockets and a robotguard player as grenades (battlefront-player.gc BF_ROCKET_PICKUP).
+   A unit a spider killed (the last foe that hit it, `bf-hit-by`) also leaves Jak and Daxter's blue
+   eco, BF_BLUE_ECO_DROP of the time: the spider's sprint (round 44)."
+  (let ((killer (bf-hit-by proc (seconds 5))))
+    (when (and killer
+               (bf-spider? killer)
+               (type? proc process-drawable)
+               (< (-> *bf* drop-count) BF_DROP_MAX)
+               (< (rand-vu) BF_BLUE_ECO_DROP)
+               )
+      (let ((i (-> *bf* drop-count)))
+        (set! (-> *bf* drop-kind i) (the-as int (pickup-type eco-blue)))
+        (vector-copy! (-> *bf* drop-pos i) (-> (the-as process-drawable proc) root trans))
+        (+! (-> *bf* drop-count) 1)
+        )
+      )
+    )
   (let ((bag (case (-> proc type symbol)
                (('flying-turret) *bf-rocket-bag*)
                (('roboguard-city) *bf-grenade-bag*)
@@ -1714,7 +2417,7 @@
   (none)
   )
 
-(defconstant BF_FALLEN_MAX 64)
+(defconstant BF_FALLEN_MAX 256) ;; 64 until round 44
 
 (deftype bf-fallen (structure)
   "The last units fallen, the newest over the oldest once full: when, and their side and kind

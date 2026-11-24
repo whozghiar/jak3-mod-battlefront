@@ -521,14 +521,16 @@
           (set! (-> *part-id-table* 4709 init-specs 3 initial-valuef) (/ f0-8 2))
           )
         )
-      ;; MOD battlefront -- a jetpack guard's flames come out of its jetpack's turbines
-      (bf-hover-nozzle! this gp-0 s5-0 0)
-      (draw-beam (-> *part-id-table* 4709) gp-0 s5-0 #f)
-      ;; MOD battlefront -- the second flame from its other turbine
-      (if (not (bf-hover-nozzle! this gp-0 s5-0 1))
-          (vector+float*! gp-0 gp-0 (-> s4-0 rvec) 1228.8)
-          )
-      (draw-beam (-> *part-id-table* 4709) gp-0 s5-0 #f)
+      ;; MOD battlefront -- a jetpack guard's flames come out of its jetpack's turbines, none while
+      ;; its model is not drawn ('hide)
+      (when (!= (bf-hover-nozzle! this gp-0 s5-0 0) 'hide)
+        (draw-beam (-> *part-id-table* 4709) gp-0 s5-0 #f)
+        ;; MOD battlefront -- the second flame from its other turbine
+        (if (not (bf-hover-nozzle! this gp-0 s5-0 1))
+            (vector+float*! gp-0 gp-0 (-> s4-0 rvec) 1228.8)
+            )
+        (draw-beam (-> *part-id-table* 4709) gp-0 s5-0 #f)
+        )
       )
     )
   (none)

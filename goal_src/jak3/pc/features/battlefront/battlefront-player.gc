@@ -56,6 +56,7 @@
 (defconstant BF_SPIDER_LEAP_HEIGHT (meters 11)) ;; height of the spider robot's leap (X)
 (defconstant BF_ROLL_SPEED 5.4)             ;; robotguard speed multiplier as a ball (3.6 before round 34, 2.4 before round 25, 1.6 before round 22)
 (defconstant BF_FLAME_BOOST 1.8)            ;; the jetpack's flames this much longer while R2 boosts
+(defconstant BF_FLAME_SIZE 0.75)            ;; the player's flames against the stock jetpack guards' (round 45: too big)
 (defconstant BF_LAND_TIME (seconds 0.7))    ;; the class model's landing clip after a fall from the sky
 (defconstant BF_SALVO_GAP (seconds 0.12))   ;; between the two shots of a jetpack or robotguard salvo
 (defconstant BF_SHIELD_TIME (seconds 5))    ;; robotguard: its shield stops every hit this long
@@ -69,7 +70,9 @@
 (defconstant BF_CHAIN_MAX 2)                ;; spider: foes its headbutt's shock jumps to besides the one struck (round 38)
 (defconstant BF_CHAIN_RANGE (meters 10))    ;; how near the one struck they stand (the Peace Maker's blast, gun-dark-shot.gc)
 (defconstant BF_CHAIN_GAP (seconds 0.1))    ;; between two foes shocked, as the Peace Maker's chain
-(defconstant BF_NOVA_RADIUS (meters 40))    ;; spider's L1 blast: foes within this die (15 m in round 38; the Super Nova's 300 m)
+(defconstant BF_NOVA_RADIUS (meters 60))    ;; spider's L1 blast: foes within this die (40 m until round 44, 15 m in round 38; the Super Nova's 300 m)
+(defconstant BF_NOVA_DOME 1.5)              ;; its dome this many times round 39's size (the radius 1.5 times round 39's)
+(defconstant BF_BLUE_ECO_FILL 0.5)          ;; a blue eco pickup fills the spider's sprint gauge this much (round 44)
 (defconstant BF_NOVA_LIFE (seconds 6))      ;; its mushroom cloud grows, then fades, this long (the Super Nova's 10 s)
 (defconstant BF_NOVA_CHARGE (seconds 30))   ;; the blast is ready this long after the spider appears (round 39)
 (defconstant BF_NOVA_VIEW (seconds 5))      ;; the camera shows the blast from afar this long, the spider gone
@@ -153,14 +156,15 @@
 
 ;; Indexed by BF_CLASS_*. Jak (3) has no avatar; his entry draws his class page preview.
 (define *bf-class-art*
-  (new 'static 'inline-array bf-class-art 8
+  (new 'static 'inline-array bf-class-art 10
     ;; Speeds since round 34 (the author's wish: the player's classes as the units of round 33): the
     ;; guards 1.4 times 1.425, the robotguard 2 times 1.05 on foot, the spider 1.6 times 2.25; the
     ;; jetpacks kept. Round 36: the guards slower with the units' (1.6 / 1.9 of 1.995).
+    ;; Round 49: the guards' rifle fires twice as fast, a shot every 0.25 s (0.5 s before; the author's wish).
     ;; blue guard: crimson-guard-ag idle 4, walk 5, run 6, jump-high 38, gun-attack 26; blast joint 14
     (new 'static 'bf-class-art :skel "skel-crimson-guard" :level 'ctypesa
          :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
-         :ammo BF_AMMO_YELLOW :speed 1.68 :height 3.8 :fire-delay (seconds 0.5))
+         :ammo BF_AMMO_YELLOW :speed 1.68 :height 3.8 :fire-delay (seconds 0.25))
     ;; blue jetpack: bf-hover-blue (battlefront-h.gc order); gun tips 9 and 11
     (new 'static 'bf-class-art :skel "skel-bf-hover-blue" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
@@ -177,7 +181,7 @@
     ;; red guard: same clip indices as the blue guard (custom_assets/jak3/models/models.jsonc)
     (new 'static 'bf-class-art :skel "skel-bf-red-guard" :level 'ctypesa
          :idle 4 :walk 5 :run 6 :jump 38 :shoot 26 :special -1 :melee 18 :gun0 14 :gun1 14
-         :ammo BF_AMMO_YELLOW :speed 1.68 :height 3.8 :fire-delay (seconds 0.5))
+         :ammo BF_AMMO_YELLOW :speed 1.68 :height 3.8 :fire-delay (seconds 0.25))
     ;; red jetpack
     (new 'static 'bf-class-art :skel "skel-bf-hover-red" :level 'ctypesc
          :idle 2 :walk 3 :run 3 :jump 3 :shoot 4 :special -1 :melee 3 :gun0 9 :gun1 11
@@ -191,6 +195,16 @@
     (new 'static 'bf-class-art :skel "skel-spydroid" :level 'ctypesc
          :idle 3 :walk 4 :run 5 :jump 6 :shoot 6 :special 6 :melee 6 :gun0 -1 :gun1 -1
          :ammo BF_AMMO_NONE :speed 3.6 :height 2.0 :fire-delay (seconds 0.8))
+    ;; Baron Praxis (round 44): bf-baron (battlefront-baron.gc BF_BARON_CLIP_*); his own moves, not Jak's
+    (new 'static 'bf-class-art :skel "skel-bf-baron" :level 'ctypesc
+         :idle 2 :walk 4 :run 3 :jump 5 :shoot 9 :special -1 :melee 6 :gun0 -1 :gun1 -1
+         :ammo BF_AMMO_NONE :speed 1.0 :height 3.6 :fire-delay (seconds 0.9))
+    ;; Ashelin (round 53): bf-ashelin (battlefront-h.gc BF_ASHELIN_CLIP_*); her own moves, not Jak's.
+    ;; Her pistols: the right one on the gun joint (skin joint 21, node 22), the left one in her left
+    ;; hand (Lhand, skin joint 8, node 9: mod_models.py's mirrored copy is bound to it)
+    (new 'static 'bf-class-art :skel "skel-bf-ashelin" :level 'ctypesc
+         :idle 2 :walk 4 :run 3 :jump 5 :shoot 9 :special -1 :melee -1 :gun0 22 :gun1 9
+         :ammo BF_AMMO_NONE :speed 1.0 :height 3.3 :fire-delay (seconds 0.13))
     )
   )
 
@@ -298,6 +312,12 @@
    (boost?      symbol)         ;; jetpack: R2 boosts this frame
    (engine-id   sound-id)       ;; jetpack: the bike engine's loop (`bf-avatar-jet-sound`), 0 none
    (thrust-id   sound-id)       ;; jetpack: the bike's thrust while R2 boosts, 0 none
+   (yaw         float)          ;; Baron: the way he faces (battlefront-baron.gc `bf-baron-update`)
+   (lean        float)          ;; Baron: his lean into a turn, as Jak's (an angle)
+   (walk-blend  float)          ;; Baron: 0 to 1 as his walk clip plays, which turns his model (BF_BARON_WALK_YAW)
+   (turn-until  time-frame)     ;; Baron: his 180 degree turn plays until then
+   (turn-yaw    float)          ;; Baron: the way he faces once it ends
+   (jumps       int32)          ;; Ashelin: her jumps since she left the ground, 2 at most (round 53)
    )
   (:state-methods
     idle
@@ -305,6 +325,16 @@
   )
 
 ;; The avatar's handle is `(-> *bf* avatar)` (battlefront-h.gc explains why).
+
+;; Baron Praxis's controls (battlefront-baron.gc, linked after this file)
+(define-extern bf-baron-update (function none :behavior bf-avatar))
+(define-extern bf-baron-pick-anim (function int :behavior bf-avatar))
+(define-extern bf-baron-play (function none :behavior bf-avatar))
+(define-extern bf-baron-init-collision (function none :behavior bf-avatar))
+;; Ashelin's controls (battlefront-ashelin.gc, linked after battlefront-baron.gc)
+(define-extern bf-ashelin-update (function none :behavior bf-avatar))
+(define-extern bf-ashelin-pick-anim (function int :behavior bf-avatar))
+(define-extern bf-ashelin-play (function none :behavior bf-avatar))
 
 (defun bf-class-art-of ((class int))
   "Drawing and weapon data of CLASS."
@@ -318,11 +348,14 @@
 
 (defun bf-class-skel-name ((class int) (weapon int))
   "Skeleton-group name of CLASS holding WEAPON. A build-actor model draws all its meshes, so the
-   red guard with the tazer or the grenade launcher is a second model (battlefront-h.gc)."
-  (if (and (= class BF_CLASS_RED_GUARD) (!= weapon BF_WEAPON_RIFLE))
-      "skel-bf-red-guard-gl"
-      (-> (bf-class-art-of class) skel)
-      )
+   red guard with the tazer or the grenade launcher is a second model (battlefront-h.gc). The
+   robotguard and the spider robot of a Freedom League player are blue (round 46)."
+  (cond
+    ((and (= class BF_CLASS_RED_GUARD) (!= weapon BF_WEAPON_RIFLE)) "skel-bf-red-guard-gl")
+    ((and (= class BF_CLASS_ROBOGUARD) (= (-> *bf* team) BF_TEAM_FF)) "skel-bf-robot-blue")
+    ((and (= class BF_CLASS_SPYDROID) (= (-> *bf* team) BF_TEAM_FF)) "skel-bf-spider-blue")
+    (else (-> (bf-class-art-of class) skel))
+    )
   )
 
 (defun bf-class-skel ((class int))
@@ -499,6 +532,10 @@
    `*bf*` combat-time."
   (set! (-> *bf* own-attack) damage)
   (bf-combat!)
+  ;; the foe was hit by the player: his class's kill is his (`bf-hit-note!`)
+  (if (and foe (!= foe *target*))
+      (bf-hit-note! foe *target*)
+      )
   (let ((id (+ (-> *game-info* attack-id) 1))
         (msg (new 'stack-no-clear 'event-message-block))
         )
@@ -698,9 +735,11 @@
   )
 
 (defun bf-refill-mags ()
-  "A full rifle magazine (a deployment, a respawn). The grenade launcher has no magazine: it throws
-   Jak's red ammo, the grenades carried."
+  "A full rifle magazine (a deployment, a respawn), and Ashelin's (round 54, battlefront-ashelin.gc
+   BF_ASH_MAG: 10). The grenade launcher has no magazine: it throws Jak's red ammo, the grenades
+   carried."
   (set! (-> *bf* mag BF_WEAPON_RIFLE) BF_MAG_RIFLE)
+  (set! (-> *bf* mag BF_WEAPON_PISTOL) 10)
   (none)
   )
 
@@ -1425,11 +1464,378 @@
   (fmin 1.0 (/ (the float (- (-> av clock frame-counter) (-> av nova-from))) (the float BF_NOVA_CHARGE)))
   )
 
+;; Jak 1's blue eco (round 44, the author's wish): the spider's sprint is blue eco, its kills leave
+;; blue eco (battlefront-h.gc `bf-queue-drop`), and it crackles with blue eco's arcs while it sprints
+;; (`bf-avatar-blue-glow`). Jak 3 keeps blue eco's pickup (collectables.gc eco-blue), but the
+;; pickup's own particles, group-eco-blue and its pickup burst, are in a debug-only file
+;; (engine/debug/debug-part.gc): a retail boot has none. Copied here, the same ids (a debug boot
+;; defines them twice). They are Jak 1's (jak1 collectables-part.gc parts 2 to 14 and 147) but for
+;; the arcs' texture: Jak 3 drew them as plain white strips (common-white), Jak 1 with the zigzags of
+;; its effects page, lightning, lightning2 and lightning3, which Jak 3 does not have. Jak 3's three
+;; lightning frames take their place, one each (round 45, the author's wish: Jak 1's look).
+(defpartgroup group-eco-blue
+  :id 154
+  :bounds (static-bspherem 0 0 0 1)
+  :parts ((sp-item 550 :flags (sp3) :binding 544)
+    (sp-item 544 :fade-after (meters 40) :flags (sp2 sp3) :binding 545)
+    (sp-item 544 :fade-after (meters 60) :flags (sp2 sp3) :binding 545)
+    (sp-item 544 :fade-after (meters 80) :flags (sp2 sp3) :binding 545)
+    (sp-item 544 :fade-after (meters 100) :flags (sp2 sp3) :binding 545)
+    (sp-item 544 :fade-after (meters 130) :flags (sp2 sp3) :binding 545)
+    (sp-item 544 :flags (sp2 sp3) :binding 545)
+    (sp-item 545 :flags (sp2 sp3) :binding 546)
+    (sp-item 545 :flags (sp2 sp3) :binding 547)
+    (sp-item 545 :flags (sp2 sp3) :binding 548)
+    (sp-item 545 :flags (sp2 sp3) :binding 546)
+    (sp-item 545 :flags (sp2 sp3) :binding 547)
+    (sp-item 545 :flags (sp2 sp3) :binding 548)
+    (sp-item 546 :fade-after (meters 60) :flags (sp2) :binding 549)
+    (sp-item 547 :fade-after (meters 70) :flags (sp2) :binding 549)
+    (sp-item 548 :fade-after (meters 80) :flags (sp2) :binding 549)
+    (sp-item 546 :fade-after (meters 90) :flags (sp2) :binding 549)
+    (sp-item 547 :fade-after (meters 100) :flags (sp2) :binding 549)
+    (sp-item 548 :fade-after (meters 100) :flags (sp2) :binding 549)
+    (sp-item 549 :flags (sp2))
+    )
+  )
+
+
+(defpartgroup group-eco-blue-collect
+  :id 155
+  :duration (seconds 0.5)
+  :linger-duration (seconds 2)
+  :bounds (static-bspherem 0 0 0 2)
+  :parts ((sp-item 558 :flags (sp3) :binding 554)
+    (sp-item 554 :flags (sp2 sp3) :binding 555)
+    (sp-item 554 :flags (sp2 sp3) :binding 556)
+    (sp-item 554 :flags (sp2 sp3) :binding 555)
+    (sp-item 554 :flags (sp2 sp3) :binding 556)
+    (sp-item 554 :flags (sp2 sp3) :binding 557)
+    (sp-item 555 :fade-after (meters 40) :flags (sp2))
+    (sp-item 555 :fade-after (meters 40) :flags (sp2))
+    (sp-item 555 :fade-after (meters 40) :flags (sp2))
+    (sp-item 555 :fade-after (meters 40) :flags (sp2))
+    (sp-item 556 :fade-after (meters 40) :flags (sp2))
+    (sp-item 556 :fade-after (meters 40) :flags (sp2))
+    (sp-item 556 :fade-after (meters 40) :flags (sp2))
+    (sp-item 556 :fade-after (meters 40) :flags (sp2))
+    (sp-item 557 :fade-after (meters 40) :flags (sp2))
+    (sp-item 557 :fade-after (meters 40) :flags (sp2))
+    (sp-item 557 :fade-after (meters 40) :flags (sp2))
+    (sp-item 557 :fade-after (meters 40) :flags (sp2))
+    )
+  )
+
+
+(defpart 544
+  :init-specs ((:texture (bigpuff level-default-sprite))
+    (:num 6.0)
+    (:y (meters 0) (meters 16))
+    (:z (meters 0.3) (meters 0.15))
+    (:scale-x (meters 2) (meters 1))
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y :copy scale-x)
+    (:r 0.0 32.0)
+    (:g 32.0 96.0)
+    (:b 128.0 128.0)
+    (:a 32.0)
+    (:omega (degrees 0) (degrees 360))
+    (:vel-x (meters 0.0148148155) (meters 0.0044444446))
+    (:vel-y (meters 0))
+    (:vel-z (meters 0))
+    (:rotvel-z (degrees -0.1) 1 (degrees 0.2))
+    (:timer (seconds -0.005))
+    (:flags (sp-cpuinfo-flag-3 ready-to-launch sp-cpuinfo-flag-14))
+    (:func 'eco-fadeout)
+    (:next-time (seconds 0.035))
+    (:next-launcher 551)
+    )
+  )
+
+
+(defpart 545
+  :init-specs ((:texture (starflash level-default-sprite))
+    (:num 1.0)
+    (:y (meters 0) (meters 16))
+    (:z (meters 0.2) (meters 0.1))
+    (:scale-x (meters 0.8) (meters 0.4))
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y :copy scale-x)
+    (:r 96.0)
+    (:g 96.0)
+    (:b 192.0)
+    (:a 32.0 32.0)
+    (:omega (degrees 0) (degrees 360))
+    (:vel-x (meters 0.017777778) (meters 0.0148148155))
+    (:vel-y (meters 0))
+    (:vel-z (meters 0))
+    (:rotvel-z (degrees 269.52002) (degrees 208.99998))
+    (:timer (seconds -0.005))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 ready-to-launch sp-cpuinfo-flag-14))
+    (:func 'eco-fadeout)
+    (:next-time (seconds 0.035))
+    (:next-launcher 552)
+    )
+  )
+
+
+(defpart 546
+  :init-specs ((:texture (lightning-anim-01 level-default-sprite))
+    (:num 0.0 1.0)
+    (:scale-x (meters 0.2) (meters 1))
+    (:rot-x 4)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.15) (meters 0.1))
+    (:r 64.0)
+    (:g 64.0)
+    (:b 128.0)
+    (:a 128.0 64.0)
+    (:fade-a -1.6)
+    (:timer (seconds 0.3))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 sp-cpuinfo-flag-14))
+    (:next-time (seconds 0.035))
+    (:next-launcher 553)
+    )
+  )
+
+
+(defpart 547
+  :init-specs ((:texture (lightning-anim-02 level-default-sprite))
+    (:num 0.0 1.0)
+    (:scale-x (meters 0.2) (meters 1))
+    (:rot-x 4)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.15) (meters 0.1))
+    (:r 64.0)
+    (:g 64.0)
+    (:b 128.0)
+    (:a 128.0 64.0)
+    (:fade-a -1.6)
+    (:timer (seconds 0.3))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 sp-cpuinfo-flag-14))
+    (:next-time (seconds 0.035))
+    (:next-launcher 553)
+    )
+  )
+
+
+(defpart 548
+  :init-specs ((:texture (lightning-anim-03 level-default-sprite))
+    (:num 0.0 1.0)
+    (:scale-x (meters 0.2) (meters 1))
+    (:rot-x 4)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.15) (meters 0.1))
+    (:r 64.0)
+    (:g 64.0)
+    (:b 128.0)
+    (:a 128.0 64.0)
+    (:fade-a -1.6)
+    (:timer (seconds 0.3))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 sp-cpuinfo-flag-14))
+    (:next-time (seconds 0.035))
+    (:next-launcher 553)
+    )
+  )
+
+
+(defpart 549
+  :init-specs ((:texture (hotdot level-default-sprite))
+    (:num 0.2 0.2)
+    (:scale-x (meters 1) (meters 0.5))
+    (:scale-y :copy scale-x)
+    (:r 32.0)
+    (:g 32.0)
+    (:b 192.0)
+    (:a 96.0 64.0)
+    (:timer (seconds 0.017))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 sp-cpuinfo-flag-14))
+    )
+  )
+
+
+(defpart 550
+  :init-specs ((:texture (hotdot level-default-sprite))
+    (:num 1.0)
+    (:x (meters 4))
+    (:scale-x (meters 0.01))
+    (:scale-y :copy scale-x)
+    (:timer (seconds -0.005))
+    (:flags (sp-cpuinfo-flag-3 sp-cpuinfo-flag-14))
+    (:func 'sparticle-track-root-prim)
+    )
+  )
+
+
+(defpart 551
+  :init-specs ((:fade-a -0.21333334) (:timer (seconds 0.5)))
+  )
+
+
+(defpart 552
+  :init-specs ((:fade-a -0.16) (:timer (seconds 0.5)))
+  )
+
+
+(defpart 553
+  :init-specs ((:r 64.0) (:g 64.0) (:fade-r -1.0) (:fade-g -1.0) (:fade-a -2.0))
+  )
+
+
+(defpart 554
+  :init-specs ((:texture (starflash level-default-sprite))
+    (:num 5.0)
+    (:y (meters -4) (meters 16))
+    (:z (meters 0.08))
+    (:scale-x (meters 0.75) (meters 0.5))
+    (:scale-y :copy scale-x)
+    (:r 64.0)
+    (:g 64.0)
+    (:b 128.0)
+    (:a 127.0)
+    (:omega (degrees 0) (degrees 360))
+    (:vel-x (meters -0.017777778) 2.0 (meters 0.035555556))
+    (:vel-y (meters 0))
+    (:vel-z (meters 0.08))
+    (:accel-z (meters -0.0053333333))
+    (:timer (seconds 0.5))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 ready-to-launch sp-cpuinfo-flag-14))
+    )
+  )
+
+
+(defpart 555
+  :init-specs ((:texture (lightning-anim-01 level-default-sprite))
+    (:num 1.0)
+    (:scale-x (meters 0.2) (meters 1))
+    (:rot-x 4)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.15) (meters 0.1))
+    (:r 64.0)
+    (:g 64.0)
+    (:b 128.0)
+    (:a 128.0 64.0)
+    (:fade-a -1.4)
+    (:timer (seconds 0.3))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 sp-cpuinfo-flag-14))
+    (:next-time (seconds 0.035))
+    (:next-launcher 553)
+    )
+  )
+
+
+(defpart 556
+  :init-specs ((:texture (lightning-anim-02 level-default-sprite))
+    (:num 1.0)
+    (:scale-x (meters 0.2) (meters 1))
+    (:rot-x 4)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.15) (meters 0.1))
+    (:r 64.0)
+    (:g 64.0)
+    (:b 128.0)
+    (:a 128.0 64.0)
+    (:fade-a -1.4)
+    (:timer (seconds 0.3))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 sp-cpuinfo-flag-14))
+    (:next-time (seconds 0.035))
+    (:next-launcher 553)
+    )
+  )
+
+
+(defpart 557
+  :init-specs ((:texture (lightning-anim-03 level-default-sprite))
+    (:num 1.0)
+    (:scale-x (meters 0.2) (meters 1))
+    (:rot-x 4)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.15) (meters 0.1))
+    (:r 64.0)
+    (:g 64.0)
+    (:b 128.0)
+    (:a 128.0 64.0)
+    (:fade-a -1.4)
+    (:timer (seconds 0.3))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 sp-cpuinfo-flag-14))
+    (:next-time (seconds 0.035))
+    (:next-launcher 553)
+    )
+  )
+
+
+(defpart 558
+  :init-specs ((:texture (starflash level-default-sprite))
+    (:num 1.0)
+    (:scale-x (meters 4))
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y :copy scale-x)
+    (:r 96.0)
+    (:g 96.0)
+    (:b 192.0)
+    (:a 64.0)
+    (:fade-a -3.2)
+    (:timer (seconds 0.5))
+    (:flags (sp-cpuinfo-flag-3 sp-cpuinfo-flag-14))
+    (:func 'part-tracker-track-root)
+    (:next-time (seconds 0.05))
+    (:next-launcher 418)
+    )
+  )
+
+
+;; Jak 1's blue eco arc on a glowing body (jak1 powerups.gc part 257, its zigzag texture Jak 3's
+;; lightning frame, as above); Jak 3's own (powerups.gc part 786) is a white strip. Its fade is Jak
+;; 3's copy of Jak 1's (part 787, jak1 part 258).
+(defpart 5221
+  :init-specs ((:texture (lightning-anim-01 level-default-sprite))
+    (:num 1.0 3.0)
+    (:scale-x (meters 0.5) (meters 1.5))
+    (:rot-x 4)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.2) (meters 0.1))
+    (:r 64.0)
+    (:g 64.0)
+    (:b 128.0)
+    (:a 128.0)
+    (:fade-a -1.6)
+    (:timer (seconds 0.3))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3))
+    (:next-time (seconds 0.035))
+    (:next-launcher 787)
+    )
+  )
+
+(defun bf-blue-glow ((at vector))
+  "Jak 1's blue eco glow at AT (jak1 powerups.gc eco-blue-glow): a blue flash (Jak 3's part 784,
+   the same as Jak 1's 255), and one time in two its arcs (part 5221)."
+  (launch-particles (-> *part-id-table* 784) at)
+  (if (rand-vu-percent? 0.5)
+      (launch-particles (-> *part-id-table* 5221) at)
+      )
+  (none)
+  )
+
+(defbehavior bf-avatar-blue-glow bf-avatar ()
+  "The spider sprinting on blue eco: blue eco's arcs on two of its joints at random a frame, as Jak's
+   body crackles with blue eco in Jak and Daxter (powerups.gc target-powerup-effect, `bf-blue-glow`)."
+  (let ((n (-> self node-list length)))
+    (when (< 4 n)
+      (dotimes (k 2)
+        (bf-blue-glow (vector<-cspace! (new 'stack-no-clear 'vector) (-> self node-list data (rand-vu-int-range 3 (+ n -1)))))
+        )
+      )
+    )
+  (none)
+  )
+
 (defun bf-nova-strike ((at vector))
   "The spider's blast at AT: every foe within BF_NOVA_RADIUS (never its own side) gets the Super
-   Nova's scorch mark and attack (`bf-send-attack-pen`, penetrate explode jak-dark-nuke, so each dies
-   as under it). Its own function, so that the actor list leaves the blast process's stack before
-   it suspends. Returns how many it struck."
+   Nova's scorch mark and an explosion's attack (`bf-send-attack-pen`, penetrate explode): each dies
+   its own death, a jetpack exploding, a guard in its cloud (round 44, the author's wish; the
+   Super Nova's jak-dark-nuke sent a city unit back to its pool at once, citizen.gc
+   msg-for-incoming-attack, so it vanished uncounted). Its own function, so that the actor list
+   leaves the blast process's stack before it suspends. Returns how many it struck."
   (let ((probe (vector-copy! (new 'stack-no-clear 'vector) at))
         (shapes (new 'stack-no-clear 'array 'collide-shape 128))
         (n 0)
@@ -1447,7 +1853,7 @@
                 (vector-copy! (-> *launch-matrix* trans) mark)
                 (part-tracker-spawn part-tracker :to *entity-pool* :group group-gun3-dark-scorched-earth)
                 )
-              (bf-send-attack-pen proc BF_DMG_NOVA (penetrate explode jak-dark-nuke))
+              (bf-send-attack-pen proc BF_DMG_NOVA (penetrate explode))
               (+! n 1)
               )
             )
@@ -1499,6 +1905,9 @@
         (part-tracker-spawn part-tracker :to *entity-pool* :group group-gun-dark3-ring)
         (activate! *camera-smush-control* 1228.8 45 1275 1.0 0.9 (-> *display* camera-clock))
         (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 255 (seconds 1))
+        ;; its bang at once (round 44: the streamed one below came late or not at all, the author heard
+        ;; none), the common bank's explosion
+        (sound-play "explosion")
         (let ((params (new 'stack-no-clear 'gun-dark-3-sphere-init-params)))
           (vector-copy! (-> params pos) top)
           (set! (-> params size-x) 1.0)
@@ -1556,8 +1965,8 @@
             ;; first 40 %, from small: at its stock size at once it held the camera, still close,
             ;; inside it (the screen dark, seen in game); then it fades
             (vector-copy! (-> params pos) top)
-            (set! (-> params size-x) (lerp (meters 0.5) (meters 12) (fmin 1.0 (* 2.5 f))))
-            (set! (-> params size-y) (lerp (meters 0.3) (meters 5) (fmin 1.0 (* 2.5 f))))
+            (set! (-> params size-x) (* BF_NOVA_DOME (lerp (meters 0.5) (meters 12) (fmin 1.0 (* 2.5 f)))))
+            (set! (-> params size-y) (* BF_NOVA_DOME (lerp (meters 0.3) (meters 5) (fmin 1.0 (* 2.5 f)))))
             (set! (-> params alpha-val) (square (- 1.0 fade)))
             (send-event (handle->process sphere) 'set-pos-and-size params)
             )
@@ -1727,12 +2136,16 @@
   )
 
 (defmethod shield-post ((this bf-shield))
-  "The stock post (its fade and transform), then a red aura: the stock one only turns red as it
-   heats up."
+  "The stock post (its fade and transform), then a red aura (the stock one only turns red as it
+   heats up); Baron Praxis's is white, for Light Jak's barrier (round 44: the Light Jak shield's own
+   model is not loaded in Jak 2's city, battlefront-baron.gc `bf-baron-shield`)."
   (let ((ret (call-parent-method this))
         (heat (-> this heat-info current-heat-value))
         )
-    (set-vector! (-> this draw color-emissive) (+ 0.5 (* 0.5 heat)) 0.0 0.0 1.0)
+    (if (= (-> *bf* class) BF_CLASS_BARON)
+        (set-vector! (-> this draw color-emissive) 0.3 0.3 0.33 1.0)
+        (set-vector! (-> this draw color-emissive) (+ 0.5 (* 0.5 heat)) 0.0 0.0 1.0)
+        )
     ret
     )
   )
@@ -1770,6 +2183,43 @@
        )
   )
 
+(defbehavior bf-shield-raise! bf-avatar ()
+  "The shield sphere (`bf-shield`, BF_SHIELD_SIZE) around Jak, 2.2 m up, when its art is loaded
+   (CTYPESA): stored in the avatar (`shield`, `shield?`) and `*bf*` shield?, which stops every hit
+   (battlefront.gc target-attacked). The robotguard's and Baron Praxis's. Returns #t when raised."
+  (when (and (= (level-status? *level* 'ctypesa #f) 'active)
+             (art-group-get-by-name *level* "skel-shield-sphere" (the-as (pointer level) #f))
+             )
+    (let ((params (new 'stack-no-clear 'shield-sphere-spawn-params)))
+      (set! (-> params owner) (process->handle *target*))
+      (set! (-> params sphere-size) BF_SHIELD_SIZE)
+      (set! (-> params track-joint) -1)
+      (set-vector! (-> params offset-vec) 0.0 (meters 2.2) 0.0 1.0)
+      (set! (-> params enable-time) 0)
+      (set! (-> params disable-time) 0)
+      (set! (-> params shield-strength) BF_SHIELD_STRENGTH)
+      (set! (-> params shield-type) (shield-type shield-type-0))
+      (let ((proc (process-spawn bf-shield :init bf-shield-init-by-other params :name "bf-shield" :to *target*)))
+        (when proc
+          ;; no collision: the robotguard's own shots went no further than the sphere (5.9 m,
+          ;; seen in game), and Jak's shield level stops every attack meanwhile (battlefront.gc
+          ;; target-attacked). Its states take the collision back from the backup (toggle-shield)
+          (let ((root (-> (the-as shield-sphere (ppointer->process proc)) root)))
+            (set! (-> root backup-collide-as) (collide-spec))
+            (set! (-> root backup-collide-with) (collide-spec))
+            (set! (-> root root-prim prim-core collide-as) (collide-spec))
+            (set! (-> root root-prim prim-core collide-with) (collide-spec))
+            )
+          (set! (-> self shield) (ppointer->handle proc))
+          (set! (-> self shield?) #t)
+          (set! (-> *bf* shield?) #t)
+          #t
+          )
+        )
+      )
+    )
+  )
+
 (defbehavior bf-avatar-shield bf-avatar ((want symbol))
   "Robotguard. WANT (Circle pressed) with the shield recharged: its red shield sphere around Jak for
    BF_SHIELD_TIME, which stops every shot, blast and blow meanwhile (the `target-attacked` wrapper of
@@ -1782,39 +2232,8 @@
        (bf-shield-close self)
        (set-time! (-> self shield-time))
        )
-      ((and want
-            (not (-> self rolling?))
-            (bf-shield-ready? self)
-            (= (level-status? *level* 'ctypesa #f) 'active)
-            (art-group-get-by-name *level* "skel-shield-sphere" (the-as (pointer level) #f))
-            )
-       (let ((params (new 'stack-no-clear 'shield-sphere-spawn-params)))
-         (set! (-> params owner) (process->handle *target*))
-         (set! (-> params sphere-size) BF_SHIELD_SIZE)
-         (set! (-> params track-joint) -1)
-         (set-vector! (-> params offset-vec) 0.0 (meters 2.2) 0.0 1.0)
-         (set! (-> params enable-time) 0)
-         (set! (-> params disable-time) 0)
-         (set! (-> params shield-strength) BF_SHIELD_STRENGTH)
-         (set! (-> params shield-type) (shield-type shield-type-0))
-         (let ((proc (process-spawn bf-shield :init bf-shield-init-by-other params :name "bf-shield" :to *target*)))
-           (when proc
-             ;; no collision: the robotguard's own shots went no further than the sphere (5.9 m,
-             ;; seen in game), and Jak's shield level stops every attack meanwhile (battlefront.gc
-             ;; target-attacked). Its states take the collision back from the backup (toggle-shield)
-             (let ((root (-> (the-as shield-sphere (ppointer->process proc)) root)))
-               (set! (-> root backup-collide-as) (collide-spec))
-               (set! (-> root backup-collide-with) (collide-spec))
-               (set! (-> root root-prim prim-core collide-as) (collide-spec))
-               (set! (-> root root-prim prim-core collide-with) (collide-spec))
-               )
-             (set! (-> self shield) (ppointer->handle proc))
-             (set! (-> self shield?) #t)
-             (set! (-> *bf* shield?) #t)
-             (set-time! (-> self shield-time))
-             )
-           )
-         )
+      ((and want (not (-> self rolling?)) (bf-shield-ready? self) (bf-shield-raise!))
+       (set-time! (-> self shield-time))
        )
       )
     )
@@ -2225,6 +2644,8 @@
          ((and (cpad-hold? 0 r2) (< 0.0 (-> self boost)))
           (set! (-> self boost) (fmax 0.0 (- (-> self boost) (/ dt BF_BOOST_TIME))))
           (set! speed (* speed BF_BOOST_SPEED))
+          ;; blue eco's arcs on it while it sprints (round 44)
+          (bf-avatar-blue-glow)
           )
          (else
            (set! (-> self boost) (fmin 1.0 (+ (-> self boost) refill)))
@@ -2273,7 +2694,7 @@
     (when (< 0.0 (-> *game-info* gun-ammo BF_AMMO_DARK))
       (set! (-> *game-info* gun-ammo BF_AMMO_DARK) 0.0)
       (if (or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK)
-              (= (-> self class) BF_CLASS_ROBOGUARD)
+              (= (-> self class) BF_CLASS_ROBOGUARD) (= (-> self class) BF_CLASS_ASHELIN)
               )
           (set! (-> *bf* rockets) (min BF_ROCKETS (+ (-> *bf* rockets) BF_ROCKET_PICKUP)))
           )
@@ -2460,6 +2881,42 @@
         (class (-> self class))
         )
     (cond
+      ((= class BF_CLASS_BARON)
+       ;; the Baron falls (his death clip, once, held: his sword thrown up comes down planted in
+       ;; him, scripts/battlefront/make_baron_clips.py, round 45), his shield closed, then goes
+       (case (-> self die-step)
+         ((0)
+          (if (-> self shield?)
+              (bf-shield-close self)
+              )
+          (ja-channel-push! 1 (seconds 0.1))
+          (ja :group! (-> self draw art-group data BF_BARON_CLIP_DEATH) :num! min)
+          (set! (-> self die-step) 1)
+          )
+         (else
+           (ja :num! (seek!))
+           (if (< (seconds 4.5) t)
+               (deactivate self)
+               )
+           )
+         )
+       )
+      ((= class BF_CLASS_ASHELIN)
+       ;; Ashelin falls (her own death clip, once, held), then goes (round 53)
+       (case (-> self die-step)
+         ((0)
+          (ja-channel-push! 1 (seconds 0.1))
+          (ja :group! (-> self draw art-group data BF_ASHELIN_CLIP_DEATH) :num! min)
+          (set! (-> self die-step) 1)
+          )
+         (else
+           (ja :num! (seek!))
+           (if (< (seconds 4) t)
+               (deactivate self)
+               )
+           )
+         )
+       )
       ((bf-guard-class? class)
        (case (-> self die-step)
          ((0)
@@ -2652,14 +3109,18 @@
 ;; ---------------------------------------------------------------------------------------------
 
 ;; The battle camera's distance behind the player, times the class's own (`bf-cam-rig-update`):
-;; 1.0 the closest, the view of rounds 13 to 34; L3 held with the right stick up comes closer, down
-;; goes farther, BF_CAM_ZOOM_MAX at most (round 35, the author's wish). Kept from life to life.
+;; 1.0 the closest, the view of rounds 13 to 34; R3 held with the left stick forward comes closer,
+;; back goes farther, BF_CAM_ZOOM_MAX at most (round 49, the author's wish; L3 and the right stick
+;; from round 35). Kept from life to life.
 (defconstant BF_CAM_ZOOM_MAX 1.8)
 (defconstant BF_CAM_ZOOM_RATE 1.0) ;; zoom a second, the stick pushed all the way
 (define *bf-cam-zoom* 1.0)
 ;; #t once the right stick zoomed while L3 was held: its release does not toggle the map
-;; (battlefront.gc `bf-l3-tapped?`)
+;; (battlefront.gc `bf-l3-tapped?`). Never set since round 49: R3 zooms
 (define *bf-l3-zoomed?* #f)
+;; The left stick's push while R3 is held, forward +1.0 to back -1.0, 0.0 otherwise: read and taken
+;; from Jak by battlefront.gc `bf-pad-lock!` (Jak stands while the camera zooms)
+(define *bf-zoom-stick* 0.0)
 
 ;; The point-of-view camera adds this offset, turned by the rig's bone, to the bone's place: none,
 ;; the rig places the camera itself. Static: the setting keeps its address.
@@ -2704,36 +3165,29 @@
    it looks up, with the PC settings' third-person camera inversions at their defaults (pad.gc
    analog-input-horizontal-third). Those defaults keep the original game's camera, which swings
    around Jak the other way (seen in game: the stock camera turned the view left for the stick
-   pushed right); switching one of them turns the battle camera the other way too. L3 held, the
-   stick's up and down zoom instead of tilting (`*bf-cam-zoom*`). Returns nothing."
+   pushed right); switching one of them turns the battle camera the other way too. R3 held, the
+   left stick forward and back zoom (`*bf-zoom-stick*`, `*bf-cam-zoom*`). Returns nothing."
   (when *target*
     (when (not (paused?))
       (let ((dt (seconds-per-frame)))
         (+! (-> *bf* view-yaw)
             (- (* BF_YAW_RATE dt (analog-input-horizontal-third (the-as int (-> *cpad-list* cpads 0 rightx)) 128.0 32.0 110.0 1.0)))
             )
-        (cond
-          ((cpad-hold? 0 l3)
-           ;; zoom: up comes closer, down goes farther (the stick's raw up, whatever the inversions)
-           (let ((up (/ (- 128.0 (the float (-> *cpad-list* cpads 0 righty))) 127.0)))
-             (when (< 0.25 (fabs up))
-               (set! *bf-l3-zoomed?* #t)
-               (set! *bf-cam-zoom* (fmax 1.0 (fmin BF_CAM_ZOOM_MAX (- *bf-cam-zoom* (* BF_CAM_ZOOM_RATE dt up)))))
-               )
-             )
-           )
-          (else
-            (set! (-> *bf* view-pitch)
-                  (fmax BF_PITCH_DOWN
-                        (fmin BF_PITCH_UP
-                              (- (-> *bf* view-pitch)
-                                 (* BF_PITCH_RATE dt (analog-input-vertical-third (the-as int (-> *cpad-list* cpads 0 righty)) 128.0 32.0 110.0 1.0))
-                                 )
-                              )
-                        )
-                  )
-            )
+        ;; zoom: R3 held, the left stick's raw axis whatever the inversions, forward closer (round 49)
+        (let ((up *bf-zoom-stick*))
+          (if (< 0.25 (fabs up))
+              (set! *bf-cam-zoom* (fmax 1.0 (fmin BF_CAM_ZOOM_MAX (- *bf-cam-zoom* (* BF_CAM_ZOOM_RATE dt up)))))
+              )
           )
+        (set! (-> *bf* view-pitch)
+              (fmax BF_PITCH_DOWN
+                    (fmin BF_PITCH_UP
+                          (- (-> *bf* view-pitch)
+                             (* BF_PITCH_RATE dt (analog-input-vertical-third (the-as int (-> *cpad-list* cpads 0 righty)) 128.0 32.0 110.0 1.0))
+                             )
+                          )
+                    )
+              )
         )
       ;; within one turn
       (cond
@@ -3067,7 +3521,9 @@
   "Stand in Jak's place (`bf-avatar-place`) and keep him hidden. `bf-avatar-cam-post` places the
    model again once Jak has moved this frame."
   (when *target*
-    (bf-avatar-place self)
+    (if (not (bf-own-mover? (-> self class)))
+        (bf-avatar-place self)
+        )
     (logior! (-> *target* draw status) (draw-control-status no-draw))
     )
   (none)
@@ -3113,7 +3569,10 @@
   (let ((av (the-as bf-avatar proc)))
     (when *target*
       (bf-target-bones!)
-      (bf-avatar-place av)
+      ;; the Baron and Ashelin place themselves, Jak on them (battlefront-baron.gc, -ashelin.gc)
+      (if (not (bf-own-mover? (-> av class)))
+          (bf-avatar-place av)
+          )
       (do-joint-math (-> av draw) (-> av node-list) (-> av skel))
       )
     )
@@ -3162,12 +3621,13 @@
   )
 
 ;; The jetpack classes' flames: a copy in GAME of the stock jetpack guards' (flying-turret.gc part
-;; 4709, level code), its length and width set before each draw. Free id after the points' beams.
+;; 4709, level code), its length and width set before each draw (BF_FLAME_SIZE of the stock's 0.4
+;; m wide). Free id after the points' beams.
 (defpart 5203
   :init-specs ((:texture (gun-yellow-muzzleflash level-default-sprite))
     (:birth-func 'birth-func-set-quat)
     (:num 1.0)
-    (:scale-x (meters 0.4))
+    (:scale-x (meters 0.3))
     (:scale-y (meters 3))
     (:r 128.0 128.0)
     (:g 32.0 96.0)
@@ -3180,9 +3640,10 @@
 
 (defbehavior bf-avatar-flames bf-avatar ()
   "The jetpack classes' two flames out of the model's turbines (`bf-hover-nozzle!`), drawn as the
-   stock jetpack guards draw theirs (flying-turret.gc flying-turret-method-229): 0.9 m long
-   hovering, up to 2.1 m flying fast, BF_FLAME_BOOST times that while R2 boosts (the author's
-   wish), the size easing toward its target (`flame`). None while the model dies or is hidden."
+   stock jetpack guards draw theirs (flying-turret.gc flying-turret-method-229), BF_FLAME_SIZE of
+   their size (round 45, the author's wish): 0.7 m long hovering, up to 1.6 m flying fast,
+   BF_FLAME_BOOST times that while R2 boosts (the author's wish), the size easing toward its target
+   (`flame`). None while the model dies or is hidden."
   (when (and (or (= (-> self class) BF_CLASS_BLUE_JETPACK) (= (-> self class) BF_CLASS_RED_JETPACK))
              (not (-> self dying?))
              (not (logtest? (-> self draw status) (draw-control-status no-draw)))
@@ -3192,7 +3653,7 @@
            (want (if (-> self boost?) BF_FLAME_BOOST (lerp-scale 0.35 1.0 speed 0.0 (meters 12))))
            )
       (seek! (-> self flame) want (* 3.0 (seconds-per-frame)))
-      (let ((len (* (lerp 3072.0 8601.6 (fmin 1.0 (-> self flame))) (fmax 1.0 (-> self flame))))
+      (let ((len (* BF_FLAME_SIZE (lerp 3072.0 8601.6 (fmin 1.0 (-> self flame))) (fmax 1.0 (-> self flame))))
             (pos (new 'stack-no-clear 'vector))
             (dir (new 'stack-no-clear 'vector))
             )
@@ -3260,12 +3721,28 @@
 (defstate idle (bf-avatar)
   :virtual #t
   :trans (behavior ()
-    (bf-avatar-follow)
-    ;; no class move while the player falls from the sky after a respawn (battlefront.gc `bf-sky-drop!`)
-    (if (and *target* (not (focus-test? *target* dead)) (not (-> self dying?)) (not (-> *bf* dropping?)))
-        (bf-avatar-moves)
+    (cond
+      ((= (-> self class) BF_CLASS_BARON)
+       ;; the Baron's own controls (battlefront-baron.gc)
+       (if *target*
+           (bf-baron-update)
+           )
+       )
+      ((= (-> self class) BF_CLASS_ASHELIN)
+       ;; Ashelin's own controls (battlefront-ashelin.gc, round 53)
+       (if *target*
+           (bf-ashelin-update)
+           )
+       )
+      (else
+        (bf-avatar-follow)
+        ;; no class move while the player falls from the sky after a respawn (battlefront.gc `bf-sky-drop!`)
+        (if (and *target* (not (focus-test? *target* dead)) (not (-> self dying?)) (not (-> *bf* dropping?)))
+            (bf-avatar-moves)
+            )
+        (bf-avatar-zap-update)
         )
-    (bf-avatar-zap-update)
+      )
     )
   :code (behavior ()
     (until #f
@@ -3274,8 +3751,16 @@
         (bf-avatar-dying)
         (suspend)
         )
-      (bf-avatar-motion)
-      (let ((want (bf-avatar-pick-anim)))
+      (if (not (bf-own-mover? (-> self class)))
+          (bf-avatar-motion)
+          )
+      (let ((want (case (-> self class)
+                    ((BF_CLASS_BARON) (bf-baron-pick-anim))
+                    ((BF_CLASS_ASHELIN) (bf-ashelin-pick-anim))
+                    (else (bf-avatar-pick-anim))
+                    )
+                  )
+            )
         ;; every new clip blends in (0.1 s). With two blends still running it waits for one to end
         ;; rather than switch at once: a third pushed channel, with the guards' two upper-body
         ;; ones, would fill the joint-control's 6 (seen in game: "could not do (ja-channel-push!
@@ -3311,6 +3796,14 @@
       ;; a close attack's clip plays once to its end, which ends the attack: the next one waits
       ;; for it (`bf-avatar-moves`)
       (cond
+        ((= (-> self class) BF_CLASS_BARON)
+         ;; the Baron's clips, each at its pace (battlefront-baron.gc)
+         (bf-baron-play)
+         )
+        ((= (-> self class) BF_CLASS_ASHELIN)
+         ;; Ashelin's (battlefront-ashelin.gc, round 53)
+         (bf-ashelin-play)
+         )
         ((and (< (current-time) (-> self melee-until)) (= (-> self anim) (bf-avatar-melee-clip)))
          (ja :num! (seek!))
          (when (ja-done? 0)
@@ -3390,7 +3883,11 @@
   "Set up the avatar of CLASS with SKEL (checked loaded by `bf-avatar-spawn`). Turns off Jak's
    own weapons for as long as the avatar lives."
   (set! (-> self class) class)
-  (set! (-> self root) (new 'process 'trsqv))
+  ;; the Baron and Ashelin move themselves: a collision of their own (`bf-baron-init-collision`)
+  (if (bf-own-mover? class)
+      (bf-baron-init-collision)
+      (set! (-> self root) (new 'process 'trsqv))
+      )
   (let ((lev (level-get *level* (-> (bf-class-art-of class) level))))
     (if lev
         (set! (-> self level) lev)
@@ -3427,6 +3924,7 @@
   (set! (-> self dive-foe) (the-as handle #f))
   (set! (-> self fuel) 1.0)
   (set! (-> self rocket-time) 0)
+  (set! (-> self jumps) 0)
   (set! (-> self left-hand?) #f)
   (set! (-> self nova-from) (-> self clock frame-counter))
   (set! (-> self nova?) #f)
@@ -3468,7 +3966,7 @@
   (set! (-> self blink?) #f)
   ;; every class that shoots turns its upper body toward the aim while it fires (`bf-avatar-aim-torso`):
   ;; node 4 is the guard's swivelMe, the jetpack guard's and the robotguard's chest
-  (if (and (!= class BF_CLASS_SPYDROID) (< 4 (-> self node-list length)))
+  (if (and (!= class BF_CLASS_SPYDROID) (not (bf-own-mover? class)) (< 4 (-> self node-list length)))
       (set! (-> self aim-jm) (new 'process 'joint-mod (joint-mod-mode polar-look-at) self 4))
       )
   ;; the arcs around a foe the tazer or the spider's headbutt shocks (`bf-avatar-zap`)

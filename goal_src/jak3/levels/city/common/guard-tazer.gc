@@ -5,6 +5,9 @@
 ;; name in dgo: guard-tazer
 ;; dgos: CWI
 
+;; MOD battlefront -- no blows in a battle (pc/features/battlefront/battlefront-h.gc, GAME, round 52)
+(define-extern bf-melee-ok? (function process symbol))
+
 ;; DECOMP BEGINS
 
 (defun spread-lightning-lazer ((arg0 lightning-control) (arg1 vector) (arg2 vector) (arg3 vector))
@@ -307,7 +310,8 @@
                    )
               (< (fabs (-> self target-y-angle)) 8192.0)
               )
-         (if (< (-> self target-self-xz-dist) 16384.0)
+         ;; MOD battlefront -- no rifle butt for a battle's guard (bf-melee-ok?): its tazer
+         (if (and (< (-> self target-self-xz-dist) 16384.0) (bf-melee-ok? self))
              (go-virtual close-attack)
              (go-virtual attack-tazer)
              )
