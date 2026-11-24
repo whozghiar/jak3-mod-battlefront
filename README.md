@@ -12,7 +12,7 @@
 
 ## Overview
 A Star Wars Battlefront mode for Jak 3. The Freedom League and the Krimzon Guard fight over Jak 2's
-Haven City, up to 100 units a side at once, and you play a soldier of either army.
+Haven City or Spargus, up to 200 units at once, and you play a soldier of either army.
 
 <p align="center">
   <img src="docs/img/mod/battle.gif" width="640" alt="A guard fighting in Jak 2's Haven City among both armies">
@@ -24,15 +24,32 @@ Haven City, up to 100 units a side at once, and you play a soldier of either arm
 ## Key Features
 - **Jak 2's Haven City as the battlefield:** the whole city, built at install from your own Jak 2 and
   Jak 3 discs. Its doors stay closed: the war is in the streets.
-- **Two armies:** the Freedom League (blue guards, jetpack guards) against the Krimzon Guard (Jak 2's
-  red guards, jetpack guards, robotguards, spider robots). Up to 100 units a side fight at once,
-  drawn from reserves of 50 to 1000.
+- **Spargus as the battlefield:** the desert city, built at install from your Jak 3, without its
+  people, its doors to the garage, the arena and the palace closed. A battle of its own there: the
+  destruction of an objective. The Freedom League defends a precursor artifact standing by the
+  precursor game, in the west district, and comes down from the sky there; its units hunt the
+  Krimzon Guard's all over the city. The Krimzon Guard comes down in the east district and crosses
+  the pass to destroy it. No point is taken: the artifact
+  destroyed, the Krimzon Guard wins; the time up, or the Krimzon Guard out of units, the Freedom
+  League. The artifact's health shows under the reserves.
+- **Two armies:** the Freedom League (blue guards, jetpack guards, blue robotguards and spider
+  robots, and Ashelin herself when the battle setup lets special characters in) against the Krimzon
+  Guard (Jak 2's red guards, jetpack guards, robotguards, spider robots, and Baron Praxis himself
+  with special characters). Once a side has lost a fifth of its units, its champion comes to fight
+  for it, once a battle: Baron Praxis for the Krimzon Guard, Ashelin for the Freedom League, a health
+  bar shown when you are near them. Up to 200 units fight
+  at once across the city, half a side, drawn from reserves of 50 to 1000, or unlimited. A unit on
+  its way to a point fights the enemies it meets, then goes on. The guards and robotguards fight
+  with their guns only, no blows, and a guard aims before it fires. Each side's shots are its color, and
+  the top left corner counts each side's units alive. You walk through the units of your side.
 - **Capture the city:** each side has two headquarters, and each of the 13 other districts has a
-  control point. Bring more units than the enemy near a point to capture it. Hold every point, or
-  outlast the enemy's reserves, to win.
-- **Reinforcements where you hold ground:** troop transports drop units at the headquarters, and
-  units fall from the sky at the points your side holds. You respawn at any of them.
-- **Six classes to play,** each with its own model, moves and weapons.
+  control point. Bring more units than the enemy near a point: in 20 s an enemy point turns neutral,
+  in 15 s a neutral point is yours. Its icon fills in the taking side's color and blinks while both
+  sides are even there. Hold every point, or outlast the enemy's reserves, to win.
+- **Reinforcements where you hold ground:** a troop transport over each headquarters, in its most
+  open ground, drops 100 units, then rises into the sky for good; units fall from the sky at the
+  points your side holds, at the one nearest a point under attack first. You respawn at any of them.
+- **Nine classes to play,** each with its own model, moves and weapons.
 - **A shooter's camera:** third person over the shoulder, free aim with the right stick.
 - **A game of its own:** a title menu, a battle setup, class, respawn and result pages in the look of
   the game's menus, in English and French. Missions, vehicles and saving are off during a battle.
@@ -48,8 +65,10 @@ Haven City, up to 100 units a side at once, and you play a soldier of either arm
 |---|---|---|---|
 | Guard | Both (blue or red) | 24 | R1 fire, D-pad weapon (rifle 20/100, grenade launcher 5, tazer), Triangle reload, Square rifle butt, X jump, L1 crouch, L2 or R2 + left stick strafe or roll |
 | Jetpack guard | Both | 18 | X climb, Circle descend, neither to hover; R1 twin shots, L1 rocket (10), R2 boost on dark eco |
-| Robotguard | Krimzon Guard | 24 | R1 twin shots, L1 grenade (10), Square punch, Circle red shield for 5 s, R2 roll as a ball |
-| Spider robot | Krimzon Guard | 12 | X 11 m leap, Square shock headbutt on up to 3 foes, R2 blue eco sprint, L1 self-destruct blast once charged |
+| Robotguard | Both (blue or red) | 24 | R1 twin shots, L1 grenade (10), Square punch, Circle red shield for 5 s, R2 roll as a ball |
+| Spider robot | Both (blue or red) | 12 | X 11 m leap, Square shock headbutt on up to 3 foes, R2 blue eco sprint (the blue eco its kills drop refills it), L1 self-destruct blast once charged |
+| Baron Praxis (special character) | Krimzon Guard | 36 | Left stick run (pushed a little: walk; pushed back at a run: he turns about), X jump, Square overhead sword chop, Circle spinning slash, R2 yellow eco ball thrown with a diagonal cut (his yellow gauge), L2 a white barrier: foes thrown out, no damage, a slow walk. In the air: X then Square, he dives and plants his sword in the ground, a blow all around; X then Circle, a full spin of his sword |
+| Ashelin (special character) | Freedom League | 36 | Left stick run, X jump and X again in the air (a flip), Square both pistols in turn while walking (10 rounds a magazine, 150 carried), Triangle reload, L1 kneel, Circle spinning kick, R2 + left stick left or right side flip, R1 grenade thrown overhand, flying in an arc (10) |
 
 | Blue guard | Blue jetpack guard |
 |---|---|
@@ -65,9 +84,8 @@ Haven City, up to 100 units a side at once, and you play a soldier of either arm
 |---|---|
 | Right stick | Aim |
 | L3 | Your kills and deaths, and the live map of the city |
-| L3 held + right stick | Move the camera farther or closer |
-| START | The battle menu: Redeploy (change class or respawn point), Restart, Quit, the game's Options |
-| L3 + SELECT | The Mods menu, to switch the mode off |
+| R3 held + left stick | Forward: the camera closer; back: farther (you stand still meanwhile) |
+| START | The battle menu, battle paused: Redeploy (change class or respawn point), Restart, Quit, Controls (every class's buttons) |
 
 <p align="center">
   <img src="docs/img/mod/hud.png" width="400" alt="In a fight: the reserves at the top, the weapon and ammo at the top right, the class gauge in the health ring">
