@@ -3991,6 +3991,16 @@
       (set! (-> self skel top-anim) top)
       )
     )
+  ;; Ashelin (round 55): her firing clip plays on her arms alone, over her legs' clip
+  ;; (`bf-ashelin-shot`), as Jak's gun clips play on his arms
+  (when (= class BF_CLASS_ASHELIN)
+    (let ((top (new 'process 'top-anim-joint-control self)))
+      (set! (-> top interp-select 0) (the-as uint BF_ASHELIN_UPPER))
+      (set! (-> top interp-select 1) (the-as uint 0))
+      (set! (-> top base-anim) (-> self draw art-group data BF_ASHELIN_CLIP_IDLE))
+      (set! (-> self skel top-anim) top)
+      )
+    )
   (set-setting! 'gun #f 0.0 0)
   (set-setting! 'attack #f 0.0 0)
   (set-setting! 'board #f 0.0 0)

@@ -9,7 +9,7 @@
   ;; the jetpack guards drawn on the flying-turret code (build-actor, Jak 2 model; blue = Freedom
   ;; League textures).
   "bf-baron-ag.go"         ;; 1084384, Baron Praxis (round 44, build-actor, Jak 2 model; round 46's clips)
-  "bf-ashelin-ag.go"       ;; 333216, Ashelin (round 53, build-actor, Jak 3 model, clips made at install; round 54 Mixamo clips)
+  "bf-ashelin-ag.go"       ;; 298304, Ashelin (round 53, build-actor, Jak 3 model, clips made at install; round 55 Jak's moves)
   "roboguard-city-ag.go"   ;; 116080
   "bf-hover-red-ag.go"     ;; 78208
   "bf-hover-blue-ag.go"    ;; 78208

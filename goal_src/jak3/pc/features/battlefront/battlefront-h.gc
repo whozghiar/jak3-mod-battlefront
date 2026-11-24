@@ -1014,26 +1014,32 @@
 
 ;; Ashelin (rounds 53 and 54): Jak 3's Ashelin, her red turned to the blue guards' blue, a second
 ;; pistol in her left hand, and clips made at install (custom_assets/jak3/models/models.jsonc
-;; "made_clips", mod_models.py: Mixamo's pistol motions on her skeleton, and moves made from her own
-;; clips): in that order from 2.
-(defconstant BF_ASHELIN_CLIP_IDLE 2)        ;; pistol idle, aiming low
-(defconstant BF_ASHELIN_CLIP_RUN 3)         ;; pistol run, its stride widened
-(defconstant BF_ASHELIN_CLIP_WALK 4)        ;; pistol walk, aiming
-(defconstant BF_ASHELIN_CLIP_JUMP 5)        ;; pistol jump, its part in the air
-(defconstant BF_ASHELIN_CLIP_FLIP 6)        ;; her second jump: a front flip, tucked
+;; "made_clips", mod_models.py: since round 55 Jak's own moves on her skeleton, and moves made from her
+;; own clips): in that order from 2.
+(defconstant BF_ASHELIN_CLIP_IDLE 2)        ;; Jak's idle
+(defconstant BF_ASHELIN_CLIP_RUN 3)         ;; Jak's run
+(defconstant BF_ASHELIN_CLIP_WALK 4)        ;; Jak's walk
+(defconstant BF_ASHELIN_CLIP_JUMP 5)        ;; Jak's jump, from its push off the ground
+(defconstant BF_ASHELIN_CLIP_FLIP 6)        ;; her second jump and her roll's jump: Jak's flip out of a roll
 (defconstant BF_ASHELIN_CLIP_FLIP_LEFT 7)   ;; her cartwheel to the left
 (defconstant BF_ASHELIN_CLIP_FLIP_RIGHT 8)  ;; the same, mirrored
 (defconstant BF_ASHELIN_CLIP_THROW 9)       ;; an overhand throw of her left hand
 (defconstant BF_ASHELIN_CLIP_HIT 10)
 (defconstant BF_ASHELIN_CLIP_DEATH 11)
-(defconstant BF_ASHELIN_CLIP_KNEEL 12)      ;; pistol stand to kneel
-(defconstant BF_ASHELIN_CLIP_KNEEL_IDLE 13) ;; pistol kneeling idle
-(defconstant BF_ASHELIN_CLIP_UNKNEEL 14)    ;; pistol kneel to stand
-(defconstant BF_ASHELIN_CLIP_STRAFE_LEFT 15) ;; pistol strafe
+(defconstant BF_ASHELIN_CLIP_KNEEL 12)      ;; Jak's crouch (L1): down
+(defconstant BF_ASHELIN_CLIP_KNEEL_IDLE 13) ;; crouching
+(defconstant BF_ASHELIN_CLIP_UNKNEEL 14)    ;; up again
+(defconstant BF_ASHELIN_CLIP_STRAFE_LEFT 15) ;; Jak's walk aside with his gun
 (defconstant BF_ASHELIN_CLIP_STRAFE_RIGHT 16)
-(defconstant BF_ASHELIN_CLIP_WALK_BACK 17)  ;; pistol walk backward
-(defconstant BF_ASHELIN_CLIP_KICK 18)       ;; a spinning kick (Mixamo's great sword kick)
+(defconstant BF_ASHELIN_CLIP_WALK_BACK 17)  ;; Jak's walk reversed
+(defconstant BF_ASHELIN_CLIP_KICK 18)       ;; Jak's spinning kick
 (defconstant BF_ASHELIN_CLIP_RELOAD 19)     ;; her pistols lowered and raised again
+(defconstant BF_ASHELIN_CLIP_ROLL 20)       ;; Jak's roll with his gun in hand, and its end
+(defconstant BF_ASHELIN_CLIP_FIRE 21)       ;; her own shot and recoil, her pistols in turn: her arms alone
+;; Her joints the firing clip takes, over her legs' clip (round 55, `top-anim`'s interp-select: a
+;; joint's bit is its node index minus 1, joint-nodes.gc ashelin-lod0-jg): her arms Lshoulder to
+;; Rhand 6 to 11, her pistol (gun) 21, her fingers 29 to 36.
+(defconstant BF_ASHELIN_UPPER #x1fe0200fc0)
 (def-art-elt bf-ashelin-ag bf-ashelin-lod0-jg 0)
 (def-art-elt bf-ashelin-ag bf-ashelin-lod0-mg 1)
 (def-art-elt bf-ashelin-ag bf-ashelin-idle-ja 2)

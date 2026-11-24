@@ -85,7 +85,9 @@ The manifest (comments allowed):
                                                // across), "mirror" (the whole clip mirrored across
                                                // x, left and right joints swapped), "mirror_limbs"
                                                // ([joints]: each limb from that joint turned as the
-                                               // mirror of the other side's), "turns" ([{"joint",
+                                               // mirror of the other side's; or {"joint", "shift"}:
+                                               // the other side's pose that share of the clip later,
+                                               // the clip a loop: two arms in turn), "turns" ([{"joint",
                                                // "axis", "deg", "to", "smooth"}]: a joint turned in
                                                // the model's space, by deg, or from deg to `to`
                                                // over the clip), "lift" (main raised along a sine),
@@ -746,10 +748,24 @@ def mirror_clip(rig: Rig, clip: Clip) -> Clip:
     return out
 
 
-def mirror_limb(rig: Rig, clip: Clip, root: str):
+def mirror_limb(rig: Rig, clip: Clip, root: str, shift: float = 0.0):
     """The limb from joint ROOT down (Lshoulder: the left arm, its fingers) turned as the mirror of
-    its partner's, its bones' lengths kept, in place."""
+    its partner's, its bones' lengths kept, in place. SHIFT (a share of the clip, the clip a loop):
+    the partner's pose that much later, each joint's turn kept from its parent's (a firing clip's
+    recoil, one arm then the other)."""
     limb = [j for j in rig.names if j == root or root in ancestors(rig, j)]
+    if shift:
+        def unit(m):
+            return m[:3, :3] / np.linalg.norm(m[:3, :3], axis=0)
+        orig = [clip.globals(rig, k) for k in range(clip.n)]
+        step = int(round(shift * clip.n))
+        for k in range(clip.n):
+            gs = orig[(k + step) % clip.n]
+            want = {j: MIRROR @ gs[rig.partner(j)] @ rig.ib[rig.partner(j)] @ MIRROR @ rig.b[j] for j in limb}
+            for j in limb:
+                par = want[rig.parent[j]] if rig.parent[j] in want else gs[rig.parent[j]]
+                clip.r[j][k] = mat_to_quat(unit(par).T @ unit(want[j]))
+        return
     for k in range(clip.n):
         g = clip.globals(rig, k)
         for j in limb:
@@ -825,7 +841,10 @@ def make_clip(src: Glb, rig: Rig, recipe: dict, made: dict, more: "Glb | None" =
     if recipe.get("mirror"):
         clip = mirror_clip(rig, clip)
     for limb in recipe.get("mirror_limbs", []):
-        mirror_limb(rig, clip, limb)
+        if isinstance(limb, dict):
+            mirror_limb(rig, clip, limb["joint"], limb.get("shift", 0.0))
+        else:
+            mirror_limb(rig, clip, limb)
     for turn in recipe.get("turns", []):
         deg = turn["deg"]
         if "to" in turn:

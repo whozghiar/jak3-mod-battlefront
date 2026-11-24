@@ -108,57 +108,63 @@
       "attach": {"joint": "gun", "holder": "Rhand", "clip": "ashelin-standing-fire"},
       "made_from": "custom_assets/jak3/models/bf-ashelin-clips.glb",
       "made_clips": [
-        {"name": "idle", "from": "mx-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        // round 55: Jak's own moves (make_ashelin_clips.py "jk-*"), her fingers on her grips
+        {"name": "idle", "from": "jk-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        {"name": "run", "from": "mx-run", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        {"name": "run", "from": "jk-run", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        {"name": "walk", "from": "mx-walk", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        {"name": "walk", "from": "jk-walk", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        {"name": "jump", "from": "mx-jump", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        {"name": "jump", "from": "jk-jump", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        // her second jump: tucked tighter at her jump's top, a front flip about her hips
-        {"name": "tuck", "like": "jump", "keys": [8, 9], "hold": [0, 18], "temp": true,
-         "turns": [{"joint": "Lthigh", "axis": [1, 0, 0], "deg": -30},
-                   {"joint": "Rthigh", "axis": [1, 0, 0], "deg": -30}]},
-        {"name": "flip", "like": "tuck",
-         "turns": [{"joint": "main", "axis": [1, 0, 0], "deg": 0, "to": 360, "smooth": true}]},
+        // her second jump: Jak's flip out of a roll
+        {"name": "flip", "from": "jk-flip", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
         // her side flips: her cartwheel to the left, in place (the game moves her), and its mirror
         {"name": "flip-left", "concat": ["ashelin-cartwheel-left-start", "ashelin-cartwheel-left-loop",
                                          "ashelin-cartwheel-left-land"], "flat_root": true},
         {"name": "flip-right", "like": "flip-left", "mirror": true},
         // an overhand throw of her left hand, a baseball pitch: her arm back and up, her chest turned
         // away, then over her shoulder and down in front of her, her chest turned back
-        {"name": "throw-a", "from": "mx-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        {"name": "throw-a", "from": "jk-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"], "keys": [0, 1], "hold": [0, 9], "temp": true,
          "turns": [{"joint": "chest", "axis": [0, 1, 0], "deg": 0, "to": 25, "smooth": true},
                    {"joint": "Lshoulder", "axis": [1, 0, 0], "deg": 0, "to": 150, "smooth": true}]},
-        {"name": "throw-b", "from": "mx-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        {"name": "throw-b", "from": "jk-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"], "keys": [0, 1], "hold": [0, 6], "temp": true,
          "turns": [{"joint": "chest", "axis": [0, 1, 0], "deg": 25, "to": -20},
                    {"joint": "Lshoulder", "axis": [1, 0, 0], "deg": 150, "to": 300}]},
-        {"name": "throw-c", "from": "mx-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        {"name": "throw-c", "from": "jk-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"], "keys": [0, 1], "hold": [0, 10], "temp": true,
          "turns": [{"joint": "chest", "axis": [0, 1, 0], "deg": -20, "to": 0, "smooth": true},
                    {"joint": "Lshoulder", "axis": [1, 0, 0], "deg": 300, "to": 360, "smooth": true}]},
         {"name": "throw", "concat": ["throw-a", "throw-b", "throw-c"]},
         {"name": "hit", "from": "ashelin-blue-hit-front0", "flat_root": true},
         {"name": "death", "from": "ashelin-die-in-place0"},
-        {"name": "kneel", "from": "mx-kneel", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        // Jak's crouch (L1): down, crouching, up again (the first reversed)
+        {"name": "kneel", "from": "jk-crouch", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        {"name": "kneel-idle", "from": "mx-kneel-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        {"name": "kneel-idle", "from": "jk-crouch-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        {"name": "unkneel", "from": "mx-unkneel", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        {"name": "unkneel", "from": "jk-uncrouch", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        {"name": "strafe-left", "from": "mx-strafe-left", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        // Jak's walk aside with his gun (to her left) and its mirror; his walk reversed
+        {"name": "strafe-left", "from": "jk-side", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        {"name": "strafe-right", "from": "mx-strafe-right", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        {"name": "strafe-right", "like": "strafe-left", "mirror": true},
+        {"name": "walk-back", "from": "jk-walk-back", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        {"name": "walk-back", "from": "mx-walk-back", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
-         "mirror_limbs": ["LmiddleA", "LthumbA"]},
-        {"name": "kick", "from": "mx-kick", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+        // Jak's spinning kick (Circle)
+        {"name": "kick", "from": "jk-kick", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
          "mirror_limbs": ["LmiddleA", "LthumbA"]},
         // her reload: her pistols lowered and raised again
-        {"name": "reload", "concat": ["ashelin-standing-to-waiting", "ashelin-waiting-to-standing"]}
+        {"name": "reload", "concat": ["ashelin-standing-to-waiting", "ashelin-waiting-to-standing"]},
+        // Jak's roll with his gun in hand (L1 on the run), and its end
+        {"name": "roll", "from": "jk-roll", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        // her firing on her arms alone (the game plays it over her legs' clip): her own shot, its
+        // recoil, by her right arm, the left arm its mirror half a loop later (her pistols in turn)
+        {"name": "fire", "from": "ashelin-standing-fire", "mirror_limbs": [{"joint": "Lshoulder", "shift": 0.5}]}
       ]
     },
     // The Freedom League's robotguard and spider robot (round 46): Jak 3's own, their red texels

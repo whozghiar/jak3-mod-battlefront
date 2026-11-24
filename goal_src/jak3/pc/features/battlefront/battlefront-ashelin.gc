@@ -8,28 +8,31 @@
 ;; Ashelin, the Freedom League's special character (round 53, the author's wish), and its champion.
 ;; Jak 3's Ashelin (her model of Spargus's oasis, DESOASIS), her red turned to the blue guards' blue,
 ;; a second pistol in her left hand. Her clips are made at install (custom_assets/jak3/models/
-;; models.jsonc "made_clips", scripts/modding/mod_models.py): since round 54, Mixamo's pistol motions
-;; put on her skeleton (her idle, run, walk, jump, kneel, strafes and walk backward; the author's
-;; files, scripts/battlefront/make_ashelin_clips.py) and a spinning kick; a tucked front flip for her
-;; second jump; her own cartwheel to the left and its mirror to the right; an overhand throw; her
-;; holstering as her reload; her hit and her death. She is a class of the avatar as the Baron is
+;; models.jsonc "made_clips", scripts/modding/mod_models.py): since round 55, Jak's own moves put on
+;; her skeleton, the author's wish (his idle, run, walk, jump, flip out of a roll, crouch, walk aside
+;; with his gun, spinning kick and roll; scripts/battlefront/make_ashelin_clips.py); her own shot and
+;; recoil on her arms alone, over her legs' clip, her pistols in turn (`top-anim`); her own cartwheel
+;; to the left and its mirror to the right; an overhand throw; her holstering as her reload; her hit
+;; and her death. She is a class of the avatar as the Baron is
 ;; (battlefront-player.gc `bf-avatar`, BF_CLASS_ASHELIN): she moves herself on the Baron's collision,
 ;; probes and stick (battlefront-baron.gc), Jak hidden where she stands.
 ;;
 ;; Buttons (round 54, the author's): left stick runs; X jumps, X again in the air jumps a second time
 ;; (a front flip); Square held fires her two pistols in turn toward the crosshair, walking (her
 ;; strafes and walk backward), 10 rounds a magazine (BF_ASH_MAG), 150 more carried (Jak's yellow
-;; ammo, BF_ASH_RESERVE), an empty magazine or Triangle reloading it; L1 held kneels; Circle kicks
+;; ammo, BF_ASH_RESERVE), an empty magazine or Triangle reloading it; L1 held crouches, L1 with the
+;; stick pushed rolls that way, and X during the roll jumps far with a flip (Jak's buttons, round
+;; 55); Circle kicks
 ;; all around her; R2 with the stick to a side flips to that side; R1 throws a grenade overhand, the
 ;; grenade flying in an arc toward the crosshair (the red gun 3's grenade, 10 a life, the
 ;; robotguard's count). As the Freedom League's champion (once it lost 20 % of its units,
 ;; battlefront-baron.gc `bf-boss-update`) her own pad is pressed by `bf-ashelin-think`.
 
-(defconstant BF_ASH_RUN (meters 10))          ;; her run: her run's clip at 1.55 times its pace (16 m/s, 3 times, looked sped up: round 54)
+(defconstant BF_ASH_RUN (meters 9))           ;; her run: Jak's run clip at 1.8 times its pace (his own: 10 m/s, 1.6 times; 16 m/s looked sped up, round 54)
 (defconstant BF_ASH_AIM_WALK (meters 3.5))    ;; her walk while she fires
 (defconstant BF_ASH_JUMP (meters 4.5))        ;; her first jump's top
 (defconstant BF_ASH_JUMP2 (meters 3.5))       ;; her second jump's, from where she is
-(defconstant BF_ASH_FLIP_TIME (seconds 0.6))  ;; her flip (0.6 s at rate 1)
+(defconstant BF_ASH_FLIP_TIME (seconds 0.6))  ;; her flip (Jak's flip out of a roll, 0.6 s at rate 1)
 (defconstant BF_ASH_SIDE_TIME (seconds 0.93)) ;; a side flip, its clip (1.67 s) played that fast
 (defconstant BF_ASH_SIDE_RATE 1.8)
 (defconstant BF_ASH_SIDE_SPEED (meters 10))   ;; across
@@ -44,19 +47,26 @@
 (defconstant BF_ASH_THROW_TIME (seconds 0.83)) ;; her throw (25 keys at 30 a second)
 (defconstant BF_ASH_THROW_AT (seconds 0.4))   ;; the grenade leaves her hand, her arm over her head
 (defconstant BF_ASH_THROW_GAP (seconds 1.2))  ;; between two grenades
-(defconstant BF_ASH_KICK_RATE 1.3)            ;; her kick's clip (1.47 s) played that fast
-(defconstant BF_ASH_KICK_TIME (seconds 1.13))
-(defconstant BF_ASH_KICK_AT (seconds 0.45))   ;; her leg out, turning
+(defconstant BF_ASH_KICK_RATE 1.3)            ;; her kick's clip (Jak's spinning kick and its end, 1.5 s) played that fast
+(defconstant BF_ASH_KICK_TIME (seconds 1.15))
+(defconstant BF_ASH_KICK_AT (seconds 0.25))   ;; her leg out, turning
 (defconstant BF_ASH_KICK_REACH (meters 3.2))  ;; all around her
 (defconstant BF_ASH_KICK_DAMAGE 14.0)         ;; of 24 points
-(defconstant BF_ASH_KNEEL_TIME (seconds 0.77)) ;; down on a knee, then her kneeling clip
-(defconstant BF_ASH_UNKNEEL_RATE 2.0)         ;; up again (1.3 s) that fast
-(defconstant BF_ASH_UNKNEEL_TIME (seconds 0.65))
+(defconstant BF_ASH_KNEEL_TIME (seconds 0.23)) ;; Jak's crouch down, then his crouching clip
+(defconstant BF_ASH_UNKNEEL_RATE 1.0)         ;; up again (0.23 s)
+(defconstant BF_ASH_UNKNEEL_TIME (seconds 0.23))
+(defconstant BF_ASH_ROLL_SPEED (meters 11.5)) ;; her roll (Jak's: target-util.gc roll-speed-min)
+(defconstant BF_ASH_ROLL_RATE 1.4)            ;; its clip (Jak's roll 0.37 s, then its end, 1.03 s) played that fast
+(defconstant BF_ASH_ROLL_TIME (seconds 0.73)) ;; the move
+(defconstant BF_ASH_ROLL_FAST (seconds 0.27)) ;; at full speed (the roll itself), then slowing to a stop
+(defconstant BF_ASH_LEAP_HEIGHT (meters 3.5)) ;; X during her roll: a flip that far up (Jak's roll-flip-height 3.52 m)
+(defconstant BF_ASH_LEAP_DIST (meters 15))    ;; and that far ahead (Jak's 17.3 m)
+(defconstant BF_ASH_FIRE_RATE 1.48)           ;; her firing clip (0.53 s) over two shots (2 BF_ASH_FIRE_GAP)
 ;; the ground each of her loops covers a second at rate 1 (make_ashelin_clips.py prints them)
-(defconstant BF_ASH_RUN_GROUND (meters 6.47))
-(defconstant BF_ASH_WALK_GROUND (meters 2.69))
-(defconstant BF_ASH_STRAFE_GROUND (meters 2.9))
-(defconstant BF_ASH_BACK_GROUND (meters 2.09))
+(defconstant BF_ASH_RUN_GROUND (meters 4.98))
+(defconstant BF_ASH_WALK_GROUND (meters 3.23))
+(defconstant BF_ASH_STRAFE_GROUND (meters 2.06))
+(defconstant BF_ASH_BACK_GROUND (meters 3.19))
 
 ;; ---------------------------------------------------------------------------------------------
 ;; Her grenade, lobbed
@@ -176,7 +186,13 @@
 (defbehavior bf-ashelin-shot bf-avatar ()
   "One shot of her pistols, the right one then the left one: a stock `guard-shot` from BF_ASH_MUZZLE
    ahead of that hand toward her aim, its owner Jak or her body (its color its side's, blue:
-   battlefront.gc `bf-shot-blue?`); a round out of her magazine."
+   battlefront.gc `bf-shot-blue?`); a round out of her magazine. Her right pistol's shot starts her
+   firing clip on her arms (round 55, battlefront-player.gc `bf-avatar-top-play`): its recoil, then
+   her left arm's half a loop later, with her left pistol's shot; let go, her arms go back to her
+   legs' clip."
+  (if (zero? (-> self fire-side))
+      (bf-avatar-top-play BF_ASHELIN_CLIP_FIRE 0.0 -1.0 BF_ASH_FIRE_RATE #t)
+      )
   (let ((owner (bf-ashelin-owner)))
     (when owner
       (let* ((art (bf-class-art-of BF_CLASS_ASHELIN))
@@ -224,7 +240,8 @@
 
 (defbehavior bf-ashelin-start! bf-avatar ((clip int) (span time-frame))
   "A move of hers on her whole body: CLIP played for SPAN (`melee-until`), its first part
-   (`melee-step` 1), facing her aim."
+   (`melee-step` 1), facing her aim, her firing clip off her arms."
+  (bf-avatar-top-stop)
   (set! (-> self yaw) (bf-ashelin-face-yaw))
   (set! (-> self stab-clip) clip)
   (set-time! (-> self melee-time))
@@ -256,7 +273,8 @@
 
 (defbehavior bf-ashelin-update bf-avatar ()
   "Every frame of Ashelin (the avatar's trans, or the champion's): her pad (`bf-baron-pad-of`) moves
-   her on her own collision and gravity (`bf-baron-step`): her side flips (R2 and the stick aside),
+   her on her own collision and gravity (`bf-baron-step`): her roll (L1 and the stick pushed) and its
+   far flip (X during it), her side flips (R2 and the stick aside),
    her kick (Circle), her throw (R1), her reload (Triangle, or an empty magazine), her kneel (L1
    held), her shots (Square held), her two jumps (X). Jak, hidden, put where she stands (the
    champion's body instead). While the player falls from the sky after a respawn, or Jak is dead or
@@ -295,6 +313,17 @@
         ;; her moves on the ground, one at a time
         (when (and ground? (not busy?))
           (cond
+            ;; L1 with the stick pushed: Jak's roll that way (round 55, Jak's own buttons)
+            ((and (bf-baron-pressed? (pad-buttons l1))
+                  (< 0.5 (vector-length (bf-baron-stick (new 'stack-no-clear 'vector))))
+                  )
+             (let ((stick (bf-baron-stick (new 'stack-no-clear 'vector))))
+               (bf-ashelin-start! BF_ASHELIN_CLIP_ROLL BF_ASH_ROLL_TIME)
+               (set! (-> self yaw) (atan (-> stick x) (-> stick z)))
+               (set! (-> stick y) 0.0)
+               (vector-normalize-copy! (-> self roll-vel) stick BF_ASH_ROLL_SPEED)
+               )
+             )
             ;; R2 and the stick to a side: a flip that way, across the way she faces
             ((and (bf-baron-held? (pad-buttons r2)) (!= (bf-ashelin-side) 0))
              (let* ((side (bf-ashelin-side))
@@ -398,6 +427,8 @@
                  (aiming? (or firing? (< now (-> self shoot-until))))
                  (flipping? (and busy? (or (= (-> self stab-clip) BF_ASHELIN_CLIP_FLIP_LEFT)
                                            (= (-> self stab-clip) BF_ASHELIN_CLIP_FLIP_RIGHT)
+                                           (= (-> self stab-clip) BF_ASHELIN_CLIP_ROLL)
+                                           (= (-> self stab-clip) BF_ASHELIN_CLIP_FLIP)
                                            )
                                  )
                             )
@@ -412,8 +443,20 @@
                  )
             (cond
               (flipping?
-               (set! (-> root transv x) (-> self roll-vel x))
-               (set! (-> root transv z) (-> self roll-vel z))
+               ;; a roll at full speed, then slowing to a stop as it ends
+               (let ((f (if (= (-> self stab-clip) BF_ASHELIN_CLIP_ROLL)
+                            (fmax 0.0 (fmin 1.0 (/ (the float (- (-> self melee-until) now))
+                                                   (the float (- BF_ASH_ROLL_TIME BF_ASH_ROLL_FAST))
+                                                   )
+                                            )
+                                  )
+                            1.0
+                            )
+                        )
+                     )
+                 (set! (-> root transv x) (* f (-> self roll-vel x)))
+                 (set! (-> root transv z) (* f (-> self roll-vel z)))
+                 )
                )
               (else
                 (let* ((want (vector-float*! (new 'stack-no-clear 'vector) stick top))
@@ -430,7 +473,7 @@
                 )
               )
             ;; she turns toward where she runs, fast, and leans into the turn; aiming, she faces her aim
-            (if aiming?
+            (if (and aiming? (not busy?))
                 (set! (-> self yaw) (bf-ashelin-face-yaw))
                 )
             (if (and (< 0.1 push) (not busy?) (not aiming?) (not (-> self crouch?)))
@@ -447,6 +490,23 @@
           )
         ;; X: her jump, and in the air once more (her flip); her gravity
         (cond
+          ;; X during her roll: a flip far ahead (Jak's roll then jump, target-roll-flip), the way
+          ;; she rolls
+          ((and busy? ground? (= (-> self stab-clip) BF_ASHELIN_CLIP_ROLL) (bf-baron-pressed? (pad-buttons x)))
+           (let* ((vy (sqrtf (* 2.0 gravity BF_ASH_LEAP_HEIGHT)))
+                  (air (/ (* 2.0 vy) gravity))
+                  (yaw (-> self yaw))
+                  )
+             (bf-ashelin-start! BF_ASHELIN_CLIP_FLIP (the time-frame (* air 300.0)))
+             (set! (-> self yaw) yaw)
+             (vector-normalize! (-> self roll-vel) (/ BF_ASH_LEAP_DIST air))
+             (set! (-> root transv y) vy)
+             (set! (-> self jumps) 2)
+             (set! (-> self ground-time) 0)
+             (set-time! (-> self dodge-time))
+             (sound-play "jump")
+             )
+           )
           ;; the second 0.2 s after the first at the soonest: a press could be read on two frames
           ;; (the round 53 test's first jump flipped at once)
           ((and (not busy?) (not (-> self crouch?)) (bf-baron-pressed? (pad-buttons x)) (< (-> self jumps) 2)
@@ -532,16 +592,16 @@
 
 (defbehavior bf-ashelin-play bf-avatar ()
   "A frame of her clip (after `bf-ashelin-pick-anim` chose it): her run, walks and strafes as fast
-   as her feet cover the ground she covers (BF_ASH_*_GROUND: her run 1.55 times its pace at most, not
-   a sped-up run, the author's wish), her idle and kneeling looped, a side flip, her kick and
-   standing up faster (BF_ASH_SIDE_RATE, BF_ASH_KICK_RATE, BF_ASH_UNKNEEL_RATE), the rest once, held
-   at their end."
+   as her feet cover the ground she covers (BF_ASH_*_GROUND: no foot sliding, the author's wish,
+   round 55), her idle and crouching looped, a side flip, her kick, her roll and standing up at
+   their rates (BF_ASH_SIDE_RATE, BF_ASH_KICK_RATE, BF_ASH_ROLL_RATE, BF_ASH_UNKNEEL_RATE), the rest
+   once, held at their end."
   (let ((speed (vector-xz-length (-> (the-as collide-shape-moving (-> self root)) transv)))
         (anim (-> self anim))
         )
     (case anim
       ((BF_ASHELIN_CLIP_RUN)
-       (ja :num! (loop! (fmax 0.6 (fmin 1.8 (/ speed BF_ASH_RUN_GROUND)))))
+       (ja :num! (loop! (fmax 0.6 (fmin 2.2 (/ speed BF_ASH_RUN_GROUND)))))
        )
       ((BF_ASHELIN_CLIP_WALK)
        (ja :num! (loop! (fmax 0.5 (fmin 2.0 (/ speed BF_ASH_WALK_GROUND)))))
@@ -563,6 +623,9 @@
        )
       ((BF_ASHELIN_CLIP_UNKNEEL)
        (ja :num! (seek! max BF_ASH_UNKNEEL_RATE))
+       )
+      ((BF_ASHELIN_CLIP_ROLL)
+       (ja :num! (seek! max BF_ASH_ROLL_RATE))
        )
       (else
         (ja :num! (seek!))
