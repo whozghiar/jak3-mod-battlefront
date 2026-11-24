@@ -8,7 +8,11 @@
     "jak2/dig1": "DG1.DGO",
     "jak2/drillmtn": "DRILLMTN.DGO",
     "jak2/forestb": "FOB.DGO",
-    "jak3/ctypesa": "CTYPESA.DGO"
+    "jak2/ldjakbrn": "LDJAKBRN.DGO",
+    "jak2/ldjakbrn-pris": "LDJAKBRN.DGO",
+    "jak3/ctypesa": "CTYPESA.DGO",
+    "jak3/ctypesc": "CTYPESC.DGO",
+    "jak3/desoasis": "DESOASIS.DGO"
   },
   "models": {
     // The Jak 2 Krimzon Guard's mesh and red textures on the Jak 3 guard's skeleton (its 38 joints
@@ -65,10 +69,118 @@
       "level": "ctypesa",
       "mesh": "jak2/forestb/transport-lod0.glb"
     },
+    // Baron Praxis, the Krimzon Guard's special character (round 44): Jak 2's cutscene model
+    // (baron-highres, its smallest copy), none of its own clip (one pose with morph keys,
+    // which build-actor refuses), the motion captures the Jak Animation Studio put on it instead
+    // (scripts/battlefront/make_baron_clips.py: the mod's own keys, his sword in his right hand).
+    // Round 45: his one eye (the other is under his helmet) drawn with his eye texture: the game
+    // draws its eyes at run time over a 4 x 4 placeholder, which the mesh keeps; his sword's blade,
+    // which the model never had (sheathed, only its hilt is modeled), made here along the scabbard
+    // it fits, the width of the guard's bar.
+    "bf-baron": {
+      "level": "ctypesc",
+      "mesh": "jak2/ldjakbrn/baron-highres-lod0.glb",
+      "rip_clips": 0,
+      "clip_file": "custom_assets/jak3/models/bf-baron-clips.glb",
+      "texture_files": {"programmer_eye_left": "jak2/ldjakbrn-pris/baron-eye.png"},
+      "blades": [{"joint": "sword", "base": [0.738, 1.857, 0.299], "tip": [0.452, 0.574, -1.465],
+                  "flat": [0.282, -0.797, 0.534], "width": 0.2, "thickness": 0.045,
+                  "material": "baron-brushedmetal-envmap"}]
+    },
+    // Ashelin, the Freedom League's special character (rounds 53 and 54): Jak 3's Ashelin (her model of
+    // the oasis), her red (top, shoulder pad, buckle, shoe plates, Krimzon Guard badge) turned to the
+    // blue guards' blue (216 degrees: the guards' armor 216 to 217, as saturated and as bright), her
+    // hair and face kept; a second pistol in her left hand, her right one's primitives mirrored
+    // through her grip (mirror_props). Her clips (made_clips, her right pistol kept in her right hand
+    // in each: attach): Mixamo's pistol motions and a spinning kick put on her skeleton (made_from,
+    // scripts/battlefront/make_ashelin_clips.py), her fingers closed on her grips as in her own
+    // firing clip; her own cartwheel, hit, death and holstering, and moves made from them. Order:
+    // battlefront-h.gc BF_ASHELIN_CLIP_*.
+    "bf-ashelin": {
+      "level": "ctypesc",
+      "mesh": "jak3/desoasis/ashelin-lod0.glb",
+      "rip_clips": 0,
+      "recolor": {"hues": [-20, 20], "rotate": 216, "min_saturation": 0.3,
+                  "textures": ["ashelin-lo-redtop", "ashelin-lo-shield", "ashelin-lo-beltbuckle",
+                               "ashelin-lo-shoemetal", "ashelin-lo-cglogo"]},
+      "mirror_props": [{"prims": [0, 1, 2, 16], "joint": "gun", "holder": "Rhand", "to": "Lhand",
+                        "clip": "ashelin-standing-fire"}],
+      "attach": {"joint": "gun", "holder": "Rhand", "clip": "ashelin-standing-fire"},
+      "made_from": "custom_assets/jak3/models/bf-ashelin-clips.glb",
+      "made_clips": [
+        {"name": "idle", "from": "mx-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        {"name": "run", "from": "mx-run", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        {"name": "walk", "from": "mx-walk", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        {"name": "jump", "from": "mx-jump", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        // her second jump: tucked tighter at her jump's top, a front flip about her hips
+        {"name": "tuck", "like": "jump", "keys": [8, 9], "hold": [0, 18], "temp": true,
+         "turns": [{"joint": "Lthigh", "axis": [1, 0, 0], "deg": -30},
+                   {"joint": "Rthigh", "axis": [1, 0, 0], "deg": -30}]},
+        {"name": "flip", "like": "tuck",
+         "turns": [{"joint": "main", "axis": [1, 0, 0], "deg": 0, "to": 360, "smooth": true}]},
+        // her side flips: her cartwheel to the left, in place (the game moves her), and its mirror
+        {"name": "flip-left", "concat": ["ashelin-cartwheel-left-start", "ashelin-cartwheel-left-loop",
+                                         "ashelin-cartwheel-left-land"], "flat_root": true},
+        {"name": "flip-right", "like": "flip-left", "mirror": true},
+        // an overhand throw of her left hand, a baseball pitch: her arm back and up, her chest turned
+        // away, then over her shoulder and down in front of her, her chest turned back
+        {"name": "throw-a", "from": "mx-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"], "keys": [0, 1], "hold": [0, 9], "temp": true,
+         "turns": [{"joint": "chest", "axis": [0, 1, 0], "deg": 0, "to": 25, "smooth": true},
+                   {"joint": "Lshoulder", "axis": [1, 0, 0], "deg": 0, "to": 150, "smooth": true}]},
+        {"name": "throw-b", "from": "mx-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"], "keys": [0, 1], "hold": [0, 6], "temp": true,
+         "turns": [{"joint": "chest", "axis": [0, 1, 0], "deg": 25, "to": -20},
+                   {"joint": "Lshoulder", "axis": [1, 0, 0], "deg": 150, "to": 300}]},
+        {"name": "throw-c", "from": "mx-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"], "keys": [0, 1], "hold": [0, 10], "temp": true,
+         "turns": [{"joint": "chest", "axis": [0, 1, 0], "deg": -20, "to": 0, "smooth": true},
+                   {"joint": "Lshoulder", "axis": [1, 0, 0], "deg": 300, "to": 360, "smooth": true}]},
+        {"name": "throw", "concat": ["throw-a", "throw-b", "throw-c"]},
+        {"name": "hit", "from": "ashelin-blue-hit-front0", "flat_root": true},
+        {"name": "death", "from": "ashelin-die-in-place0"},
+        {"name": "kneel", "from": "mx-kneel", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        {"name": "kneel-idle", "from": "mx-kneel-idle", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        {"name": "unkneel", "from": "mx-unkneel", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        {"name": "strafe-left", "from": "mx-strafe-left", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        {"name": "strafe-right", "from": "mx-strafe-right", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        {"name": "walk-back", "from": "mx-walk-back", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        {"name": "kick", "from": "mx-kick", "pose_from": [{"clip": "ashelin-standing-fire", "joints": ["RmiddleA", "RmiddleB", "RthumbA", "RthumbB"]}],
+         "mirror_limbs": ["LmiddleA", "LthumbA"]},
+        // her reload: her pistols lowered and raised again
+        {"name": "reload", "concat": ["ashelin-standing-to-waiting", "ashelin-waiting-to-standing"]}
+      ]
+    },
+    // The Freedom League's robotguard and spider robot (round 46): Jak 3's own, their red texels
+    // turned to blue (the transport's rule), by 210 degrees since round 50: matched on screen to
+    // the blue guards' armor (217 put them at a hue of 221, the guards' 214). Their first clip only: they play the stock art groups'
+    // clips (battlefront-h.gc bf-guard-clips), the skeletons being the same.
+    "bf-robot-blue": {
+      "level": "ctypesc",
+      "mesh": "jak3/ctypesc/roboguard-city-lod0.glb",
+      "rip_clips": 1,
+      "recolor": {"hues": [-15, 15], "rotate": 210, "min_saturation": 0.3}
+    },
+    "bf-spider-blue": {
+      "level": "ctypesc",
+      "mesh": "jak3/ctypesc/spydroid-lod0.glb",
+      "rip_clips": 1,
+      "recolor": {"hues": [-15, 15], "rotate": 210, "min_saturation": 0.3}
+    },
     "bf-transport-blue": {
       "level": "ctypesa",
       "mesh": "jak2/forestb/transport-lod0.glb",
-      "recolor": {"hues": [-15, 15], "rotate": 217, "min_saturation": 0.3}
+      "recolor": {"hues": [-15, 15], "rotate": 210, "min_saturation": 0.3}
     }
   }
 }

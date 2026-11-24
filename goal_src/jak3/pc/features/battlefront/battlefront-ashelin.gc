@@ -1,0 +1,713 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: battlefront-ashelin.gc
+;; name in dgo: battlefront-ashelin
+;; dgos: GAME
+
+;; Ashelin, the Freedom League's special character (round 53, the author's wish), and its champion.
+;; Jak 3's Ashelin (her model of Spargus's oasis, DESOASIS), her red turned to the blue guards' blue,
+;; a second pistol in her left hand. Her clips are made at install (custom_assets/jak3/models/
+;; models.jsonc "made_clips", scripts/modding/mod_models.py): since round 54, Mixamo's pistol motions
+;; put on her skeleton (her idle, run, walk, jump, kneel, strafes and walk backward; the author's
+;; files, scripts/battlefront/make_ashelin_clips.py) and a spinning kick; a tucked front flip for her
+;; second jump; her own cartwheel to the left and its mirror to the right; an overhand throw; her
+;; holstering as her reload; her hit and her death. She is a class of the avatar as the Baron is
+;; (battlefront-player.gc `bf-avatar`, BF_CLASS_ASHELIN): she moves herself on the Baron's collision,
+;; probes and stick (battlefront-baron.gc), Jak hidden where she stands.
+;;
+;; Buttons (round 54, the author's): left stick runs; X jumps, X again in the air jumps a second time
+;; (a front flip); Square held fires her two pistols in turn toward the crosshair, walking (her
+;; strafes and walk backward), 10 rounds a magazine (BF_ASH_MAG), 150 more carried (Jak's yellow
+;; ammo, BF_ASH_RESERVE), an empty magazine or Triangle reloading it; L1 held kneels; Circle kicks
+;; all around her; R2 with the stick to a side flips to that side; R1 throws a grenade overhand, the
+;; grenade flying in an arc toward the crosshair (the red gun 3's grenade, 10 a life, the
+;; robotguard's count). As the Freedom League's champion (once it lost 20 % of its units,
+;; battlefront-baron.gc `bf-boss-update`) her own pad is pressed by `bf-ashelin-think`.
+
+(defconstant BF_ASH_RUN (meters 10))          ;; her run: her run's clip at 1.55 times its pace (16 m/s, 3 times, looked sped up: round 54)
+(defconstant BF_ASH_AIM_WALK (meters 3.5))    ;; her walk while she fires
+(defconstant BF_ASH_JUMP (meters 4.5))        ;; her first jump's top
+(defconstant BF_ASH_JUMP2 (meters 3.5))       ;; her second jump's, from where she is
+(defconstant BF_ASH_FLIP_TIME (seconds 0.6))  ;; her flip (0.6 s at rate 1)
+(defconstant BF_ASH_SIDE_TIME (seconds 0.93)) ;; a side flip, its clip (1.67 s) played that fast
+(defconstant BF_ASH_SIDE_RATE 1.8)
+(defconstant BF_ASH_SIDE_SPEED (meters 10))   ;; across
+(defconstant BF_ASH_SIDE_HOP (meters 1.5))    ;; and up
+(defconstant BF_ASH_FIRE_GAP (seconds 0.18))  ;; between two shots, one pistol then the other
+(defconstant BF_ASH_FIRE_HOLD (seconds 0.3))  ;; she keeps facing her aim this long after a shot
+(defconstant BF_ASH_MUZZLE (meters 0.5))      ;; a shot leaves this far ahead of the hand
+(defconstant BF_ASH_MAG 10)                   ;; rounds a magazine (the author's wish, round 54)
+(defconstant BF_ASH_RESERVE 150.0)            ;; and carried besides it (Jak's yellow ammo)
+(defconstant BF_ASH_RELOAD_TIME (seconds 1.13)) ;; her reload's clip (34 keys at 30 a second)
+(defconstant BF_ASH_RELOAD_AT (seconds 0.8))  ;; the magazine is full again
+(defconstant BF_ASH_THROW_TIME (seconds 0.83)) ;; her throw (25 keys at 30 a second)
+(defconstant BF_ASH_THROW_AT (seconds 0.4))   ;; the grenade leaves her hand, her arm over her head
+(defconstant BF_ASH_THROW_GAP (seconds 1.2))  ;; between two grenades
+(defconstant BF_ASH_KICK_RATE 1.3)            ;; her kick's clip (1.47 s) played that fast
+(defconstant BF_ASH_KICK_TIME (seconds 1.13))
+(defconstant BF_ASH_KICK_AT (seconds 0.45))   ;; her leg out, turning
+(defconstant BF_ASH_KICK_REACH (meters 3.2))  ;; all around her
+(defconstant BF_ASH_KICK_DAMAGE 14.0)         ;; of 24 points
+(defconstant BF_ASH_KNEEL_TIME (seconds 0.77)) ;; down on a knee, then her kneeling clip
+(defconstant BF_ASH_UNKNEEL_RATE 2.0)         ;; up again (1.3 s) that fast
+(defconstant BF_ASH_UNKNEEL_TIME (seconds 0.65))
+;; the ground each of her loops covers a second at rate 1 (make_ashelin_clips.py prints them)
+(defconstant BF_ASH_RUN_GROUND (meters 6.47))
+(defconstant BF_ASH_WALK_GROUND (meters 2.69))
+(defconstant BF_ASH_STRAFE_GROUND (meters 2.9))
+(defconstant BF_ASH_BACK_GROUND (meters 2.09))
+
+;; ---------------------------------------------------------------------------------------------
+;; Her grenade, lobbed
+;; ---------------------------------------------------------------------------------------------
+
+(defconstant BF_LOB_GRAVITY (meters 30))  ;; its fall, a second
+(defconstant BF_LOB_REACH (meters 40))    ;; it lands this far at most
+(defconstant BF_LOB_FLIGHT 0.9)           ;; seconds of flight at its reach, less nearer
+
+(deftype bf-lob (bf-grenade)
+  "Ashelin's grenade: the robotguard's (`bf-grenade`: the red gun 3's grenade model and glow, the
+   rocket's burst and damage) falling as it flies, lobbed in an arc (the author's wish, round 53)."
+  ()
+  )
+
+(defmethod projectile-method-25 ((this bf-lob))
+  "Every frame of its flight: its fall (BF_LOB_GRAVITY), then the rocket's frame (its model turned
+   along its flight, its trail, drawn)."
+  (-! (-> this root transv y) (* BF_LOB_GRAVITY (seconds-per-frame)))
+  (call-parent-method this)
+  (none)
+  )
+
+(defun bf-lob-throw ((owner process-focusable) (from vector) (to vector))
+  "A `bf-lob` from FROM landing at TO (within BF_LOB_REACH across of FROM), OWNER its owner (its
+   hits are OWNER's): its flight takes BF_LOB_FLIGHT seconds at the reach, less nearer, and its
+   speed rises by half its fall over that time, an arc. It bursts where it hits, or a little past
+   its flight's end."
+  (let* ((dir (vector-! (new 'stack-no-clear 'vector) to from))
+         (across (vector-xz-length dir))
+         (params (new 'stack-no-clear 'projectile-init-by-other-params))
+         )
+    (when (< BF_LOB_REACH across)
+      (vector-float*! dir dir (/ BF_LOB_REACH across))
+      (set! across BF_LOB_REACH)
+      )
+    (let* ((t (fmax 0.45 (* BF_LOB_FLIGHT (/ across BF_LOB_REACH))))
+           (vel (vector-float*! (new 'stack-no-clear 'vector) dir (/ 1.0 t)))
+           )
+      (+! (-> vel y) (* 0.5 BF_LOB_GRAVITY t))
+      (set! (-> params ent) (-> *target* entity))
+      (set! (-> params charge) 1.0)
+      (set! (-> params options) (projectile-options))
+      (logclear! (-> params options) (projectile-options po14 po15 po16))
+      (set! (-> params notify-handle) (process->handle owner))
+      (set! (-> params owner-handle) (process->handle owner))
+      (set! (-> params target-handle) (the-as handle #f))
+      (set! (-> params target-pos quad) (the-as uint128 0))
+      (set! (-> params ignore-handle) (process->handle owner))
+      (let* ((info *game-info*)
+             (id (+ (-> info attack-id) 1))
+             )
+        (set! (-> info attack-id) id)
+        (set! (-> params attack-id) id)
+        )
+      (set! (-> params timeout) (+ (the int (* 300.0 t)) (seconds 0.6)))
+      (vector-copy! (-> params pos) from)
+      (vector-copy! (-> params vel) vel)
+      (spawn-projectile bf-lob params owner *default-dead-pool*)
+      )
+    )
+  (none)
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Her shots, her throw, her magazine, her facing
+;; ---------------------------------------------------------------------------------------------
+
+(defbehavior bf-ashelin-owner bf-avatar ()
+  "Who her shots and grenades belong to: Jak for the player, the champion's body for the champion."
+  (if (bf-boss? self)
+      (the-as process-focusable (handle->process (-> (the-as bf-boss self) body)))
+      *target*
+      )
+  )
+
+(defbehavior bf-ashelin-aim bf-avatar ()
+  "Where she aims: the crosshair's point for the player (`*bf*` aim), the champion's own (`aim`, at
+   her foe)."
+  (if (bf-boss? self)
+      (-> self aim)
+      (-> *bf* aim)
+      )
+  )
+
+(defbehavior bf-ashelin-face-yaw bf-avatar ()
+  "The way she faces to shoot, throw, kneel or flip: the camera's heading for the player, toward her
+   aim for the champion."
+  (if (bf-boss? self)
+      (let ((pos (-> self root trans))
+            (aim (-> self aim))
+            )
+        (atan (- (-> aim x) (-> pos x)) (- (-> aim z) (-> pos z)))
+        )
+      (-> *bf* view-yaw)
+      )
+  )
+
+(defbehavior bf-ashelin-mag bf-avatar ()
+  "Her magazine's rounds, a pointer: the player's in `*bf*` (mag, BF_WEAPON_PISTOL, which the gun HUD
+   shows), the champion's in her own `salvo-left` (no class of hers fires salvos)."
+  (if (bf-boss? self)
+      (&-> self salvo-left)
+      (&-> *bf* mag BF_WEAPON_PISTOL)
+      )
+  )
+
+(defbehavior bf-ashelin-reserve bf-avatar ()
+  "Rounds she carries besides her magazine: the player's, Jak's yellow ammo (the stock pickups refill
+   it); the champion's, without end."
+  (if (bf-boss? self)
+      1000.0
+      (-> *game-info* gun-ammo BF_AMMO_YELLOW)
+      )
+  )
+
+(defbehavior bf-ashelin-shot bf-avatar ()
+  "One shot of her pistols, the right one then the left one: a stock `guard-shot` from BF_ASH_MUZZLE
+   ahead of that hand toward her aim, its owner Jak or her body (its color its side's, blue:
+   battlefront.gc `bf-shot-blue?`); a round out of her magazine."
+  (let ((owner (bf-ashelin-owner)))
+    (when owner
+      (let* ((art (bf-class-art-of BF_CLASS_ASHELIN))
+             (from (bf-joint-pos self (if (zero? (-> self fire-side)) (-> art gun0) (-> art gun1)) (new 'stack-no-clear 'vector)))
+             (ahead (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> self root quat)))
+             (to (vector-copy! (new 'stack-no-clear 'vector) (bf-ashelin-aim)))
+             )
+        (vector+float*! from from ahead BF_ASH_MUZZLE)
+        ;; the champion misses a little
+        (when (bf-boss? self)
+          (+! (-> to x) (* (meters 1.2) (rand-vu-float-range -1.0 1.0)))
+          (+! (-> to y) (* (meters 0.8) (rand-vu-float-range -1.0 1.0)))
+          )
+        (spawn-guard-projectile owner from to BF_SHOT_SPEED (the-as vector #f))
+        )
+      )
+    )
+  (+! (-> (bf-ashelin-mag) 0) -1)
+  (set! (-> self fire-side) (- 1 (-> self fire-side)))
+  (set-time! (-> self fire-time))
+  (set! (-> self shoot-until) (+ (current-time) BF_ASH_FIRE_HOLD))
+  (if (not (bf-boss? self))
+      (bf-combat!)
+      )
+  (none)
+  )
+
+(defbehavior bf-ashelin-lob bf-avatar ()
+  "Her grenade leaves her left hand, high over her shoulder, toward her aim (`bf-lob-throw`: it flies
+   in an arc); the player's comes out of her grenades (`*bf*` rockets)."
+  (let ((owner (bf-ashelin-owner)))
+    (when owner
+      (let ((from (bf-joint-pos self (-> (bf-class-art-of BF_CLASS_ASHELIN) gun1) (new 'stack-no-clear 'vector))))
+        (bf-lob-throw owner from (bf-ashelin-aim))
+        )
+      (when (not (bf-boss? self))
+        (+! (-> *bf* rockets) -1)
+        (bf-combat!)
+        )
+      )
+    )
+  (set-time! (-> self rocket-time))
+  (none)
+  )
+
+(defbehavior bf-ashelin-start! bf-avatar ((clip int) (span time-frame))
+  "A move of hers on her whole body: CLIP played for SPAN (`melee-until`), its first part
+   (`melee-step` 1), facing her aim."
+  (set! (-> self yaw) (bf-ashelin-face-yaw))
+  (set! (-> self stab-clip) clip)
+  (set-time! (-> self melee-time))
+  (set! (-> self melee-until) (+ (current-time) span))
+  (set! (-> self melee-step) 1)
+  (set! (-> self crouch?) #f)
+  (none)
+  )
+
+(defbehavior bf-ashelin-side bf-avatar ()
+  "The side her stick points to against the way she faces (`bf-ashelin-face-yaw`): 1 to her right,
+   -1 to her left, 0 pushed less than halfway or more ahead or back than aside."
+  (let* ((stick (bf-baron-stick (new 'stack-no-clear 'vector)))
+         (yaw (bf-ashelin-face-yaw))
+         (across (- (* (-> stick z) (sin yaw)) (* (-> stick x) (cos yaw))))
+         (along (+ (* (-> stick x) (sin yaw)) (* (-> stick z) (cos yaw))))
+         )
+    (cond
+      ((or (< (fabs across) 0.5) (< (fabs across) (fabs along))) 0)
+      ((< 0.0 across) 1)
+      (else -1)
+      )
+    )
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; Her moves
+;; ---------------------------------------------------------------------------------------------
+
+(defbehavior bf-ashelin-update bf-avatar ()
+  "Every frame of Ashelin (the avatar's trans, or the champion's): her pad (`bf-baron-pad-of`) moves
+   her on her own collision and gravity (`bf-baron-step`): her side flips (R2 and the stick aside),
+   her kick (Circle), her throw (R1), her reload (Triangle, or an empty magazine), her kneel (L1
+   held), her shots (Square held), her two jumps (X). Jak, hidden, put where she stands (the
+   champion's body instead). While the player falls from the sky after a respawn, or Jak is dead or
+   was moved far by the game, she stands where Jak is instead."
+  (let* ((root (the-as collide-shape-moving (-> self root)))
+         (dt (seconds-per-frame))
+         (now (current-time))
+         (boss? (bf-boss? self))
+         (ground? (not (time-elapsed? (-> self ground-time) (seconds 0.1))))
+         (busy? (< now (-> self melee-until)))
+         (gravity (-> root dynam gravity-length))
+         (mag (bf-ashelin-mag))
+         )
+    (cond
+      ((and (not boss?)
+            (or (not *target*) (focus-test? *target* dead) (-> *bf* dropping?) (-> self dying?)
+                (< BF_BARON_FOLLOW (vector-vector-distance (-> *target* control trans) (-> root trans)))
+                )
+            )
+       (vector-copy! (-> root trans) (-> *target* control trans))
+       (vector-reset! (-> root transv))
+       (set! (-> self yaw) (quaternion-y-angle (-> *target* control quat)))
+       (set! (-> self jumps) 0)
+       (set! (-> self melee-until) 0)
+       (set! (-> self crouch?) #f)
+       (bf-baron-face! root (-> self yaw) 0.0)
+       )
+      (else
+        (if ground?
+            (set! (-> self jumps) 0)
+            )
+        ;; her carried rounds at most BF_ASH_RESERVE (the stock pickups add to Jak's own ammo)
+        (if (not boss?)
+            (set! (-> *game-info* gun-ammo BF_AMMO_YELLOW) (fmin BF_ASH_RESERVE (-> *game-info* gun-ammo BF_AMMO_YELLOW)))
+            )
+        ;; her moves on the ground, one at a time
+        (when (and ground? (not busy?))
+          (cond
+            ;; R2 and the stick to a side: a flip that way, across the way she faces
+            ((and (bf-baron-held? (pad-buttons r2)) (!= (bf-ashelin-side) 0))
+             (let* ((side (bf-ashelin-side))
+                    (yaw (bf-ashelin-face-yaw))
+                    ;; across her heading, to the screen's right (battlefront-player.gc `bf-view-right`)
+                    (right (new 'stack-no-clear 'vector))
+                    )
+               (set-vector! right (- (cos yaw)) 0.0 (sin yaw) 1.0)
+               (bf-ashelin-start! (if (> side 0) BF_ASHELIN_CLIP_FLIP_RIGHT BF_ASHELIN_CLIP_FLIP_LEFT) BF_ASH_SIDE_TIME)
+               (vector-float*! (-> self roll-vel) right (* (the float side) BF_ASH_SIDE_SPEED))
+               (set! (-> root transv y) (sqrtf (* 2.0 gravity BF_ASH_SIDE_HOP)))
+               (set! (-> self ground-time) 0)
+               (sound-play "jump")
+               )
+             )
+            ;; Circle: her spinning kick
+            ((bf-baron-pressed? (pad-buttons circle))
+             (bf-ashelin-start! BF_ASHELIN_CLIP_KICK BF_ASH_KICK_TIME)
+             )
+            ;; R1: a grenade, thrown overhand
+            ((and (bf-baron-pressed? (pad-buttons r1))
+                  (time-elapsed? (-> self rocket-time) BF_ASH_THROW_GAP)
+                  (or boss? (> (-> *bf* rockets) 0))
+                  )
+             (bf-ashelin-start! BF_ASHELIN_CLIP_THROW BF_ASH_THROW_TIME)
+             (set-time! (-> self rocket-time))
+             )
+            ;; Triangle with rounds missing, or Square on an empty magazine: her reload, rounds carried
+            ((and (< (-> mag 0) BF_ASH_MAG) (>= (bf-ashelin-reserve) 1.0)
+                  (or (bf-baron-pressed? (pad-buttons triangle))
+                      (and (<= (-> mag 0) 0) (bf-baron-held? (pad-buttons square)))
+                      )
+                  )
+             (bf-ashelin-start! BF_ASHELIN_CLIP_RELOAD BF_ASH_RELOAD_TIME)
+             (sound-play "gun-takeout")
+             )
+            )
+          (set! busy? (< now (-> self melee-until)))
+          )
+        ;; the parts of her moves
+        (when (and busy? (= (-> self melee-step) 1))
+          (case (-> self stab-clip)
+            ((BF_ASHELIN_CLIP_THROW)
+             (when (time-elapsed? (-> self melee-time) BF_ASH_THROW_AT)
+               (set! (-> self melee-step) 2)
+               (bf-ashelin-lob)
+               )
+             )
+            ((BF_ASHELIN_CLIP_KICK)
+             (when (time-elapsed? (-> self melee-time) BF_ASH_KICK_AT)
+               (set! (-> self melee-step) 2)
+               (bf-baron-strike BF_ASH_KICK_REACH #t BF_ASH_KICK_DAMAGE 0.0)
+               (sound-play "spin-kick")
+               (if (not boss?)
+                   (bf-combat!)
+                   )
+               )
+             )
+            ((BF_ASHELIN_CLIP_RELOAD)
+             (when (time-elapsed? (-> self melee-time) BF_ASH_RELOAD_AT)
+               (set! (-> self melee-step) 2)
+               (let ((take (min (- BF_ASH_MAG (-> mag 0)) (the int (bf-ashelin-reserve)))))
+                 (+! (-> mag 0) take)
+                 (if (not boss?)
+                     (+! (-> *game-info* gun-ammo BF_AMMO_YELLOW) (the float (- take)))
+                     )
+                 )
+               )
+             )
+            )
+          )
+        ;; L1 held on the ground: she kneels, facing her aim; let go: she stands up again (a move)
+        (cond
+          ((and ground? (not busy?) (bf-baron-held? (pad-buttons l1)))
+           (when (not (-> self crouch?))
+             (set! (-> self crouch?) #t)
+             (set-time! (-> self stab-time))
+             )
+           (set! (-> self yaw) (bf-ashelin-face-yaw))
+           )
+          ((-> self crouch?)
+           (set! (-> self crouch?) #f)
+           (when (and ground? (not busy?))
+             (bf-ashelin-start! BF_ASHELIN_CLIP_UNKNEEL BF_ASH_UNKNEEL_TIME)
+             (set! busy? #t)
+             )
+           )
+          )
+        ;; Square held: both pistols in turn, facing her aim, rounds in her magazine
+        (let ((firing? (and (not busy?) (bf-baron-held? (pad-buttons square)))))
+          (when firing?
+            (set! (-> self yaw) (bf-ashelin-face-yaw))
+            (if (and (> (-> mag 0) 0) (time-elapsed? (-> self fire-time) BF_ASH_FIRE_GAP))
+                (bf-ashelin-shot)
+                )
+            )
+          ;; her run toward the stick against the camera, a walk while she fires or aims, still
+          ;; kneeling or in a move; a side flip's way across
+          (let* ((stick (bf-baron-stick (new 'stack-no-clear 'vector)))
+                 (push (vector-length stick))
+                 (aiming? (or firing? (< now (-> self shoot-until))))
+                 (flipping? (and busy? (or (= (-> self stab-clip) BF_ASHELIN_CLIP_FLIP_LEFT)
+                                           (= (-> self stab-clip) BF_ASHELIN_CLIP_FLIP_RIGHT)
+                                           )
+                                 )
+                            )
+                 (top (cond
+                        ((or busy? (-> self crouch?)) 0.0)
+                        (aiming? BF_ASH_AIM_WALK)
+                        (else BF_ASH_RUN)
+                        )
+                      )
+                 (want-yaw (if (< 0.1 push) (atan (-> stick x) (-> stick z)) (-> self yaw)))
+                 (yaw0 (-> self yaw))
+                 )
+            (cond
+              (flipping?
+               (set! (-> root transv x) (-> self roll-vel x))
+               (set! (-> root transv z) (-> self roll-vel z))
+               )
+              (else
+                (let* ((want (vector-float*! (new 'stack-no-clear 'vector) stick top))
+                       (dv (vector-! (new 'stack-no-clear 'vector) want (-> root transv)))
+                       (most (* dt (if (< (vector-xz-length (-> root transv)) (vector-xz-length want)) BF_BARON_ACCEL BF_BARON_DECEL)))
+                       )
+                  (set! (-> dv y) 0.0)
+                  (if (< most (vector-length dv))
+                      (vector-normalize! dv most)
+                      )
+                  (+! (-> root transv x) (-> dv x))
+                  (+! (-> root transv z) (-> dv z))
+                  )
+                )
+              )
+            ;; she turns toward where she runs, fast, and leans into the turn; aiming, she faces her aim
+            (if aiming?
+                (set! (-> self yaw) (bf-ashelin-face-yaw))
+                )
+            (if (and (< 0.1 push) (not busy?) (not aiming?) (not (-> self crouch?)))
+                (set! (-> self yaw) (deg-seek (-> self yaw) want-yaw (* BF_BARON_YAW_RATE dt)))
+                )
+            (let ((rate (/ (deg-diff yaw0 (-> self yaw)) (fmax dt 0.001))))
+              (seek! (-> self lean)
+                     (fmax (degrees -18) (fmin (degrees 18) (* (- BF_BARON_LEAN) (/ (vector-xz-length (-> root transv)) (meters 1)) (* rate 0.0000958738))))
+                     (* (degrees 120) dt)
+                     )
+              )
+            (bf-baron-face! root (-> self yaw) (if (or busy? aiming? (-> self crouch?)) 0.0 (-> self lean)))
+            )
+          )
+        ;; X: her jump, and in the air once more (her flip); her gravity
+        (cond
+          ;; the second 0.2 s after the first at the soonest: a press could be read on two frames
+          ;; (the round 53 test's first jump flipped at once)
+          ((and (not busy?) (not (-> self crouch?)) (bf-baron-pressed? (pad-buttons x)) (< (-> self jumps) 2)
+                (or ground? (time-elapsed? (-> self dodge-time) (seconds 0.2)))
+                )
+           (set-time! (-> self dodge-time))
+           (let ((second? (not ground?)))
+             (set! (-> root transv y) (sqrtf (* 2.0 gravity (if second? BF_ASH_JUMP2 BF_ASH_JUMP))))
+             ;; off a ledge with no jump yet, the one in the air is her second
+             (set! (-> self jumps) (if second? 2 1))
+             (set! (-> self ground-time) 0)
+             (if second?
+                 (set! (-> self dive-until) (+ now BF_ASH_FLIP_TIME))
+                 )
+             (if second?
+                 (sound-play "jump-double")
+                 (sound-play "jump")
+                 )
+             )
+           )
+          (else
+            (-! (-> root transv y) (* gravity dt))
+            )
+          )
+        (bf-baron-step root dt)
+        (if (-> self was-ground?)
+            (set-time! (-> self ground-time))
+            )
+        ;; Jak where she stands, still: the camera, the units' aim and the hits taken are hers. The
+        ;; champion's body instead
+        (cond
+          (boss?
+           (bf-boss-place-body)
+           )
+          (else
+            (move-to-point! (-> *target* control) (-> root trans))
+            (vector-reset! (-> *target* control transv))
+            (quaternion-axis-angle! (-> *target* control quat) 0.0 1.0 0.0 (-> self yaw))
+            )
+          )
+        )
+      )
+    (if (not boss?)
+        (logior! (-> *target* draw status) (draw-control-status no-draw))
+        )
+    )
+  (none)
+  )
+
+(defbehavior bf-ashelin-pick-anim bf-avatar ()
+  "Her clip now: a move's while it lasts (a side flip, her kick, her throw, her reload, standing up),
+   her flip, a jump in the air, kneeling down then her kneeling clip, while she aims her walk ahead,
+   backward or her strafe to a side by the way she goes against the way she faces, else her run, her
+   walk, her idle."
+  (let* ((vel (-> (the-as collide-shape-moving (-> self root)) transv))
+         (speed (vector-xz-length vel))
+         (now (current-time))
+         (yaw (-> self yaw))
+         ;; her velocity ahead and to her right (`bf-ashelin-side`'s frame)
+         (along (+ (* (-> vel x) (sin yaw)) (* (-> vel z) (cos yaw))))
+         (across (- (* (-> vel z) (sin yaw)) (* (-> vel x) (cos yaw))))
+         )
+    (cond
+      ((< now (-> self melee-until)) (-> self stab-clip))
+      ((< now (-> self dive-until)) BF_ASHELIN_CLIP_FLIP)
+      ((time-elapsed? (-> self ground-time) (seconds 0.15)) BF_ASHELIN_CLIP_JUMP)
+      ((-> self crouch?)
+       (if (time-elapsed? (-> self stab-time) BF_ASH_KNEEL_TIME) BF_ASHELIN_CLIP_KNEEL_IDLE BF_ASHELIN_CLIP_KNEEL)
+       )
+      ((and (< now (-> self shoot-until)) (< (meters 0.5) speed))
+       (cond
+         ((< (fabs along) (fabs across)) (if (< 0.0 across) BF_ASHELIN_CLIP_STRAFE_RIGHT BF_ASHELIN_CLIP_STRAFE_LEFT))
+         ((< along 0.0) BF_ASHELIN_CLIP_WALK_BACK)
+         (else BF_ASHELIN_CLIP_WALK)
+         )
+       )
+      ((< (meters 4.5) speed) BF_ASHELIN_CLIP_RUN)
+      ((< (meters 0.5) speed) BF_ASHELIN_CLIP_WALK)
+      (else BF_ASHELIN_CLIP_IDLE)
+      )
+    )
+  )
+
+(defbehavior bf-ashelin-play bf-avatar ()
+  "A frame of her clip (after `bf-ashelin-pick-anim` chose it): her run, walks and strafes as fast
+   as her feet cover the ground she covers (BF_ASH_*_GROUND: her run 1.55 times its pace at most, not
+   a sped-up run, the author's wish), her idle and kneeling looped, a side flip, her kick and
+   standing up faster (BF_ASH_SIDE_RATE, BF_ASH_KICK_RATE, BF_ASH_UNKNEEL_RATE), the rest once, held
+   at their end."
+  (let ((speed (vector-xz-length (-> (the-as collide-shape-moving (-> self root)) transv)))
+        (anim (-> self anim))
+        )
+    (case anim
+      ((BF_ASHELIN_CLIP_RUN)
+       (ja :num! (loop! (fmax 0.6 (fmin 1.8 (/ speed BF_ASH_RUN_GROUND)))))
+       )
+      ((BF_ASHELIN_CLIP_WALK)
+       (ja :num! (loop! (fmax 0.5 (fmin 2.0 (/ speed BF_ASH_WALK_GROUND)))))
+       )
+      ((BF_ASHELIN_CLIP_STRAFE_LEFT BF_ASHELIN_CLIP_STRAFE_RIGHT)
+       (ja :num! (loop! (fmax 0.5 (fmin 2.0 (/ speed BF_ASH_STRAFE_GROUND)))))
+       )
+      ((BF_ASHELIN_CLIP_WALK_BACK)
+       (ja :num! (loop! (fmax 0.5 (fmin 2.0 (/ speed BF_ASH_BACK_GROUND)))))
+       )
+      ((BF_ASHELIN_CLIP_IDLE BF_ASHELIN_CLIP_KNEEL_IDLE)
+       (ja :num! (loop!))
+       )
+      ((BF_ASHELIN_CLIP_FLIP_LEFT BF_ASHELIN_CLIP_FLIP_RIGHT)
+       (ja :num! (seek! max BF_ASH_SIDE_RATE))
+       )
+      ((BF_ASHELIN_CLIP_KICK)
+       (ja :num! (seek! max BF_ASH_KICK_RATE))
+       )
+      ((BF_ASHELIN_CLIP_UNKNEEL)
+       (ja :num! (seek! max BF_ASH_UNKNEEL_RATE))
+       )
+      (else
+        (ja :num! (seek!))
+        )
+      )
+    )
+  (none)
+  )
+
+;; ---------------------------------------------------------------------------------------------
+;; The Freedom League's champion's thinking
+;; ---------------------------------------------------------------------------------------------
+
+(defconstant BF_ASH_KEEP_NEAR (meters 10)) ;; she backs off from a foe closer than this
+(defconstant BF_ASH_KEEP_FAR (meters 24))  ;; and runs at one farther
+(defconstant BF_ASH_FIRE_REACH (meters 36)) ;; she fires at a foe this close
+(defconstant BF_ASH_KICK_NEAR (meters 3))  ;; she kicks a foe this close
+(defconstant BF_ASH_LOB_MIN (meters 12))   ;; she throws a grenade at a foe this far
+(defconstant BF_ASH_LOB_EVERY (seconds 4))
+(defconstant BF_ASH_BURST (seconds 1.2))   ;; her bursts, and the pauses between them
+(defconstant BF_ASH_PAUSE (seconds 0.7))
+
+(defbehavior bf-ashelin-think bf-boss ()
+  "Every frame before her moves (`bf-ashelin-update`): her pad pressed as a player would. Four times
+   a second she looks for her foe (`bf-boss-pick-foe`), or, none in sight, for a point to take
+   (`bf-boss-pick-goal`). With a foe, she keeps between BF_ASH_KEEP_NEAR and BF_ASH_KEEP_FAR of it,
+   kicks it within BF_ASH_KICK_NEAR (Circle), fires bursts (Square) at it within BF_ASH_FIRE_REACH,
+   her magazine reloading itself once empty, throws a grenade (R1) at one farther than BF_ASH_LOB_MIN
+   every BF_ASH_LOB_EVERY, and flips aside (R2, her stick to a side) every 2.5 to 4.5 s. Stuck, she
+   jumps, jumps again in the air, then goes around for 1.5 s, as the Baron does."
+  (let* ((pos (-> self root trans))
+         (now (current-time))
+         (pad (-> self pad))
+         )
+    (set! (-> pad last) (-> pad buttons))
+    (set! (-> pad buttons) (the-as uint 0))
+    (when (time-elapsed? (-> self think-time) (seconds 0.25))
+      (set-time! (-> self think-time))
+      (bf-boss-pick-foe)
+      (if (>= (-> self foe-dist) BF_BOSS_SIGHT)
+          (bf-boss-pick-goal)
+          )
+      )
+    (let ((fight? (< (-> self foe-dist) BF_BOSS_SIGHT))
+          (ground? (not (time-elapsed? (-> self ground-time) (seconds 0.1))))
+          (busy? (< now (-> self melee-until)))
+          (to (new 'stack-no-clear 'vector))
+          )
+      ;; her aim: her foe's chest
+      (when fight?
+        (vector-copy! (-> self aim) (-> self foe-pos))
+        (+! (-> self aim y) (meters 1.2))
+        )
+      ;; the way she runs
+      (vector-! to (if fight? (-> self foe-pos) (-> self goal-pos)) pos)
+      (set! (-> to y) 0.0)
+      (cond
+        ((< now (-> self wander-until))
+         (vector-copy! (-> self move) (-> self wander-dir))
+         )
+        ((and fight? (< (-> self foe-dist) BF_ASH_KEEP_NEAR))
+         (vector-normalize-copy! (-> self move) to -1.0)
+         )
+        ((and fight? (< (-> self foe-dist) BF_ASH_KEEP_FAR))
+         (vector-reset! (-> self move))
+         )
+        ((and (not fight?) (< (vector-length to) (meters 3)))
+         (vector-reset! (-> self move))
+         )
+        (else
+          (vector-normalize-copy! (-> self move) to 1.0)
+          )
+        )
+      ;; stuck: a jump, her second in the air, then a way around
+      (when (time-elapsed? (-> self stuck-time) (seconds 1))
+        (set-time! (-> self stuck-time))
+        (cond
+          ((and (< 0.5 (vector-length (-> self move)))
+                (not busy?)
+                (< (vector-vector-xz-distance pos (-> self last-pos)) (meters 1.5))
+                )
+           (+! (-> self stuck) 1)
+           (cond
+             ((>= (-> self stuck) 3)
+              (set-vector! (-> self wander-dir) (-> self move z) 0.0 (- (-> self move x)) 1.0)
+              (if (< (rand-vu) 0.5)
+                  (vector-negate! (-> self wander-dir) (-> self wander-dir))
+                  )
+              (set! (-> self wander-until) (+ now (seconds 1.5)))
+              (set! (-> self stuck) 0)
+              )
+             (ground?
+               (set! (-> pad buttons) (the-as uint (pad-buttons x)))
+               )
+             )
+           )
+          (else
+            (set! (-> self stuck) 0)
+            )
+          )
+        (vector-copy! (-> self last-pos) pos)
+        )
+      ;; her second jump, at the top of a jump she made while stuck
+      (when (and (not ground?) (= (-> self jumps) 1) (> (-> self stuck) 0)
+                 (<= (-> (the-as collide-shape-moving (-> self root)) transv y) 0.0)
+                 )
+        (set! (-> pad buttons) (the-as uint (pad-buttons x)))
+        )
+      ;; her fight
+      (when (and fight? ground? (not busy?))
+        (cond
+          ;; a foe at her feet: her kick
+          ((< (-> self foe-dist) BF_ASH_KICK_NEAR)
+           (set! (-> pad buttons) (the-as uint (pad-buttons circle)))
+           )
+          ;; a flip aside now and then: R2, her stick across her aim for this frame
+          ((and (< (-> self foe-dist) BF_ASH_FIRE_REACH) (< (-> self dodge-until) now))
+           (set! (-> self dodge-until) (+ now (the int (* 300.0 (rand-vu-float-range 2.5 4.5)))))
+           (when (nonzero? (-> self blows))
+             (let ((yaw (bf-ashelin-face-yaw))
+                   (side (if (< (rand-vu) 0.5) -1.0 1.0))
+                   )
+               (set-vector! (-> self move) (* side (- (cos yaw))) 0.0 (* side (sin yaw)) 1.0)
+               (set! (-> pad buttons) (the-as uint (pad-buttons r2)))
+               )
+             )
+           (+! (-> self blows) 1)
+           )
+          ;; a grenade at a far foe
+          ((and (< BF_ASH_LOB_MIN (-> self foe-dist)) (< (-> self foe-dist) BF_LOB_REACH)
+                (time-elapsed? (-> self cast-time) BF_ASH_LOB_EVERY)
+                )
+           (set-time! (-> self cast-time))
+           (set! (-> self aim y) (-> self foe-pos y))
+           (set! (-> pad buttons) (the-as uint (pad-buttons r1)))
+           )
+          ;; her bursts (an empty magazine reloads itself: `bf-ashelin-update`)
+          ((and (< (-> self foe-dist) BF_ASH_FIRE_REACH)
+                (< (mod (the int now) (the int (+ BF_ASH_BURST BF_ASH_PAUSE))) (the int BF_ASH_BURST))
+                )
+           (set! (-> pad buttons) (the-as uint (pad-buttons square)))
+           )
+          )
+        )
+      )
+    )
+  (none)
+  )
