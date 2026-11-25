@@ -26,7 +26,7 @@
     "file": "goal_src/jak3/levels/bf-spargus/bf-spargus.gp",
     "default_deps": [],
     "code_deps": {
-      "bf-spargus-obs": ["ctywide-init"]
+      "bf-spargus-obs": ["ctywide-init", "ctywide-obs"]
     }
   },
   "level_info": {
@@ -46,15 +46,17 @@
     "prefix": "bfs-",
     "names": {"wascitya-start": "bf-spargus-start"},
     // the sides' camps, the battle's bases (battlefront-h.gc *bf-point-defs-spargus*), on the nav
-    // mesh at the city's two ends, the player facing the city: the Freedom League's on wascitya's
-    // east terrace, the Krimzon Guard's on wascityb's west plaza. Each on open ground with open
-    // sky, where its troop transport lands (round 50's probe of every nav poly: at 2422, -100 the
-    // Freedom League's ship never came)
+    // mesh, the player facing the city. Since round 61 "ff-camp", on wascitya's east terrace, is the
+    // Freedom League's, 128 m from the precursor artifact it defends (at the white eco fountain), and
+    // "stairs-camp", where the pass's lane meets the east district, the Krimzon Guard's (rounds 57 to
+    // 60 the other way, the artifact by the Freedom League's camp; rounds 57 and 58 by the foot of the
+    // arena's stairs, 2293, 8.3, -245, its name kept; round 57: the battle keeps to wascitya,
+    // wascityb walled off at the pass)
     "new_continues": {
       "ff-camp": {"level": "wascitya", "pos": [2474.8, 23.5, -107.1], "facing": [-1.0, 0.0],
                   "distance": 0.0, "wants": [["wascitya", "'display"]]},
-      "kg-camp": {"level": "wascityb", "pos": [1494.0, 27.9, -341.7], "facing": [1.0, 0.0],
-                  "distance": 0.0, "wants": [["wascityb", "'display"]]}
+      "stairs-camp": {"level": "wascitya", "pos": [2016.0, 35.3, -352.0], "facing": [1.0, 0.0],
+                      "distance": 0.0, "wants": [["wascitya", "'display"]]}
     }
   },
   "levels": [
@@ -77,7 +79,7 @@
       "collision_bounds": [1300, -60, -650, 2650, 320, 160],
       // the camps (the bases) and a continue point in each district (the control points' respawns
       // load the one level whichever they name)
-      "continues": ["ff-camp", "kg-camp", "wascitya-start", "wascityb-start"],
+      "continues": ["ff-camp", "stairs-camp", "wascitya-start", "wascityb-start"],
       "mesh": {
         // Spargus's props as background. The doors to the places the war zone leaves out, in their
         // closed pose with a collision box, so they never open: the garage's (wascity-airlock-small),
@@ -118,26 +120,32 @@
         // every unit put on a lane went to sleep (round 50's tests: 534 "Going inactive")
         "clock": [0, 1],
         // the pass between the two districts: their nav meshes stop 17 to 20 m apart with no link
-        // (Spargus's people never cross it), so a strip of polys across the gap and a link
-        "links": [{"a": ["wascitya", 1, 68, 2], "b": ["wascityb", 0, 32, 1]}]
+        // (Spargus's people never cross it). Rounds 51 to 56 laid a strip of polys across the gap
+        // and a link ({"a": ["wascitya", 1, 68, 2], "b": ["wascityb", 0, 32, 1]}); since round 57 a
+        // force field walls the pass (battlefront-city.gc *bf-field-ends*) and no unit crosses it
+        "links": []
       },
       // Jak 3's city code (its ctywide's DGO, with the battle's level code) but not Haven City's
       // props, particles, missions and scenes; the units' art comes in the borrow levels
       "traffic": {
         "code_from": "goal_src/jak3/dgos/cwi.gd",
-        "skip": ["ctyport-obs", "ctywide-obs", "ctywide-part", "ctywide-scenes", "ctywide-tasks",
+        // ctywide-obs comes along since round 57 for its security wall, the force field at the pass
+      "skip": ["ctyport-obs", "ctywide-part", "ctywide-scenes", "ctywide-tasks",
                  "krimson-wall", "mhcity-obs", "mhcity-obs2", "mhcity-part", "trail", "trail-graph"],
         "code": ["bf-spargus-obs.o"],
         // the Battlefront's precursor artifact (round 54, battlefront-artifact.gc): Jak 3's precursor
-        // generator C, its textures baked into the level with it
-        "art": ["precur-generator-c-ag"]
+        // generator C, its textures baked into the level with it; the force field at the pass (round
+        // 57): Jak 3's security wall, the slums' blue one
+        "art": ["precur-generator-c-ag", "security-wall-ag"]
       },
       "level_info": {
         // Jak 3's ctywide's own callbacks (ctywide-init.o, in the city code above): the traffic
         // engine, the squads, the faction and borrow managers and the attack controller, as the
         // battle's code expects them
         "callbacks": [[33, "ctywide-login"], [34, "ctywide-logout"],
-                      [35, "ctywide-activate"], [36, "ctywide-deactivate"]],
+                      [35, "ctywide-activate"], [36, "ctywide-deactivate"],
+                      // the security wall's shimmer (ctywide's own, ctywide-texture.gc), round 57
+                      [6, "*security-texture-anim-array*"]],
         "draw_priority": "9.0",
         // Jak 3's ctywide's borrow heaps (KB), where ctypesa and ctypesc load
         "borrow_sizes": [420, 420, 420, 780, 810],

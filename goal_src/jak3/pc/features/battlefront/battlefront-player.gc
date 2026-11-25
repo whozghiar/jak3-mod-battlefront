@@ -200,10 +200,10 @@
          :idle 2 :walk 4 :run 3 :jump 5 :shoot 9 :special -1 :melee 6 :gun0 -1 :gun1 -1
          :ammo BF_AMMO_NONE :speed 1.0 :height 3.6 :fire-delay (seconds 0.9))
     ;; Ashelin (round 53): bf-ashelin (battlefront-h.gc BF_ASHELIN_CLIP_*); her own moves, not Jak's.
-    ;; Her pistols: the right one on the gun joint (skin joint 21, node 22), the left one in her left
-    ;; hand (Lhand, skin joint 8, node 9: mod_models.py's mirrored copy is bound to it)
+    ;; Her pistols: the right one in her right hand (Rhand, node 12: mod_models.py's "rebind" binds it
+    ;; there, round 56), the left one in her left hand (Lhand, node 9: the mirrored copy)
     (new 'static 'bf-class-art :skel "skel-bf-ashelin" :level 'ctypesc
-         :idle 2 :walk 4 :run 3 :jump 5 :shoot 9 :special -1 :melee -1 :gun0 22 :gun1 9
+         :idle 2 :walk 4 :run 3 :jump 5 :shoot 9 :special -1 :melee -1 :gun0 12 :gun1 9
          :ammo BF_AMMO_NONE :speed 1.0 :height 3.3 :fire-delay (seconds 0.13))
     )
   )
@@ -318,6 +318,15 @@
    (turn-until  time-frame)     ;; Baron: his 180 degree turn plays until then
    (turn-yaw    float)          ;; Baron: the way he faces once it ends
    (jumps       int32)          ;; Ashelin: her jumps since she left the ground, 2 at most (round 53)
+   (reload-until time-frame)    ;; Ashelin: her reload, on her arms, plays until then (round 57)
+   (reload-step int32)          ;; Ashelin: 1 while it plays, 2 once her magazine is full again, 0 none
+   (lob-at      time-frame)     ;; Ashelin: her grenade thrown on the run leaves her hand then, 0 none (round 58)
+   (land-until  time-frame)     ;; Ashelin: her landing's clip plays until then while she stands (round 58)
+   (land-clip   int32)          ;; Ashelin: that clip, out of a jump or out of her far flip
+   (aloft?      symbol)         ;; Ashelin: in the air long enough for a landing
+   (hurt-until  time-frame)     ;; Ashelin and the Baron: hit, their hit clip plays and no attack hurts until then (round 60)
+   (hurt-time   time-frame)     ;; when that hit reaction began
+   (hurt-new?   symbol)         ;; a hit reaction to start (`bf-avatar-hurt!`, read by their update)
    )
   (:state-methods
     idle
@@ -3925,6 +3934,18 @@
   (set! (-> self fuel) 1.0)
   (set! (-> self rocket-time) 0)
   (set! (-> self jumps) 0)
+  ;; Ashelin's reload, throw on the run and landing (rounds 57 and 58): a process's fields start at
+  ;; zero, and a zero symbol reads true (round 58: `aloft?` left so played art group entry 0 as her
+  ;; landing, and the game crashed at a deployment; Lisp wiki common 1.4.28)
+  (set! (-> self reload-until) 0)
+  (set! (-> self reload-step) 0)
+  (set! (-> self lob-at) 0)
+  (set! (-> self land-until) 0)
+  (set! (-> self land-clip) BF_ASHELIN_CLIP_LAND)
+  (set! (-> self aloft?) #f)
+  (set! (-> self hurt-until) 0)
+  (set! (-> self hurt-time) 0)
+  (set! (-> self hurt-new?) #f)
   (set! (-> self left-hand?) #f)
   (set! (-> self nova-from) (-> self clock frame-counter))
   (set! (-> self nova?) #f)

@@ -9,8 +9,26 @@
   Battlefront mod -- the level code of bf-spargus, Jak 3's Spargus as the battle's third war zone
   (custom_assets/jak3/ports/battlefront-spargus/port.jsonc, built by scripts/level_port from the
   player's Jak 3 disc). Its level callbacks are Jak 3's ctywide's (ctywide-init.o, in the same DGO);
-  this file holds what Jak 3's city lacks: Spargus's mood.
+  this file holds what Jak 3's city lacks: Spargus's mood, and the force field at its pass.
 |#
+
+(defun bf-spargus-field ((parent process) (a vector) (b vector) (height float))
+  "The force field walling the pass between Spargus's districts (round 57, the author's wish): Jak
+   3's security wall from A to B, HEIGHT tall, a child of PARENT (ctywide-obs.gc
+   `spawn-security-wall`, in this level's DGO with its art group, security-wall-ag, and the
+   shimmer of its textures, the level's callback 6), solid to Jak, drawn light blue: its model's
+   emissive color (0.3, 0.6, 1), its color multiplier being 0 (round 57's tests: its texture showed
+   white in this level whatever color `set-security-color!` gave, 1 1 1 as the slums' wall keeps it
+   or that blue; the child's own init sets red there). Returns its handle."
+  (let* ((h (spawn-security-wall parent a b height #f))
+         (wall (the-as security-wall-child (handle->process h)))
+         )
+    (if wall
+        (set-vector! (-> wall draw color-emissive) 0.3 0.6 1.0 1.0)
+        )
+    h
+    )
+  )
 
 ;; The background comes from Spargus's levels, whose time-of-day palettes are laid out like this
 ;; (update-mood-wascitya, goal_src/jak3/levels/wascity/waswide-mood.gc, in WASALL, which a battle

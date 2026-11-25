@@ -653,7 +653,8 @@
    A point's ship leaves too when its section unloads, and for good once its side's units are all
    brought (battlefront-h.gc `bf-ships-gone?`, round 44) or once it brought `*bf-ship-load*` units
    itself (100: it rises into the sky and none comes to that base again, `ship-done?`, round 45, the
-   author's wish). The ships are the director's children."
+   author's wish). The ships are the director's children. Spargus's camps have none (round 59, the
+   author's wish: its units all come down from the sky, and its ships brought none)."
   (let ((parent (the-as process (handle->process (-> *bf* director)))))
     (when (and parent *target* (bf-fighting?))
       (dotimes (i (-> *bf* point-count))
@@ -663,10 +664,14 @@
                )
           (when (and live? (not (-> pt snapped?)))
             (set! (-> pt snapped?) #t)
-            (when (if (-> pt base?)
-                      (bf-transport-spot (-> pt pos) *bf-city-spot* BF_SPOT_REACH #t)
-                      (bf-transport-spot (-> pt pos) *bf-city-spot* (meters 20) #f)
-                      )
+            ;; not Spargus's artifact's point: it stays where the artifact stands (round 61: at the
+            ;; white eco fountain, it moved 20 m off, its attackers and drops going by it)
+            (when (and (not (and (bf-objective?) (= i BF_ARTIFACT_POINT)))
+                       (if (-> pt base?)
+                           (bf-transport-spot (-> pt pos) *bf-city-spot* BF_SPOT_REACH #t)
+                           (bf-transport-spot (-> pt pos) *bf-city-spot* (meters 20) #f)
+                           )
+                       )
               (format 0 "battlefront: point ~D moved ~M onto open ground~%" i (vector-vector-distance (-> pt pos) *bf-city-spot*))
               (vector-copy! (-> pt pos) *bf-city-spot*)
               )
@@ -689,6 +694,7 @@
              (format 0 "battlefront: the ship over point ~D leaves~%" i)
              )
             ((and (not ship) live? (-> pt base?) (>= (-> pt owner) 0) (not (handle->process (-> pt old-ship)))
+                  (not (bf-objective?))
                   (not (bf-ships-gone? (-> pt owner)))
                   (not (-> pt ship-done?))
                   )
@@ -923,14 +929,12 @@
     )
   )
 
-(defconstant BF_HUNT_WEST (meters 1968)) ;; Spargus: a foe west of this stands on the west district's meshes (the pass's gap, 1958 to 1977 m)
-
 (defun bf-city-hunt ((proc process) (out vector))
   "Spargus's destruction of an objective (round 55, the author's wish: the Freedom League's units do
    not wait around the artifact, they hunt every Krimzon Guard unit): OUT, the place of the unit of
    the Krimzon Guard (or its player) nearest PROC (`*bf-unit-dots*`), else the Krimzon Guard's camp.
-   Returns the point the march routes by, the one of the district OUT stands in: the artifact's
-   (west of BF_HUNT_WEST) or the Krimzon Guard's camp (east). No side effect but OUT."
+   Returns the point the march routes by, the one nearer OUT: the artifact's or the Krimzon Guard's
+   camp (both in wascitya since round 57). No side effect but OUT."
   (let ((dots *bf-unit-dots*)
         (from (-> (the-as process-drawable proc) root trans))
         (best -1)
@@ -947,7 +951,12 @@
         )
       )
     (vector-copy! out (if (>= best 0) (-> dots pos best) (-> *bf* points 1 pos)))
-    (if (< (-> out x) BF_HUNT_WEST) BF_ARTIFACT_POINT 1)
+    (if (< (vector-vector-xz-distance out (-> *bf* points BF_ARTIFACT_POINT pos))
+           (vector-vector-xz-distance out (-> *bf* points 1 pos))
+           )
+        BF_ARTIFACT_POINT
+        1
+        )
     )
   )
 
@@ -3027,8 +3036,12 @@
 
 (define *bf-city-artifact-info* (the-as city-attacker-info #f))
 
-(defconstant BF_ARTIFACT_KEEP (meters 10)) ;; the Krimzon Guard's units over the pass attack the artifact unless their foe is this close
-(defconstant BF_ARTIFACT_WEST (meters 1990)) ;; over the pass: west of this (the Freedom League's drops' limit too)
+;; Since round 59 every Krimzon Guard unit has the artifact as its foe, wherever it stands, unless the
+;; foe it sees best stands within BF_ARTIFACT_KEEP: it fights that one first (the author's wishes: in
+;; round 58 the objective theirs, the foes on their way left alone; in round 59 the blue units fought
+;; too). Rounds 54 to 57 turned them onto it near it alone (within 80 m in round 57; over the pass
+;; before), unless their foe stood within 10 m.
+(defconstant BF_ARTIFACT_KEEP (meters 25))
 ;; Round 54's tests: within 45 m, then 150 m of it, the Freedom League's defenders held the attackers
 ;; 130 m off and none of them ever fired at it (a Freedom League sent to meet them held them at the
 ;; pass instead); from anywhere on the map, they stood at the pass's east end (x 1977 m): a unit with
@@ -3071,9 +3084,9 @@
   )
 
 (defun bf-city-artifact-pull! ((ctrl mission-squad-control) (info city-attacker-info) (pos vector))
-  "Attacker INFO at POS, a Krimzon Guard unit over the pass (west of BF_ARTIFACT_WEST, the artifact's
-   district), turns onto it unless its foe stands within BF_ARTIFACT_KEEP of it (`bf-city-retarget`):
-   the attackers go for the objective, fighting only the defenders at their feet."
+  "Attacker INFO at POS, a Krimzon Guard unit, turns onto the artifact (`bf-city-retarget`, after
+   the other hatreds) unless the foe it sees best stands within BF_ARTIFACT_KEEP: the attackers march
+   to the objective and fire at it, and fight the defenders that come near them (round 59)."
   (let ((b *bf-city-artifact-info*))
     (when (and b
                (= (bf-ctt-team (-> info self-type)) BF_TEAM_KG)
@@ -3081,45 +3094,13 @@
                (!= (-> info enemy-index) (-> b self-index))
                )
       (let ((nf (-> info enemy-index)))
-        (if (and (< (-> pos x) BF_ARTIFACT_WEST)
-                 (or (< nf 0) (< BF_ARTIFACT_KEEP (vector-vector-xz-distance pos (-> ctrl attacker-cache data nf pos))))
-                 )
+        (if (or (< nf 0) (< BF_ARTIFACT_KEEP (vector-vector-xz-distance pos (-> ctrl attacker-cache data nf pos))))
             (bf-city-set-foe! ctrl info (-> b self-index))
             )
         )
       )
     )
   (none)
-  )
-
-(defun bf-city-nearest-poly ((pt vector) (out vector))
-  "OUT: the middle of the nav poly of the loaded meshes (`*bf-ways*`) nearest PT, the link polys
-   aside (Spargus's artifact stands on the ground the units walk, round 54). #f for none, else #t."
-  (let ((w *bf-ways*)
-        (best -1.0)
-        (c (new 'stack-no-clear 'vector))
-        )
-    (dotimes (k (-> w count))
-      (let ((m (-> w mesh k)))
-        (when m
-          (dotimes (i (-> m poly-count))
-            (let ((poly (-> m poly-array i)))
-              (when (not (logtest? (-> poly pat) 4))
-                (poly-centroid m poly c)
-                (let ((d (vector-vector-distance c pt)))
-                  (when (or (< best 0.0) (< d best))
-                    (set! best d)
-                    (vector-copy! out c)
-                    )
-                  )
-                )
-              )
-            )
-          )
-        )
-      )
-    (<= 0.0 best)
-    )
   )
 
 (defun bf-city-foes-of ((proc process))
@@ -3182,19 +3163,33 @@
 
 ;; ctywide-obs.o comes after this file in CWI
 (define-extern spawn-security-wall (function process vector vector float symbol handle))
+;; Spargus's DGO only (goal_src/jak3/levels/bf-spargus/bf-spargus-obs.gc)
+(define-extern bf-spargus-field (function process vector vector float handle))
 
-(defconstant BF_FIELD_COUNT 2)
+(defconstant BF_FIELD_COUNT 3)
 
 ;; Each force field's ends, world x, y and z in meters, and its height. The ruins' is the game's own
 ;; security-wall-12 (ctyslumb), the street from Freedom HQ's district into the ruins (ctygenb), which
 ;; the game drops after its first task; the nest's crosses the street from the Port to the Metal
 ;; Head nest (mhcitya), just short of its dark eco door (mhcity-dark-eco-door-1, -381 m, 1199 m),
-;; read off the START menu's map.
-(define *bf-field-ends* (new 'static 'array float 14
+;; read off the START menu's map. The third walls Spargus's pass (round 57, the author's wish):
+;; across the strip of ground between its districts' nav meshes (17 m wide, x 1981 to 1998 m at z
+;; -316 m, the port's nav), a little wider, from under its ground (35.5 to 37.2 m).
+(define *bf-field-ends* (new 'static 'array float 21
                           389.75 7.94 -18.44 389.75 7.94 -70.72 40.0
                           -410.0 7.0 1212.0 -335.0 7.0 1212.0 40.0
+                          1976.0 34.0 -316.0 2003.0 34.0 -316.0 40.0
                           )
         )
+
+(defun bf-field-here? ((i int))
+  "#t when force field I belongs to the current war zone: the first two to Jak 3's city, the third
+   to Spargus; none to Jak 2's city."
+  (if (= (-> *bf* zone) BF_ZONE_SPARGUS)
+      (= i 2)
+      (and (< i 2) (not (bf-zone-ported? (-> *bf* zone))))
+      )
+  )
 
 (deftype bf-city-fields (structure)
   "The force fields' walls (security-wall-child processes, children of the director)."
@@ -3209,25 +3204,28 @@
   )
 
 (defun bf-city-fields-up ()
-  "Twice a second in a fight: each force field's wall (`*bf-field-ends*`) spawned again when it is
-   gone (a battle's start, a far respawn's reset): `spawn-security-wall` (ctywide-obs.gc), solid to
-   Jak and drawn red wherever ctywide is loaded."
+  "Twice a second in a fight: each force field's wall of the war zone (`*bf-field-ends*`,
+   `bf-field-here?`) spawned again when it is gone (a battle's start, a far respawn's reset):
+   `spawn-security-wall` (ctywide-obs.gc), solid to Jak and drawn red wherever ctywide is loaded;
+   Spargus's blue (`bf-spargus-field`, round 57). Jak 2's city has none (its DGO leaves
+   ctywide-obs.o out)."
   (let ((parent (handle->process (-> *bf* director)))
         (a (new 'stack-no-clear 'vector))
         (b (new 'stack-no-clear 'vector))
         )
-    ;; Jak 3's city only: its walls are its own places, and spawn-security-wall is its ctywide-obs.o,
-    ;; which the ported war zones' DGOs leave out (Jak 2's city, Spargus)
-    (when (and parent (not (bf-zone-ported? (-> *bf* zone))))
+    (when parent
       (dotimes (i BF_FIELD_COUNT)
-        (when (not (handle->process (-> *bf-city-fields* wall i)))
+        (when (and (bf-field-here? i) (not (handle->process (-> *bf-city-fields* wall i))))
           (let ((e (* i 7)))
             (set-vector! a (meters (-> *bf-field-ends* e)) (meters (-> *bf-field-ends* (+ e 1)))
                          (meters (-> *bf-field-ends* (+ e 2))) 1.0)
             (set-vector! b (meters (-> *bf-field-ends* (+ e 3))) (meters (-> *bf-field-ends* (+ e 4)))
                          (meters (-> *bf-field-ends* (+ e 5))) 1.0)
             (set! (-> *bf-city-fields* wall i)
-                  (spawn-security-wall parent a b (meters (-> *bf-field-ends* (+ e 6))) #f)
+                  (if (= i 2)
+                      (bf-spargus-field parent a b (meters (-> *bf-field-ends* (+ e 6))))
+                      (spawn-security-wall parent a b (meters (-> *bf-field-ends* (+ e 6))) #f)
+                      )
                   )
             (format 0 "battlefront: force field ~D up~%" i)
             )
@@ -3394,12 +3392,23 @@
 ;; When each side may bring units in at a control point again (`bf-city-spawn-tick`).
 (define *bf-spawn-time* (new 'static 'array time-frame 2))
 
-;; Spargus's objective (round 54): the drops of a side anywhere on the map (`bf-city-spawn-spot` PT
-;; #f) keep to x between these (its district: the Freedom League's west of the pass, wascityb with
-;; the precursor game, the Krimzon Guard's east of it, wascitya). Set by `bf-city-spawn-tick`.
-(define *bf-spawn-x* (new 'static 'array float 2 -1000000000.0 1000000000.0))
-(defconstant BF_SPARGUS_FF_EAST (meters 1990))  ;; the Freedom League's drops west of this
-(defconstant BF_SPARGUS_KG_WEST (meters 2110))  ;; the Krimzon Guard's east of this (the pass, 2078 m, between)
+;; Spargus's objective: the drops of a side anywhere on the map (`bf-city-spawn-spot` PT #f) keep to
+;; x above the first of these, and between the next two of the artifact's point across. Since round
+;; 57 both sides come down in wascitya, east of the force field at the pass (wascityb, with the
+;; anti-aircraft turret, stays empty, the author's wish), each on its own side of it: the Freedom
+;; League's around the artifact (at the white eco fountain in wascitya's middle since round 61, by the
+;; force field in rounds 59 and 60, by the arena's stairs in rounds 57 and 58), the Krimzon Guard's
+;; everywhere else in wascitya and the pass's lane (rounds 54 to 56:
+;; the Freedom League in wascityb, the Krimzon Guard in wascitya). Set by `bf-city-spawn-tick`. The
+;; pass's lane north of the force field (x 1970 to 2000 m, z under BF_SPARGUS_FIELD_Z) is wascitya's
+;; too: the artifact stands in it since round 59.
+(define *bf-spawn-area* (new 'static 'array float 3 -1000000000.0 0.0 1000000000.0))
+(defconstant BF_SPARGUS_EAST (meters 2000))      ;; every drop east of this (the pass, 1981 to 1998 m), or in the pass's lane north of the field
+(defconstant BF_SPARGUS_LANE (meters 1970))      ;; the pass's lane: east of this,
+(defconstant BF_SPARGUS_FIELD_Z (meters -316))   ;; and north of the force field (z under this)
+(defconstant BF_SPARGUS_FF_MIN (meters 40))      ;; the Freedom League's no nearer the artifact than this (round 60, the author's wish: not on it, the fight over the whole district, not in the lane)
+(defconstant BF_SPARGUS_FF_NEAR (meters 150))    ;; and within this of it (90 until round 59)
+(defconstant BF_SPARGUS_KG_FAR (meters 150))     ;; the Krimzon Guard's farther than this from it: everywhere else (round 61; 170 until round 60)
 
 (defun bf-city-spawn-spot ((pt vector) (out vector) (reach float) (low? symbol))
   "OUT: the middle of a nav poly drawn at random among those of the loaded meshes (`*bf-ways*`)
@@ -3422,7 +3431,13 @@
             (let ((poly (-> m poly-array i)))
               (when (not (logtest? (-> poly pat) 4))
                 (poly-centroid m poly c)
-                (when (and (or (and (not pt) (< (-> *bf-spawn-x* 0) (-> c x)) (< (-> c x) (-> *bf-spawn-x* 1)))
+                (when (and (or (and (not pt)
+                                    (or (< (-> *bf-spawn-area* 0) (-> c x))
+                                        (and (< BF_SPARGUS_LANE (-> c x)) (< (-> c z) BF_SPARGUS_FIELD_Z))
+                                        )
+                                    (<= (-> *bf-spawn-area* 1) (vector-vector-xz-distance c (-> *bf* points BF_ARTIFACT_POINT pos)))
+                                    (< (vector-vector-xz-distance c (-> *bf* points BF_ARTIFACT_POINT pos)) (-> *bf-spawn-area* 2))
+                                    )
                                (and pt (< (vector-vector-xz-distance c pt) reach) (< (fabs (- (-> c y) (-> pt y))) (meters 20)))
                                )
                            (or (not low?) (< (-> c y) (-> w deck-y k)))
@@ -3645,8 +3660,10 @@
         (let* ((kind (bf-transport-next-kind team))
                (at (new 'stack-no-clear 'vector))
                (sky (new 'stack-no-clear 'vector))
-               ;; a jetpack guard never over the walkways (`bf-city-spawn-spot` LOW?)
-               (low? (= kind (the-as int (traffic-type flying-turret))))
+               ;; a jetpack guard never over the walkways (`bf-city-spawn-spot` LOW?); in Spargus anywhere:
+               ;; the pass's lane by the artifact stands above its mesh's deck height, and the Freedom
+               ;; League, wanting a jetpack guard first, brought none there (round 59's test: no spot in 10)
+               (low? (and (= kind (the-as int (traffic-type flying-turret))) (!= (-> *bf* zone) BF_ZONE_SPARGUS)))
                (around (if (>= point 0) (-> *bf* points point pos) (the-as vector #f)))
                (mesh (if (>= kind 0) (bf-city-spawn-spot around at BF_SPAWN_REACH low?)))
                (h (if mesh (bf-sky-height at) 0.0))
@@ -3751,17 +3768,19 @@
    (bf-transport.gc `bf-transport-drop-point`; at its base its ship brings them): `bf-city-spawn-near`,
    then the next units a second later, half a second after none (the point passed over once, as a
    ship's).
-   In Spargus every unit comes down anywhere in its side's district instead (`bf-city-spawn-near`,
-   point -1, `*bf-spawn-x*`), its ships bringing none (bf-transport.gc `bf-transport-my-turn?`): the
-   Freedom League's west of the pass, where the precursor game and the artifact it defends stand,
-   the Krimzon Guard's east of it (the author's wish, round 54; round 52 dropped both anywhere)."
+   In Spargus every unit comes down anywhere on its side's part of wascitya instead
+   (`bf-city-spawn-near`, point -1, `*bf-spawn-area*`), its ships bringing none (bf-transport.gc
+   `bf-transport-my-turn?`): the Freedom League's around the artifact it defends, the Krimzon
+   Guard's on the far side (round 57; round 54 had them each in its district, round 52 anywhere)."
   (dotimes (team 2)
     (when (and (= (-> *bf* zone) BF_ZONE_SPARGUS) (>= (current-time) (-> *bf-spawn-time* team)))
-      (set! (-> *bf-spawn-x* 0) (if (= team BF_TEAM_FF) -1000000000.0 BF_SPARGUS_KG_WEST))
-      (set! (-> *bf-spawn-x* 1) (if (= team BF_TEAM_FF) BF_SPARGUS_FF_EAST 1000000000.0))
+      (set! (-> *bf-spawn-area* 0) BF_SPARGUS_EAST)
+      (set! (-> *bf-spawn-area* 1) (if (= team BF_TEAM_FF) BF_SPARGUS_FF_MIN BF_SPARGUS_KG_FAR))
+      (set! (-> *bf-spawn-area* 2) (if (= team BF_TEAM_FF) BF_SPARGUS_FF_NEAR 1000000000.0))
       (set! (-> *bf-spawn-time* team) (+ (current-time) (if (> (bf-city-spawn-near team -1) 0) (seconds 1) (seconds 0.5))))
-      (set! (-> *bf-spawn-x* 0) -1000000000.0)
-      (set! (-> *bf-spawn-x* 1) 1000000000.0)
+      (set! (-> *bf-spawn-area* 0) -1000000000.0)
+      (set! (-> *bf-spawn-area* 1) 0.0)
+      (set! (-> *bf-spawn-area* 2) 1000000000.0)
       )
     (when (and (!= (-> *bf* zone) BF_ZONE_SPARGUS) (>= (current-time) (-> *bf-spawn-time* team)))
       (let ((turn (bf-transport-drop-point team)))

@@ -43,8 +43,10 @@
 ;; His attacks play their clips BF_BARON_ATTACK_RATE times as fast, whole (round 44 cut them at a
 ;; fixed length: only their wind-up showed): a clip's length and when its blow lands, at that rate
 (defconstant BF_BARON_ATTACK_RATE 1.3)
-(defconstant BF_BARON_SLASH_REACH (meters 3.2)) ;; Jak's punch, for a taller man with a sword
-(defconstant BF_BARON_SPIN_REACH (meters 3.4))  ;; Jak's spin kick (target-util.gc spin-radius 2.2 m), the same
+;; how near a foe the champion slashes and spins (his blows strike with Jak's spin kick's hitbox since
+;; round 61, `bf-jak-spin-strike`: a crimson guard within about 3.7 m)
+(defconstant BF_BARON_SLASH_REACH (meters 3.2))
+(defconstant BF_BARON_SPIN_REACH (meters 3.4))
 (defconstant BF_BARON_SLASH_TIME (seconds 0.85)) ;; the overhead chop (1.1 s), it lands 0.57 s in
 (defconstant BF_BARON_SLASH_AT (seconds 0.44))
 (defconstant BF_BARON_SPIN_TIME (seconds 1.15)) ;; the spin (1.5 s), its two swings 0.55 s and 1.07 s in
@@ -65,7 +67,6 @@
 (defconstant BF_BARON_PLANT_REACH (meters 5))     ;; the blow's reach all around him
 (defconstant BF_BARON_AIRSPIN_TIME (seconds 0.89))
 (defconstant BF_BARON_AIRSPIN_FALL 0.3)           ;; his gravity's share while he spins in the air
-(defconstant BF_BARON_AIRSPIN_BELOW (meters 6))   ;; the spin in the air reaches this far under his feet
 (defconstant BF_BARON_TURN_RATE 1.6)            ;; his 180 degree turn's clip (0.77 s) this fast
 (defconstant BF_BARON_TURN_TIME (seconds 0.48))
 (defconstant BF_BARON_CAST_COST 0.25)           ;; of his yellow eco gauge
@@ -88,9 +89,10 @@
 ;; the Baron's class, its code shared with the player's Baron), and `bf-boss-body`, the body the units
 ;; aim at and hit (a process-focusable registered in the attack controller as a Krimzon Guard robot,
 ;; battlefront-city.gc `bf-city-boss-attacker!`), put where he stands each frame.
-(defconstant BF_BOSS_SHARE 20)            ;; % of the Krimzon Guard's units lost before he comes
-(defconstant BF_BOSS_UNLIMITED 100)       ;; losses before he comes when the units are unlimited
+(defconstant BF_BOSS_SHARE 10)            ;; % of a side's units lost before its champion comes (20 until round 58; earlier, the author's wish, round 59)
+(defconstant BF_BOSS_UNLIMITED 50)        ;; losses before he comes when the units are unlimited (100 until round 58)
 (defconstant BF_BOSS_HP 100.0)            ;; a champion's health on the 24 point scale, about four guards' (the author's wish, round 52; 480 in round 49), Ashelin's the same (round 53)
+(defconstant BF_BOSS_BARON_HP 300.0)      ;; Baron Praxis's, the Krimzon Guard's champion (round 58: at BF_BOSS_HP he fell to a few seconds of the player's fire, the author's "too vulnerable")
 (defconstant BF_BOSS_SIGHT (meters 80))   ;; a foe this close is his; farther, he marches to a point
 (defconstant BF_BOSS_CLOSE (meters 2.6))  ;; he stops this close to his foe and strikes
 (defconstant BF_BOSS_CAST_MIN (meters 8)) ;; he throws his yellow eco ball at a foe this far
@@ -147,6 +149,12 @@
 (set! (-> *bf-boss-ref* champ 1) (the-as handle #f))
 (define *bf-boss-done* (new 'static 'array int32 2 0 0))  ;; 1: that side's champion came in this battle
 (define *bf-boss-hps* (new 'static 'array float 2 0.0 0.0)) ;; each champion's health left, for the HUD
+
+(defun bf-boss-hp-max ((team int))
+  "Side TEAM's champion's full health on the 24 point scale: Baron Praxis's BF_BOSS_BARON_HP, Ashelin's
+   BF_BOSS_HP."
+  (if (= team BF_TEAM_KG) BF_BOSS_BARON_HP BF_BOSS_HP)
+  )
 (define *bf-boss-pos* (new 'static 'inline-array vector 2)) ;; and where each stands
 ;; For the tests: attacks on his body, [0] all, [1] from his own side, [2] repeated, [3] taken
 (define *bf-boss-hits* (new 'static 'array int32 4 0 0 0 0))
@@ -634,6 +642,38 @@
       )
   )
 
+;; Hit reactions of Ashelin and the Baron, the player's and the champions' (round 60, the author's
+;; wish): a hit that hurts plays their hit clip, during which no other attack hurts them; one at
+;; most every BF_HURT_GAP, so a crowd's fire cannot hold them in it (the hits between hurt, unplayed)
+(defconstant BF_HURT_GAP (seconds 1.5))
+(defconstant BF_ASH_HURT_TIME (seconds 0.45))   ;; her own hit clip (0.27 s), then held
+(defconstant BF_BARON_HURT_TIME (seconds 0.83)) ;; his hit clip (make_baron_clips.py "r45 hit")
+
+(defun bf-avatar-hurt! ((av bf-avatar))
+  "An attack that would hurt AV (Ashelin or the Baron) lands: #t while its hit reaction runs (the
+   attack hurts nothing), else #f (it hurts), a new reaction asked of its update (`hurt-new?`, the
+   class's hit clip for BF_ASH_HURT_TIME or BF_BARON_HURT_TIME) unless the last began less than
+   BF_HURT_GAP ago. Any other class: #f."
+  (let ((now (-> av clock frame-counter)))
+    (cond
+      ((not (or (= (-> av class) BF_CLASS_ASHELIN) (= (-> av class) BF_CLASS_BARON)))
+       #f
+       )
+      ((< now (-> av hurt-until))
+       #t
+       )
+      (else
+        (when (< BF_HURT_GAP (- now (-> av hurt-time)))
+          (set! (-> av hurt-time) now)
+          (set! (-> av hurt-until) (+ now (if (= (-> av class) BF_CLASS_BARON) BF_BARON_HURT_TIME BF_ASH_HURT_TIME)))
+          (set! (-> av hurt-new?) #t)
+          )
+        #f
+        )
+      )
+    )
+  )
+
 (defbehavior bf-baron-pressed? bf-avatar ((b pad-buttons))
   "#t the frame B went down on the Baron's pad (`bf-baron-pad-of`)."
   (let ((pad (bf-baron-pad-of)))
@@ -780,6 +820,88 @@
           )
         )
       )
+    )
+  (none)
+  )
+
+;; Jak's own hitboxes (round 61, the author's wish: Ashelin's punch and kicks, the Baron's sword
+;; "the same as Jak's"), target-util.gc `target-danger-set!` with *TARGET-bank*'s sizes: his spin
+;; kick (on the ground and in the air) a sphere of 2.2 m around a point 1.6 m above his feet; his
+;; punch one of 1.3 m around a point 1.3 m above his feet and one of 1.3 m on his forearm. The game
+;; strikes a foe when one of the foe's collision spheres overlaps one of them (a crimson guard's two
+;; body spheres are 1.5 m wide): `bf-jak-strike`
+(defconstant BF_JAK_SPIN_RADIUS (meters 2.2))
+(defconstant BF_JAK_SPIN_HEIGHT (meters 1.6))
+(defconstant BF_JAK_PUNCH_RADIUS (meters 1.3))
+(defconstant BF_JAK_PUNCH_HEIGHT (meters 1.3))
+
+(defun bf-shape-touches? ((shape collide-shape) (at vector) (radius float))
+  "Whether one of SHAPE's collision spheres (each one of its group, or its one sphere), taking part
+   in collisions, overlaps the sphere of RADIUS around AT."
+  (let ((root (-> shape root-prim))
+        (hit #f)
+        )
+    (if (zero? (-> root prim-core prim-type))
+        ;; a group: its children (all 80 bytes, laid out after it)
+        (let ((group (the-as collide-shape-prim-group root)))
+          (dotimes (i (-> group num-children))
+            (let ((prim (-> group child i)))
+              (if (and (nonzero? (-> prim prim-core collide-as))
+                       (< (vector-vector-distance (-> prim prim-core world-sphere) at) (+ radius (-> prim prim-core world-sphere w)))
+                       )
+                  (set! hit #t)
+                  )
+              )
+            )
+          )
+        (set! hit (< (vector-vector-distance (-> root prim-core world-sphere) at) (+ radius (-> root prim-core world-sphere w))))
+        )
+    hit
+    )
+  )
+
+(defbehavior bf-jak-strike bf-avatar ((at vector) (at2 vector) (radius float) (damage float))
+  "A blow with Jak's hitbox (round 61): every foe one of whose collision spheres overlaps the sphere
+   of RADIUS around AT, or around AT2 (#f: none), struck once for DAMAGE (`bf-shape-touches?`); from
+   the champion's body for a champion, else from Jak (`bf-melee-hit`), as `bf-baron-strike`.
+   Returns nothing."
+  (let ((probe (vector-copy! (new 'stack-no-clear 'vector) at))
+        (shapes (new 'stack-no-clear 'array 'collide-shape 64))
+        )
+    ;; the shapes near enough for one of their spheres to reach either sphere (the forearm's within
+    ;; 2 m of AT, a robotguard's spheres within 4 m of its middle)
+    (set! (-> probe w) (+ radius (meters 6)))
+    (countdown (i (fill-actor-list-for-box *actor-hash* probe shapes 64))
+      (let ((shape (as-type (-> shapes i) collide-shape)))
+        (when shape
+          (let ((proc (-> shape process)))
+            (when (and (bf-foe? proc (bf-baron-team))
+                       (or (bf-boss? self) (!= proc *target*))
+                       (or (bf-shape-touches? shape at radius) (and at2 (bf-shape-touches? shape at2 radius)))
+                       )
+              (if (bf-boss? self)
+                  (let ((body (handle->process (-> (the-as bf-boss self) body))))
+                    (if body
+                        (bf-boss-send-attack proc body damage)
+                        )
+                    )
+                  (bf-melee-hit proc damage)
+                  )
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior bf-jak-spin-strike bf-avatar ((damage float))
+  "A blow with Jak's spin kick's hitbox (`bf-jak-strike`): the sphere of BF_JAK_SPIN_RADIUS
+   BF_JAK_SPIN_HEIGHT above the feet, for DAMAGE. Returns nothing."
+  (let ((at (vector-copy! (new 'stack-no-clear 'vector) (-> self root trans))))
+    (+! (-> at y) BF_JAK_SPIN_HEIGHT)
+    (bf-jak-strike at (the-as vector #f) BF_JAK_SPIN_RADIUS damage)
     )
   (none)
   )
@@ -990,6 +1112,58 @@
   (none)
   )
 
+;; The force fields hold the special characters as walls (round 61, the author's wish: a wall, no
+;; death). Their probes go through Jak 3's security wall's mesh, and until round 60 the wall's shock
+;; (ctywide-obs.gc security-wall-method-24: 2 points as a grenade's blast once Jak's place crosses
+;; its plane, Jak standing where they stand) threw them back, killing them on the battle's scale.
+(defconstant BF_FIELD_GAP (meters 0.5)) ;; a body kept this far off a field's plane
+(defconstant BF_FIELD_NEAR (meters 4))  ;; a move from this near its plane (no teleport across)
+
+(defun bf-field-keep-out! ((old vector) (pos vector) (vel vector))
+  "A move from OLD to POS that crosses a force field's plane, or ends within BF_FIELD_GAP of it, on
+   its stretch (the director's security-wall-child children, `bf-city-fields-up`): POS put back on
+   OLD's side BF_FIELD_GAP off it, VEL's part toward it cancelled. The wall's plane: its root's
+   forward axis through its middle, its length its scale across (ctywide-obs.gc `init-wall`).
+   Returns #t when it held the move."
+  (let ((parent (handle->process (-> *bf* director)))
+        (held? #f)
+        )
+    (when parent
+      (let ((child (-> parent child)))
+        (while child
+          (let ((wall (the-as process-drawable (ppointer->process child))))
+            (when (= (-> wall type symbol) 'security-wall-child)
+              (let* ((n (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> wall root quat)))
+                     (r (vector-x-quaternion! (new 'stack-no-clear 'vector) (-> wall root quat)))
+                     (c (-> wall root trans))
+                     (d-old (- (vector-dot n old) (vector-dot n c)))
+                     (d-new (- (vector-dot n pos) (vector-dot n c)))
+                     (side (- (vector-dot r pos) (vector-dot r c)))
+                     (sign (if (< 0.0 d-old) 1.0 -1.0))
+                     )
+                (when (and (< (fabs d-old) BF_FIELD_NEAR)
+                           (< (fabs side) (+ (* 2048.0 (-> wall root scale x)) (meters 1)))
+                           (< (* sign d-new) BF_FIELD_GAP)
+                           )
+                  (vector+float*! pos pos n (- (* sign BF_FIELD_GAP) d-new))
+                  (let ((vn (vector-dot vel n)))
+                    (if (< (* sign vn) 0.0)
+                        (vector+float*! vel vel n (- vn))
+                        )
+                    )
+                  (set! held? #t)
+                  )
+                )
+              )
+            (set! child (-> wall brother))
+            )
+          )
+        )
+      )
+    held?
+    )
+  )
+
 (defbehavior bf-baron-step bf-avatar ((root collide-shape-moving) (dt float))
   "One frame of his move, by his velocity (ROOT transv) over DT, on probes of his own (round 44: the
    engine's integrate-and-collide! kept a sphere resting on the ground from sliding): across, a
@@ -1000,6 +1174,7 @@
   (let ((pos (-> root trans))
         (move (new 'stack-no-clear 'vector))
         (from (new 'stack-no-clear 'vector))
+        (old (vector-copy! (new 'stack-no-clear 'vector) (-> root trans)))
         )
     ;; across
     (set-vector! move (* (-> root transv x) dt) 0.0 (* (-> root transv z) dt) 1.0)
@@ -1028,6 +1203,8 @@
       )
     ;; the foes he walks into stop him (round 46)
     (bf-baron-push-out! pos (bf-baron-team))
+    ;; the force fields too (round 61)
+    (bf-field-keep-out! old pos (-> root transv))
     ;; up: a ceiling
     (let ((dy (* (-> root transv y) dt)))
       (when (< 0.0 dy)
@@ -1159,6 +1336,21 @@
        (bf-baron-face! root (-> self yaw) 0.0)
        )
       (else
+        ;; hit (`bf-avatar-hurt!`, round 60): his hit clip, his attack or turn broken off, no blow
+        ;; (melee-step 3: past the steps that strike)
+        (when (-> self hurt-new?)
+          (set! (-> self hurt-new?) #f)
+          (if (= (-> self anim) BF_BARON_CLIP_HIT)
+              (set! (-> self anim) -1)
+              )
+          (set! (-> self stab-clip) BF_BARON_CLIP_HIT)
+          (set! (-> self melee-step) 3)
+          (set-time! (-> self melee-time))
+          (set! (-> self melee-until) (-> self hurt-until))
+          (set! (-> self turn-until) 0)
+          (set! busy? #t)
+          (set! turning? #f)
+          )
         ;; his gauge, his guard
         (set! (-> self boost) (fmin 1.0 (+ (-> self boost) (/ dt BF_BARON_ECO_REFILL))))
         (bf-baron-shield (and ground? (bf-baron-held? (pad-buttons l2))))
@@ -1247,9 +1439,10 @@
                       )
               (set! (-> self melee-step) (+ step 1))
               (case clip
-                ((BF_BARON_CLIP_SLASH) (bf-baron-strike BF_BARON_SLASH_REACH #f BF_DMG_BARON_SLASH 0.0))
-                ((BF_BARON_CLIP_SPIN) (bf-baron-strike BF_BARON_SPIN_REACH #t BF_DMG_BARON_SPIN 0.0))
-                ((BF_BARON_CLIP_AIRSPIN) (bf-baron-strike BF_BARON_SPIN_REACH #t BF_DMG_BARON_SPIN BF_BARON_AIRSPIN_BELOW))
+                ;; his sword strikes with Jak's spin kick's hitbox (round 61, the author's wish;
+                ;; before, a cone ahead for the slash, a ring of 3.4 m for the spins)
+                ((BF_BARON_CLIP_SLASH) (bf-jak-spin-strike BF_DMG_BARON_SLASH))
+                ((BF_BARON_CLIP_SPIN BF_BARON_CLIP_AIRSPIN) (bf-jak-spin-strike BF_DMG_BARON_SPIN))
                 ((BF_BARON_CLIP_PLANT) (bf-baron-plant-blow))
                 ((BF_BARON_CLIP_CAST) (bf-baron-cast))
                 )
@@ -1461,7 +1654,13 @@
       (if (and owner (= (bf-unit-team owner) (-> self team)))
           (+! (-> *bf-boss-hits* 1) 1)
           )
-      (when (not (and owner (= (bf-unit-team owner) (-> self team))))
+      (when (and (not (and owner (= (bf-unit-team owner) (-> self team))))
+                 ;; his hit reaction running: this attack hurts nothing (round 60)
+                 (not (let ((b (handle->process (-> self boss))))
+                        (and b (bf-avatar-hurt! (the-as bf-avatar b)))
+                        )
+                      )
+                 )
         (+! (-> *bf-boss-hits* 3) 1)
         (if (< dmg 0.0)
             (set! dmg 4.0)
@@ -1500,7 +1699,7 @@
 (defbehavior bf-boss-body-init-by-other bf-boss-body ((boss handle) (pos vector) (team int))
   "The body at POS of side TEAM's champion: a shape the units' shots and blows meet (the guards'
    collide-as, civilian, solid, two spheres up his height, in the hit-by-others list), his full
-   health (BF_BOSS_HP), a place in the attack controller as a unit of his side
+   health (`bf-boss-hp-max`), a place in the attack controller as a unit of his side
    (`bf-city-boss-attacker!`)."
   (let ((cshape (new 'process 'collide-shape self (collide-list-enum hit-by-others))))
     (let ((group (new 'process 'collide-shape-prim-group cshape (the-as uint 2) 0)))
@@ -1541,7 +1740,7 @@
     )
   (set! (-> self boss) boss)
   (set! (-> self team) team)
-  (set! (-> self hp) BF_BOSS_HP)
+  (set! (-> self hp) (bf-boss-hp-max team))
   (set! (-> self last-id) (the-as uint 0))
   (set! (-> self focus-status) (focus-status))
   (set! (-> self attacker) #f)
@@ -1878,8 +2077,17 @@
   (set! (-> self wander-until) 0)
   (set! (-> self cast-time) 0)
   (set! (-> self blows) 0)
-  ;; Ashelin's (round 53)
+  ;; Ashelin's (round 53; her reload, throw on the run and landing, rounds 57 and 58)
   (set! (-> self jumps) 0)
+  (set! (-> self reload-until) 0)
+  (set! (-> self reload-step) 0)
+  (set! (-> self lob-at) 0)
+  (set! (-> self land-until) 0)
+  (set! (-> self land-clip) BF_ASHELIN_CLIP_LAND)
+  (set! (-> self aloft?) #f)
+  (set! (-> self hurt-until) 0)
+  (set! (-> self hurt-time) 0)
+  (set! (-> self hurt-new?) #f)
   (set! (-> self rocket-time) 0)
   (set! (-> self dive-until) 0)
   (set! (-> self dodge-until) 0)
@@ -1952,7 +2160,7 @@
             (when sg
               (set! (-> *bf-boss-done* team) 1)
               (let ((at (bf-boss-spawn-pos team (new 'stack-no-clear 'vector))))
-                (set! (-> *bf-boss-hps* team) BF_BOSS_HP)
+                (set! (-> *bf-boss-hps* team) (bf-boss-hp-max team))
                 (set! (-> *bf-boss-ref* champ team)
                       (ppointer->handle (process-spawn bf-boss at sg class team :name "bf-boss" :to *entity-pool* :stack-size #x8000))
                       )

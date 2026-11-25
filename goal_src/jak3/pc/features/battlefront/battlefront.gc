@@ -121,13 +121,13 @@
    (units    int32)   ;; units per side, 50 to 1000 by 50, then 0: unlimited (round 44)
    (at-once  int32)   ;; units on the street at once in the whole city, both sides, 60 to 200 by 20, 200 by default, half a side (`bf-caps-set!`; round 45: rounds 41 to 44 counted a side, 30 to 200)
    (victory  int32)   ;; BF_WIN_POINTS or BF_WIN_UNITS
-   (special  int32)   ;; 1: the special characters can be picked on the class page (Baron Praxis, round 45), 0: not
+   (special  int32)   ;; 1: the special characters can be picked on the class page (Baron Praxis, round 45; 1 by default since round 60), 0: not
    (team-a   int32)   ;; the player's side, the top panel
    (team-b   int32)   ;; the other side, the bottom panel: never the same
    )
   )
 
-(define *bf-config* (new 'static 'bf-config :minutes 0 :units 500 :at-once 200 :victory 0 :special 0 :team-a 1 :team-b 0))
+(define *bf-config* (new 'static 'bf-config :minutes 0 :units 500 :at-once 200 :victory 0 :special 1 :team-a 1 :team-b 0))
 (define *bf-time-choices* (new 'static 'array int32 6 0 5 10 15 20 30))
 (defconstant BF_CONFIG_COUNT 8) ;; the configuration page's rows: 5 settings, 2 sides, Next
 (defconstant BF_CONFIG_SETTINGS 5)
@@ -341,7 +341,7 @@
    WIDTH wide at most, measured in the font: cut at MAX-CHARS bytes and each line shrunk to fit, a
    paragraph came out in mixed sizes (round 41). A word wider than WIDTH stands alone on its line,
    shrunk. MAX-CHARS: the most bytes a line takes (127 at most, `*bf-line*`). Lines 40 units apart
-   at scale 1 (34 before round 41: the lines touched)."
+   at scale 1 (34 before round 41: the lines touched). Returns the height under its last line."
   (let ((font (new 'stack 'font-context *font-default-matrix* 0 0 0.0 (font-color default) (font-flags kerning large)))
         (len (length str))
         (most (min 127 max-chars))
@@ -396,8 +396,8 @@
         (+! line-y (* 40.0 scale))
         )
       )
+    line-y
     )
-  (none)
   )
 
 (defun bf-pbutton-text ((buf dma-buffer) (str string) (x float) (box-y float) (box-h float) (scale float) (color font-color) (width float))
@@ -964,7 +964,8 @@
 ;; Indexed by BF_WEAPON_*: the gun (pickup-type) whose icon the stock gun HUD shows for a guard's
 ;; weapon: the rifle yellow 1, the tazer blue 2, the grenade launcher red 3; for the rockets and the
 ;; robotguard's grenades the red 3, whose icon the HUD hides and draws theirs over
-;; (`bf-draw-pixel-icon`); Ashelin's pistols the yellow 1, as the rifle (round 54).
+;; (`bf-draw-pixel-icon`); Ashelin's pistols the yellow 1, as the rifle (round 54), hidden too since
+;; round 57 under the author's red pistol.
 (define *bf-hud-weapons* (new 'static 'array int32 6 29 33 28 28 28 29))
 
 (defun bf-gun-hud-weapon ()
@@ -1017,19 +1018,31 @@
 
 (defconstant BF_GUN_ICON_STRETCH 1.22) ;; the stock gun icon's width on screen over hud.gc's for its sprite (measured, round 42)
 
-(defun bf-draw-pixel-icon ((buf dma-buffer) (bx float) (by float) (bw float) (bh float) (grenade? symbol))
-  "One of the gun HUD's pixel-art icons into BUF (a direct bucket): the jetpack's rocket, or with
-   GRENADE? the robotguard's grenade, as large as it fits in the box from BX, BY (its top left, on
+(defun bf-pixel-icon-of ((weapon int))
+  "The gun HUD's pixel-art icon drawn over the stock one for WEAPON (BF_WEAPON_*): 0 the jetpack's
+   rocket, 1 the robotguard's grenade, 2 Ashelin's red pistol (round 57, the author's drawing); -1
+   none (the stock icon shows)."
+  (cond
+    ((= weapon BF_WEAPON_ROCKET) 0)
+    ((= weapon BF_WEAPON_BOT_GRENADE) 1)
+    ((= weapon BF_WEAPON_PISTOL) 2)
+    (else -1)
+    )
+  )
+
+(defun bf-draw-pixel-icon ((buf dma-buffer) (bx float) (by float) (bw float) (bh float) (icon int))
+  "One of the gun HUD's pixel-art icons into BUF (a direct bucket): ICON (`bf-pixel-icon-of`) 0 the
+   jetpack's rocket, 1 the robotguard's grenade, 2 Ashelin's pistol, as large as it fits in the box from BX, BY (its top left, on
    the 512 x 416 screen of the HUD's sprites), BW across and BH down, and centered in it, its art
    pixels square on the display (`bf-x-squeeze`). Each is one of the author's drawings
    (battlefront-icons.gc, made by scripts/battlefront/make_hud_icons.py) as one flat sprite per run
    of one color, all in one GIF packet (draw-sprite2d-xy's, display.gc, looped). A texture uploaded
    as the L3 map's never showed in a fight, whatever its bucket."
-  (let* ((colors (if grenade? *bf-grenade-icon-colors* *bf-rocket-icon-colors*))
-         (runs (if grenade? *bf-grenade-icon-runs* *bf-rocket-icon-runs*))
-         (count (if grenade? BF_GRENADE_ICON_RUNS BF_ROCKET_ICON_RUNS))
-         (aw (the float (if grenade? BF_GRENADE_ICON_W BF_ROCKET_ICON_W)))
-         (ah (the float (if grenade? BF_GRENADE_ICON_H BF_ROCKET_ICON_H)))
+  (let* ((colors (case icon ((1) *bf-grenade-icon-colors*) ((2) *bf-pistol-icon-colors*) (else *bf-rocket-icon-colors*)))
+         (runs (case icon ((1) *bf-grenade-icon-runs*) ((2) *bf-pistol-icon-runs*) (else *bf-rocket-icon-runs*)))
+         (count (case icon ((1) BF_GRENADE_ICON_RUNS) ((2) BF_PISTOL_ICON_RUNS) (else BF_ROCKET_ICON_RUNS)))
+         (aw (the float (case icon ((1) BF_GRENADE_ICON_W) ((2) BF_PISTOL_ICON_W) (else BF_ROCKET_ICON_W))))
+         (ah (the float (case icon ((1) BF_GRENADE_ICON_H) ((2) BF_PISTOL_ICON_H) (else BF_ROCKET_ICON_H))))
          (sq (bf-x-squeeze))
          ;; an art pixel PX units across and PX / SQ down: the largest that fits in the box
          (px (fmin (/ bw aw) (/ (* sq bh) ah)))
@@ -1072,7 +1085,7 @@
 
 (defun bf-draw-rocket-hud ((buf dma-buffer))
   "The director's HUD, each frame of a fight: into BUF, a jetpack guard's rocket icon or a
-   robotguard's grenade icon (round 38) in the box of the stock weapon icon the gun HUD shows and
+   robotguard's grenade icon (round 38), or Ashelin's red pistol (round 57), in the box of the stock weapon icon the gun HUD shows and
    hides for them (`*bf-hud-weapons*`: its sprite 1, the red gun's), as the screen shows that icon
    (round 42, the author's wish: placed and sized from its reticle before, they stood higher and
    drawn larger than the weapons'): from its sprite 1's top down its texture's height times its
@@ -1083,7 +1096,7 @@
    found). While that HUD is up (not hidden), moving with it as it slides in
    (`bf-draw-pixel-icon`). Its count and shells are the gun HUD's (`bf-draw-gun-ammo`)."
   (let ((weapon (bf-gun-hud-weapon)))
-    (when (and *target* (or (= weapon BF_WEAPON_ROCKET) (= weapon BF_WEAPON_BOT_GRENADE)))
+    (when (and *target* (>= (bf-pixel-icon-of weapon) 0))
       (let ((hg (the-as hud-gun (process-by-name "hud-gun" *target*))))
         (when (and hg (not (hidden? hg)))
           (let* ((spr (-> hg sprites 1))
@@ -1093,7 +1106,7 @@
               (let ((w (* BF_GUN_ICON_STRETCH (the float (-> tex w)) (-> spr scale-x) (-> *video-params* relative-x-scale))))
                 (bf-draw-pixel-icon buf (- (the float (-> hg sprites 0 pos x)) w) (the float (-> spr pos y))
                                     w (* (the float (-> tex h)) (-> spr scale-y))
-                                    (= weapon BF_WEAPON_BOT_GRENADE)
+                                    (bf-pixel-icon-of weapon)
                                     )
                 )
               )
@@ -1222,7 +1235,7 @@
           ;; the rockets and the robotguard's grenades: the stock icon see-through (sprites 0 and 1, whose scales the stock draw sets
           ;; itself) and its reticle (sprite 15, whose color it sets) shrunk to nothing; the director
           ;; draws the rocket's in its place (`bf-draw-rocket-hud`)
-          (when (or (= weapon BF_WEAPON_ROCKET) (= weapon BF_WEAPON_BOT_GRENADE))
+          (when (>= (bf-pixel-icon-of weapon) 0)
             (set! (-> this sprites 0 color w) 0)
             (set! (-> this sprites 1 color w) 0)
             (set! (-> this sprites 15 scale-x) 0.0)
@@ -1230,7 +1243,7 @@
           (*bf-stock-gun-draw* this)
           (set! (-> this strings 0 scale) text-scale)
           (set! (-> this sprites 14 scale-y) shell-y)
-          (when (or (= weapon BF_WEAPON_ROCKET) (= weapon BF_WEAPON_BOT_GRENADE))
+          (when (>= (bf-pixel-icon-of weapon) 0)
             (set! (-> this sprites 0 color w) 128)
             (set! (-> this sprites 1 color w) 128)
             (set! (-> this sprites 15 scale-x) 1.0)
@@ -1416,8 +1429,8 @@
          (track (static-rgba 20 24 34 90))
          (half (- 256.0 (+ l bev 3.0)))
          (full (the float (max 1 (-> *bf* reserve-max))))
-         (ff (if (bf-unlimited?) half (* half (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_FF)) full)))))
-         (kg (if (bf-unlimited?) half (* half (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_KG)) full)))))
+         (ff (if (bf-no-tickets? BF_TEAM_FF) half (* half (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_FF)) full)))))
+         (kg (if (bf-no-tickets? BF_TEAM_KG) half (* half (fmin 1.0 (/ (the float (-> *bf* reserve BF_TEAM_KG)) full)))))
          )
     ;; the background: the top bar, an elongated hexagon, then the compartment under its middle
     (bf-draw-quad buf (+ l bev) top (- r bev) top (- r bev) bot (+ l bev) bot back)
@@ -1445,11 +1458,13 @@
     (bf-draw-line buf (+ l bev) bot l mid 1.0 edge)
     (bf-draw-line buf l mid (+ l bev) top 1.0 edge)
     (bf-draw-line buf 256.0 top 256.0 cb 1.0 edge)
-    ;; the counts (none with unlimited units: the bars stay full)
-    (when (not (bf-unlimited?))
+    ;; the counts (none for a side with no tickets, `bf-no-tickets?`: its bar stays full)
+    (when (not (bf-no-tickets? BF_TEAM_FF))
       (clear *bf-text*)
       (format *bf-text* "~D" (-> *bf* reserve BF_TEAM_FF))
       (bf-draw-text buf *bf-text* 232.0 (+ bot 3.0) 0.42 (font-color cyan) #t)
+      )
+    (when (not (bf-no-tickets? BF_TEAM_KG))
       (clear *bf-text*)
       (format *bf-text* "~D" (-> *bf* reserve BF_TEAM_KG))
       (bf-draw-text buf *bf-text* 280.0 (+ bot 3.0) 0.42 (font-color red) #t)
@@ -2457,7 +2472,7 @@
 
 (defun bf-draw-boss-bar ((buf dma-buffer))
   "Bottom middle, into BUF: each champion's name and health (battlefront-baron.gc `*bf-boss-hps*` of
-   BF_BOSS_HP), a bar in a dark track, while he lives within BF_BOSS_BAR_REACH of the player (round
+   `bf-boss-hp-max`), a bar in a dark track, while he lives within BF_BOSS_BAR_REACH of the player (round
    49, the author's wish): Baron Praxis's red, Ashelin's blue above it (round 53)."
   (let ((y 366.0))
     (dotimes (k 2)
@@ -2468,7 +2483,7 @@
           (let* ((w 220.0)
                  (x0 (- 256.0 (* 0.5 w)))
                  (h 8.0)
-                 (fill (* w (fmax 0.0 (fmin 1.0 (/ (-> *bf-boss-hps* team) BF_BOSS_HP)))))
+                 (fill (* w (fmax 0.0 (fmin 1.0 (/ (-> *bf-boss-hps* team) (bf-boss-hp-max team))))))
                  )
             (bf-draw-text buf (if (= team BF_TEAM_KG) "BARON PRAXIS" "ASHELIN") 0.0 (- y 15.0) 0.42 (bf-team-color team) #t)
             (bf-draw-quad buf (+ x0 -2.0) (+ y -2.0) (+ x0 w 2.0) (+ y -2.0) (+ x0 w 2.0) (+ y h 2.0) (+ x0 -2.0) (+ y h 2.0)
@@ -2489,17 +2504,18 @@
   )
 
 (defun bf-draw-artifact-bar ((buf dma-buffer))
-  "Top middle, into BUF, during a battle of the destruction of an objective (Spargus, round 54): the
+  "Top left, into BUF, during a battle of the destruction of an objective (Spargus, round 54): the
    precursor artifact's name and health (battlefront-artifact.gc `*bf-artifact*` of BF_ARTIFACT_HP),
-   a blue bar in a dark track, under the reserves and the points' marks."
+   a small blue bar in a dark track, under the units alive (`bf-draw-alive`). Round 57, the author's
+   wish: much smaller than rounds 54 to 56's, 220 units wide at the top middle."
   (when (and (bf-objective?) (handle->process (-> *bf-artifact* proc)))
-    (let* ((w 220.0)
-           (x0 (- 256.0 (* 0.5 w)))
-           (y 104.0)
-           (h 7.0)
+    (let* ((w 90.0)
+           (x0 14.0)
+           (y 48.0)
+           (h 4.0)
            (fill (* w (fmax 0.0 (fmin 1.0 (/ (-> *bf-artifact* hp) BF_ARTIFACT_HP)))))
            )
-      (bf-draw-text buf (bf-tr "PRECURSOR ARTIFACT" "ARTEFACT PRÉCURSEUR") 0.0 (- y 14.0) 0.4 (bf-team-color BF_TEAM_FF) #t)
+      (bf-draw-text buf (bf-tr "Precursor artifact" "Artefact précurseur") x0 (- y 10.0) 0.32 (bf-team-color BF_TEAM_FF) #f)
       (bf-draw-quad buf (+ x0 -2.0) (+ y -2.0) (+ x0 w 2.0) (+ y -2.0) (+ x0 w 2.0) (+ y h 2.0) (+ x0 -2.0) (+ y h 2.0)
                     (static-rgba 20 24 34 100)
                     )
@@ -2623,8 +2639,14 @@
       (else
         (set! (-> *bf* zone) zone)
         (bf-zone-select! zone)
-        ;; the armies' caps from the setup's units at once, half the city's each side (round 41, 45)
-        (bf-caps-set! (/ (-> *bf-config* at-once) 2))
+        ;; the armies' caps from the setup's units at once, half the city's each side (round 41, 45);
+        ;; Spargus's always BF_SPARGUS_AT_ONCE a side, its setup without the row (round 61, the
+        ;; author's wish; round 59: at most that many)
+        (bf-caps-set! (if (= zone BF_ZONE_SPARGUS)
+                          BF_SPARGUS_AT_ONCE
+                          (/ (-> *bf-config* at-once) 2)
+                          )
+                      )
         (set! (-> *bf* team) team)
         (set! (-> *bf* class) class)
         (set! (-> *bf* weapon) BF_WEAPON_RIFLE)
@@ -2640,6 +2662,10 @@
         (set! (-> *bf* tazer-time) 0)
         ;; the configuration page's settings (`*bf-config*`; BF_RESERVE units a side until round 28)
         (set! (-> *bf* reserve-max) (-> *bf-config* units))
+        ;; Spargus's at most BF_SPARGUS_UNITS a side, unlimited too (round 59, the author's wish)
+        (if (and (= zone BF_ZONE_SPARGUS) (or (zero? (-> *bf* reserve-max)) (< BF_SPARGUS_UNITS (-> *bf* reserve-max))))
+            (set! (-> *bf* reserve-max) BF_SPARGUS_UNITS)
+            )
         (set! (-> *bf* time-limit) (-> *bf-config* minutes))
         (set! (-> *bf* victory) (-> *bf-config* victory))
         (set! (-> *bf* hold-team) BF_TEAM_NONE)
@@ -2911,10 +2937,11 @@
 (defbehavior bf-point-icons bf-director ()
   "Each frame of a fight: every battle point without its mark on the game's minimap gets one, a
    connection of the director at the point's place (minimap.gc add-icon!, class 10, then
-   `*bf-point-minimap-class*`, or `*bf-base-minimap-class*` for a base)."
+   `*bf-point-minimap-class*`, or `*bf-base-minimap-class*` for a base). In the destruction of an
+   objective (Spargus), the artifact's point alone: no camp (round 58, the author's wish)."
   (dotimes (i (-> *bf* point-count))
     (let ((pt (-> *bf* points i)))
-      (when (not (-> pt icon))
+      (when (and (not (-> pt icon)) (not (and (-> pt base?) (bf-objective?))))
         (let ((c (add-icon! *minimap* self (the-as uint 10) (the-as int #f) (-> pt pos) 0)))
           (when c
             (set! (-> c class) (if (-> pt base?) *bf-base-minimap-class* *bf-point-minimap-class*))
@@ -3406,8 +3433,12 @@
       )
     )
   ;; the Baron (round 44): pad 0's buttons and left stick are his (`*bf-baron-pad*`), Jak keeps START,
-  ;; SELECT, L3 and the right stick (the menus, the map, the camera) and stands still
-  (when (and (zero? (-> pad number)) (bf-own-mover? (-> *bf* class)) (bf-fighting?) (not *popup-menu-open*) *target*)
+  ;; SELECT, L3 and the right stick (the menus, the map, the camera) and stands still. Not once he is
+  ;; dead (round 58): the death screen's X and Triangle are Jak's (`bf-target-death`), and taken
+  ;; from him they never came, the player stuck on it
+  (when (and (zero? (-> pad number)) (bf-own-mover? (-> *bf* class)) (bf-fighting?) (not *popup-menu-open*) *target*
+             (not (focus-test? *target* dead))
+             )
     (set! (-> *bf-baron-pad* last) (-> *bf-baron-pad* buttons))
     (set! (-> *bf-baron-pad* buttons) (-> pad button0))
     (set! (-> *bf-baron-pad* leftx) (-> pad leftx))
@@ -4120,7 +4151,8 @@
    color (`*bf-unit-dots*`) and each point's mark in its holder's color, live, blinking while a side
    takes it (`bf-draw-point-mark`), Jak in white; before one, where `*bf-point-defs*` puts them,
    the bases in their side's color and the control points grey. The point PICK (-1 none) ringed in
-   blinking yellow."
+   blinking yellow. Spargus (the destruction of an objective) shows the artifact's mark alone, a camp
+   only when picked (round 58, the author's wish)."
   ;; out of a battle, the zone shown is the one picked or under the cursor: its points
   (if (not (bf-active?))
       (bf-zone-select! zone)
@@ -4163,7 +4195,7 @@
                   )
               )
             )
-        (when (bf-zone-xy zone at at)
+        (when (and (bf-zone-xy zone at at) (not (and base? (= zone BF_ZONE_SPARGUS) (!= i pick))))
           (bf-draw-point-mark buf (-> at x) (-> at y) (if base? 3.0 3.6) (if base? (the-as string #f) (bf-point-letter i)) owner
                               (and active? (bf-point-capturing? (-> *bf* points i))) alpha
                               )
@@ -4203,7 +4235,15 @@
                  )
         )
       )
-    (bf-pwrap buf (bf-page-desc page (-> self pick-team) cur) x (bf-fy 0.4) 0.34 w 127)
+    ;; a war zone's game mode in a sentence, then its description (round 58)
+    (let ((y (bf-fy 0.4)))
+      (when (and (= page BF_PAGE_ZONE) (bf-zone-open? (bf-row-zone cur)))
+        (let ((zone (-> *bf-zones* (bf-row-zone cur))))
+          (set! y (+ 6.0 (bf-pwrap buf (bf-tr (-> zone mode) (-> zone mode-fr)) x y 0.34 w 127)))
+          )
+        )
+      (bf-pwrap buf (bf-page-desc page (-> self pick-team) cur) x y 0.34 w 127)
+      )
     (if (and (= page BF_PAGE_ZONE) (not (bf-zone-open? (bf-row-zone cur))))
         (bf-ptext buf (if (= (bf-row-zone cur) BF_ZONE_JAK2) (bf-tr "Needs Jak 2" "Jak 2 requis") (bf-tr "Reinstall" "À réinstaller")) (bf-fx 0.76) (bf-fy 0.42) 0.6 (font-color menu-invalid) #t (* 0.45 (-> *bf-frame* w)))
         (bf-draw-map-marks buf (if (= page BF_PAGE_ZONE) (bf-row-zone cur) (-> self pick-zone)) -1)
@@ -4211,6 +4251,14 @@
     (bf-pkeys buf (bf-tr "<PAD_X> Select    <PAD_TRIANGLE> Back" "<PAD_X> Choisir    <PAD_TRIANGLE> Retour"))
     )
   (none)
+  )
+
+(defbehavior bf-config-hidden? bf-director ((row int))
+  "#t for a row of the battle setup the picked war zone does without: Spargus has no victory choice
+   (round 60, the author's wish: the Krimzon Guard wins by destroying the artifact, the Freedom
+   League by using up the Krimzon Guard's units, `bf-no-tickets?`) and no units at once (round 61:
+   always BF_SPARGUS_AT_ONCE a side, `bf-start-battle!`)."
+  (and (or (= row 2) (= row 3)) (= (-> self pick-zone) BF_ZONE_SPARGUS))
   )
 
 (defbehavior bf-draw-config-page bf-director ((buf dma-buffer))
@@ -4232,13 +4280,18 @@
     (bf-pheader buf (bf-tr "Battle setup" "Configuration de la bataille"))
     (dotimes (i BF_CONFIG_SETTINGS)
       (let ((y (+ top (* rh (the float i)))))
+        (when (not (bf-config-hidden? i))
         (if (= i cur)
             (bf-pbox buf lx (+ y -2.0) lw (+ rh -3.0) (static-rgba 128 128 64 64))
             )
         (bf-ptext buf
                   (case i
                     ((0) (bf-tr "Time limit" "Limite de temps"))
-                    ((1) (bf-tr "Units per side" "Unités par équipe"))
+                    ((1) (if (= (-> self pick-zone) BF_ZONE_SPARGUS)
+                             (bf-tr "Krimzon Guard units" "Unités de la Grenagarde")
+                             (bf-tr "Units per side" "Unités par équipe")
+                             )
+                     )
                     ((2) (bf-tr "Units at once in the city" "Unités simultanées en ville"))
                     ((3) (bf-tr "Victory" "Condition de victoire"))
                     (else (bf-tr "Special characters" "Personnages spéciaux"))
@@ -4252,6 +4305,7 @@
                   #t (+ lw -30.0)
                   )
         (bf-draw-arrow buf (+ lx lw -6.0) (+ y vy 5.0) 1.0 (= i cur))
+        )
         )
       )
     ;; the sides
@@ -4392,7 +4446,7 @@
     (let* ((active? (bf-active?))
            (unlimited? (if active? (bf-unlimited?) (zero? (-> *bf-config* units))))
            (full (if unlimited? 1.0 (the float (max 1 (if active? (-> *bf* reserve-max) (-> *bf-config* units))))))
-           (n-ff (cond (unlimited? 1) (active? (-> *bf* reserve BF_TEAM_FF)) (else (-> *bf-config* units))))
+           (n-ff (cond (unlimited? 1) ((and active? (bf-no-tickets? BF_TEAM_FF)) (-> *bf* reserve-max)) (active? (-> *bf* reserve BF_TEAM_FF)) (else (-> *bf-config* units))))
            (n-kg (cond (unlimited? 1) (active? (-> *bf* reserve BF_TEAM_KG)) (else (-> *bf-config* units))))
            (half (* 0.5 mw))
            (by (bf-fy 0.01))
@@ -4408,9 +4462,12 @@
           (bf-pbox buf (+ cxm 1.0) (+ by 4.0) kg 6.0 (static-rgba 245 45 45 128))
           )
       (when (not unlimited?)
-        (clear *bf-text*)
-        (format *bf-text* "~D" n-ff)
-        (bf-ptext buf *bf-text* (- cxm (* 0.5 half)) (+ by 11.0) 0.32 (font-color cyan) #t half)
+        ;; no count for a side with no tickets (the Freedom League in Spargus, round 60)
+        (when (not (and active? (bf-no-tickets? BF_TEAM_FF)))
+          (clear *bf-text*)
+          (format *bf-text* "~D" n-ff)
+          (bf-ptext buf *bf-text* (- cxm (* 0.5 half)) (+ by 11.0) 0.32 (font-color cyan) #t half)
+          )
         (clear *bf-text*)
         (format *bf-text* "~D" n-kg)
         (bf-ptext buf *bf-text* (+ cxm (* 0.5 half)) (+ by 11.0) 0.32 (font-color red) #t half)
@@ -4635,10 +4692,17 @@
     (cond
       ((cpad-pressed? 0 up l-analog-up)
        (set! (-> self cursor) (if (> (-> self cursor) 0) (+ (-> self cursor) -1) (+ count -1)))
+       ;; the setup rows the war zone does without are passed over (`bf-config-hidden?`)
+       (while (and (= (-> self page) BF_PAGE_CONFIG) (bf-config-hidden? (-> self cursor)))
+         (+! (-> self cursor) -1)
+         )
        (sound-play "roll-over")
        )
       ((cpad-pressed? 0 down l-analog-down)
        (set! (-> self cursor) (if (< (-> self cursor) (+ count -1)) (+ (-> self cursor) 1) 0))
+       (while (and (= (-> self page) BF_PAGE_CONFIG) (bf-config-hidden? (-> self cursor)))
+         (+! (-> self cursor) 1)
+         )
        (sound-play "roll-over")
        )
       ((and (= (-> self page) BF_PAGE_CONFIG) (cpad-pressed? 0 left right))
@@ -5600,14 +5664,38 @@
    and kills when it leaves less than one segment of the ring;
    one the battle does not know keeps its own damage (Jak's health-single-inc when it names none).
    While the robotguard's shield is up, Jak's shield level stops every attack, shot, blast or blow
-   (set for each attack, then the stock handler runs)."
-  (let ((ignore? #f))
+   (set for each attack, then the stock handler runs). Ashelin and the Baron react to a hit and take
+   none while they do (`bf-avatar-hurt!`, round 60)."
+  (let ((ignore? #f)
+        (shock? #f)
+        )
     (when (and (bf-fighting?) (bf-avatar-alive?))
       (let* ((owner (find-offending-process-focusable arg2 arg1))
              (dmg (bf-attack-damage arg2 owner))
              )
         (cond
           ((and owner (!= owner self) (= (bf-unit-team owner) (-> *bf* team)))
+           (set! ignore? #t)
+           )
+          ;; a force field's shock (round 61, the author's wish: a wall, nothing more): Jak 3's security
+          ;; wall sends 2 points as a grenade's blast when Jak's place crosses its plane
+          ;; (ctywide-obs.gc security-wall-method-24, from a child wall). No harm: Jak put back on his
+          ;; side (`bf-field-keep-out!`, from where he stood the frame before; the special characters
+          ;; are held as they move, battlefront-baron.gc `bf-baron-step`), the shock taken (#t: the
+          ;; wall sends it again until one is)
+          ((and arg2 (= (-> arg2 type symbol) 'security-wall-child))
+           (bf-field-keep-out! (-> self control trans-old) (-> self control trans) (-> self control transv))
+           (set! ignore? #t)
+           (set! shock? #t)
+           )
+          ;; Ashelin's or the Baron's hit reaction running: no attack hurts them (round 60, the
+          ;; author's wish: a crowd's fire held them down); a hit that hurts starts one
+          ;; (battlefront-baron.gc `bf-avatar-hurt!`). Behind the Baron's shield, none
+          ((and (not (-> *bf* shield?))
+                (let ((av (handle->process (-> *bf* avatar))))
+                  (and av (bf-avatar-hurt! (the-as bf-avatar av)))
+                  )
+                )
            (set! ignore? #t)
            )
           ((<= 0.0 dmg)
@@ -5633,10 +5721,11 @@
         )
       )
     (set! (-> self fact shield-level) (if (-> *bf* shield?) 1.0 0.0))
-    (if ignore?
-        #f
-        (*bf-stock-target-attacked* arg0 arg1 arg2 arg3 arg4)
-        )
+    (cond
+      (shock? #t)
+      (ignore? #f)
+      (else (*bf-stock-target-attacked* arg0 arg1 arg2 arg3 arg4))
+      )
     )
   )
 

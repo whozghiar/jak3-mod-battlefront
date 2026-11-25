@@ -133,7 +133,7 @@
 
 ;; Army caps: units per side on the street at once, the battle setup's choice (30 to 100, 100 by
 ;; default since round 43; round 41, the author's wish: 40 until round 39, 63 in round 40). `bf-caps-set!` splits it:
-;; each side two fifths of guards (the Krimzon Guard's three riflemen for one grenadier), a fifth
+;; each side two fifths of guards (half riflemen, half grenadiers since round 58), a fifth
 ;; each of jetpack guards and robotguards, the rest spider robots (round 46: the Freedom League's
 ;; robotguards and spiders, blue; until then 72 % blue guards and the rest jetpack guards). The
 ;; traffic pools are capped to their sums (`*bf-pool-caps*`, `bf-want-count`), and each new unit
@@ -168,6 +168,10 @@
 ;; The battle's unit kinds (traffic types: guard-a, flying-turret, roboguard, spydroid) and each
 ;; side's share of the caps above, Freedom League then Krimzon Guard, in that order: what its troop
 ;; transports bring it (levels/city/battlefront/bf-transport.gc).
+;; Spargus's armies (round 59, the author's wish): at most this many units a side at once, and this
+;; many a side in all (battlefront.gc `bf-start-battle!`), whatever the setup asks
+(defconstant BF_SPARGUS_AT_ONCE 30)
+(defconstant BF_SPARGUS_UNITS 500)
 (defconstant BF_KIND_COUNT 4)
 (define *bf-kinds* (new 'static 'array int32 4 6 16 14 15))
 (define *bf-team-caps* (new 'static 'array int32 8 43 17 0 0 24 12 12 12))
@@ -190,6 +194,8 @@
    (kg-continue string)    ;; Krimzon Guard base
    (city        symbol)    ;; the level holding the battle's city code (Jak 3's ctywide, bf-havenj2 or bf-spargus)
    (bases       int32)     ;; its headquarters: the first points of its table (`*bf-base-count*`)
+   (mode        string)    ;; its game mode in a sentence, over its description (round 58, the author's wish)
+   (mode-fr     string)
    )
   )
 
@@ -448,6 +454,8 @@
       :kg-continue "ctyport-bbush-8"
       :city 'ctywide
       :bases 2
+      :mode "Conquest: take and hold the control points."
+      :mode-fr "Conquête : prenez et tenez les points de contrôle."
       )
     ;; Jak 2's Haven City (round 40, the author's wish), one level made from the player's Jak 2 and
     ;; Jak 3 discs at install (bf-havenj2: battlefront-havenj2-info.gc); without Jak 2, greyed
@@ -456,31 +464,38 @@
     ;; deploys) and at the palace's foot; a control point in each of its 13 other districts.
     (new 'static 'bf-zone
       :name "Haven City (Jak 2)"
-      :desc "Jak 2's whole Haven City: two HQs a side, a control point in each of the 13 other districts. Freedom League: the slums and the port. Krimzon Guard: the stadium and the palace."
+      :desc "Jak 2's whole Haven City: two HQs a side, a control point in each of the 13 other districts."
       :name-fr "Haven City (Jak 2)"
-      :desc-fr "Toute la Haven City de Jak 2 : deux QG par camp, un point de contrôle dans chacun des 13 autres quartiers. Ligue : bas quartiers et port. Grenagarde : stade et palais."
+      :desc-fr "Toute la Haven City de Jak 2 : deux QG par camp, un point de contrôle dans chacun des 13 autres quartiers."
       :ff-continue "bfh-ctysluma-alley"
       :kg-continue "bfh-stadium-start"
       :city 'bf-havenj2
       :bases 4
+      :mode "Conquest: take and hold the control points."
+      :mode-fr "Conquête : prenez et tenez les points de contrôle."
       )
     ;; Jak 3's Spargus (round 50, the author's wish), one level made from the player's Jak 3 disc at
     ;; install (bf-spargus: battlefront-spargus-info.gc): its two districts with Haven City's traffic
     ;; code, no Wastelander, its doors to the garage, the arena and the palace walled. Since round 54
     ;; the destruction of an objective (battlefront-artifact.gc): the Freedom League defends a
-    ;; precursor artifact by the precursor game, in the west district, the Krimzon Guard comes from
-    ;; the east one to destroy it; no control point.
+    ;; precursor artifact, since round 61 at the white eco fountain in the east district's middle
+    ;; (rounds 59 and 60 by the force field at the pass, 57 and 58 at the foot of the arena's
+    ;; stairs), the Krimzon Guard comes from everywhere else to destroy it; a force field walls the
+    ;; west district off at the pass; no control point.
     (new 'static 'bf-zone
       :name "Spargus"
-      :desc "The desert city, the destruction of an objective: the Freedom League defends a precursor artifact by the precursor game, in the west district; the Krimzon Guard comes from the east district to destroy it."
+      :desc "The desert city: the Freedom League guards the artifact at the white eco fountain."
       :name-fr "Spargus"
-      :desc-fr "La cité du désert, destruction d'objectif : la Ligue défend un artefact précurseur près du jeu précurseur, dans le quartier ouest ; la Grenagarde vient du quartier est pour le détruire."
-      ;; round 54: the Freedom League at the west camp by the precursor game (the port's "kg-camp"),
-      ;; the Krimzon Guard at the east one (its "ff-camp"), as `*bf-point-defs-spargus*`
-      :ff-continue "bfs-kg-camp"
-      :kg-continue "bfs-ff-camp"
+      :desc-fr "La cité du désert : la Ligue garde l'artefact à la fontaine d'éco blanche."
+      ;; the Freedom League at the east terrace above the artifact (the port's "ff-camp"), the
+      ;; Krimzon Guard where the pass's lane meets the district (its "stairs-camp"), as
+      ;; `*bf-point-defs-spargus*` (round 61; the other way until round 60)
+      :ff-continue "bfs-ff-camp"
+      :kg-continue "bfs-stairs-camp"
       :city 'bf-spargus
       :bases 2
+      :mode "Objective: the Krimzon Guard must destroy the precursor artifact."
+      :mode-fr "Objectif : la Grenagarde doit détruire l'artefact précurseur."
       )
     )
   )
@@ -605,25 +620,30 @@
     )
   )
 
-;; Spargus (round 54, the destruction of an objective): each side's camp at one end of the city (the
-;; level port's continue points, on the nav mesh), then the precursor artifact's point, which no side
-;; takes (battlefront-artifact.gc; it moves onto the nav poly nearest the precursor game's door as
-;; the artifact stands, `bf-artifact-update`). The Freedom League's camp is the west one by the
-;; precursor game (the port's "kg-camp", its name of rounds 50 to 53), the Krimzon Guard's the east
-;; one (the port's "ff-camp"). Rounds 50 to 53 had 4 control points: wascityb's market (1775.9, 29.7,
+;; Spargus (round 54, the destruction of an objective): each side's camp (the level port's continue
+;; points, on the nav mesh), then the precursor artifact's point, which no side takes
+;; (battlefront-artifact.gc; it moves where the artifact stands, `bf-artifact-update`). Since round
+;; 61 the artifact stands at the white eco fountain in the middle of wascitya, the Freedom League's
+;; camp on the east terrace above it, 128 m away (the port's "ff-camp", its name of rounds 50 to 53),
+;; the Krimzon Guard's where the pass's lane meets the east district, 433 m away (the port's
+;; "stairs-camp"). Rounds 57 to 60 had them the other way: the Freedom League's camp by the artifact
+;; (rounds 57 and 58 by the arena's stairs, 59 and 60 in the pass's lane); rounds 54
+;; to 56 had the Freedom League's in wascityb by the precursor game (the port's "kg-camp", gone), the
+;; artifact by its door (1477.1, 28.2, -370.8). Rounds 50 to 53 had 4 control points: wascityb's market (1775.9, 29.7,
 ;; -367.7) and western heights (1763.4, 47.9, -224.5), the pass (2078.4, 26.9, -310.4) and
 ;; wascitya's square (2262.4, 3.4, -171.2). The level port links the two districts' meshes at the
 ;; pass with a strip of polys across their 17 to 19 m gap (port.jsonc's nav "links", round 51).
 (define *bf-point-defs-spargus*
   (new 'static 'boxed-array :type bf-point-def
-    (new 'static 'bf-point-def :name "Freedom League camp" :name-fr "Camp de la Ligue" :continue "bfs-kg-camp")
-    (new 'static 'bf-point-def :name "Krimzon Guard camp" :name-fr "Camp de la Grenagarde" :continue "bfs-ff-camp")
-    (new 'static 'bf-point-def :name "Precursor artifact" :name-fr "Artefact précurseur" :continue "bfs-wascityb-start"
-      :x 1477.1 :y 28.2 :z -370.8)
+    (new 'static 'bf-point-def :name "Freedom League camp" :name-fr "Camp de la Ligue" :continue "bfs-ff-camp")
+    (new 'static 'bf-point-def :name "Krimzon Guard camp" :name-fr "Camp de la Grenagarde" :continue "bfs-stairs-camp")
+    ;; at the white eco fountain (round 61; battlefront-artifact.gc `*bf-artifact-near*`)
+    (new 'static 'bf-point-def :name "Precursor artifact" :name-fr "Artefact précurseur" :continue "bfs-ff-camp"
+      :x 2347.4 :y 5.6 :z -93.8)
     )
   )
 
-;; letters from the Krimzon Guard's side (the east) to the Freedom League's (the west): the one point
+;; letters from the Krimzon Guard's side to the Freedom League's: the one point
 (define *bf-point-order-spargus* (new 'static 'array int32 1 2))
 
 (define *bf-point-links-spargus*
@@ -1017,29 +1037,34 @@
 ;; "made_clips", mod_models.py: since round 55 Jak's own moves on her skeleton, and moves made from her
 ;; own clips): in that order from 2.
 (defconstant BF_ASHELIN_CLIP_IDLE 2)        ;; Jak's idle
-(defconstant BF_ASHELIN_CLIP_RUN 3)         ;; Jak's run
+(defconstant BF_ASHELIN_CLIP_RUN 3)         ;; her own run, her pistols in hand
 (defconstant BF_ASHELIN_CLIP_WALK 4)        ;; Jak's walk
 (defconstant BF_ASHELIN_CLIP_JUMP 5)        ;; Jak's jump, from its push off the ground
 (defconstant BF_ASHELIN_CLIP_FLIP 6)        ;; her second jump and her roll's jump: Jak's flip out of a roll
 (defconstant BF_ASHELIN_CLIP_FLIP_LEFT 7)   ;; her cartwheel to the left
 (defconstant BF_ASHELIN_CLIP_FLIP_RIGHT 8)  ;; the same, mirrored
-(defconstant BF_ASHELIN_CLIP_THROW 9)       ;; an overhand throw of her left hand
+(defconstant BF_ASHELIN_CLIP_THROW 9)       ;; her grenade: from her pocket, its pin pulled, thrown overhand
 (defconstant BF_ASHELIN_CLIP_HIT 10)
 (defconstant BF_ASHELIN_CLIP_DEATH 11)
 (defconstant BF_ASHELIN_CLIP_KNEEL 12)      ;; Jak's crouch (L1): down
 (defconstant BF_ASHELIN_CLIP_KNEEL_IDLE 13) ;; crouching
 (defconstant BF_ASHELIN_CLIP_UNKNEEL 14)    ;; up again
 (defconstant BF_ASHELIN_CLIP_STRAFE_LEFT 15) ;; Jak's walk aside with his gun
-(defconstant BF_ASHELIN_CLIP_STRAFE_RIGHT 16)
-(defconstant BF_ASHELIN_CLIP_WALK_BACK 17)  ;; Jak's walk reversed
-(defconstant BF_ASHELIN_CLIP_KICK 18)       ;; Jak's spinning kick
-(defconstant BF_ASHELIN_CLIP_RELOAD 19)     ;; her pistols lowered and raised again
+(defconstant BF_ASHELIN_CLIP_STRAFE_RIGHT 16) ;; the same played backward (round 56)
+(defconstant BF_ASHELIN_CLIP_WALK_BACK 17)  ;; Jak's walk with his gun aimed, reversed
+(defconstant BF_ASHELIN_CLIP_KICK 18)       ;; a captured spinning kick (round 56)
+(defconstant BF_ASHELIN_CLIP_RELOAD 19)     ;; her pistols lowered, a magazine into one then the other, raised again
 (defconstant BF_ASHELIN_CLIP_ROLL 20)       ;; Jak's roll with his gun in hand, and its end
 (defconstant BF_ASHELIN_CLIP_FIRE 21)       ;; her own shot and recoil, her pistols in turn: her arms alone
+(defconstant BF_ASHELIN_CLIP_PUNCH 22)      ;; Jak's punch, her fist growing as his (round 60; her pistol whip in rounds 56 to 59)
+(defconstant BF_ASHELIN_CLIP_JUMPKICK 23)   ;; her jump kick: her spinning kick in the air (round 56)
+(defconstant BF_ASHELIN_CLIP_LAND 24)       ;; Jak's landing out of a jump (round 58)
+(defconstant BF_ASHELIN_CLIP_FLIP_LAND 25)  ;; Jak's landing out of his far flip (round 58)
 ;; Her joints the firing clip takes, over her legs' clip (round 55, `top-anim`'s interp-select: a
-;; joint's bit is its node index minus 1, joint-nodes.gc ashelin-lod0-jg): her arms Lshoulder to
-;; Rhand 6 to 11, her pistol (gun) 21, her fingers 29 to 36.
-(defconstant BF_ASHELIN_UPPER #x1fe0200fc0)
+;; joint's bit is its node index minus 1, joint-nodes.gc ashelin-lod0-jg): her chest, neck and head 3
+;; to 5 (round 56: on her legs' clips her chest turned up to 90 degrees from her firing clip's, her
+;; arms aiming aside), her arms Lshoulder to Rhand 6 to 11, her pistol (gun) 21, her fingers 29 to 36.
+(defconstant BF_ASHELIN_UPPER #x1fe0200ff8)
 (def-art-elt bf-ashelin-ag bf-ashelin-lod0-jg 0)
 (def-art-elt bf-ashelin-ag bf-ashelin-lod0-mg 1)
 (def-art-elt bf-ashelin-ag bf-ashelin-idle-ja 2)
@@ -1329,10 +1354,14 @@
        )
       ((and name (string-prefix= "death-" name) (-> this process) (bf-custom-model? (-> this process)))
        ;; a red guard of the battle dissolves as the blue ones do, in the dissolve's sparks
-       ;; (`bf-fizz-start!`; the author's wish, round 28: its body stayed until the pool took it)
-       (if (= (-> this process type symbol) 'crimson-guard)
-           (bf-fizz-start! (the-as process-drawable (-> this process)))
-           )
+       ;; (`bf-fizz-start!`; the author's wish, round 28: its body stayed until the pool took it),
+       ;; and is told its death started, as the stock effect tells it (effect-control.gc): without
+       ;; that, a guard dying on the ground got up into its standing death clip (enemy-states.gc
+       ;; knocked, enemy-flag death-start; round 60, the author's report)
+       (when (= (-> this process type symbol) 'crimson-guard)
+         (bf-fizz-start! (the-as process-drawable (-> this process)))
+         (send-event (-> this process) 'death-start death-default)
+         )
        )
       (else
         (*bf-stock-do-effect* this arg0 arg1 arg2)
@@ -1345,9 +1374,12 @@
 ;; The red guards' death: the blue guards' dissolve (the death-default effect, merc-death.gc), which
 ;; a build-actor model cannot take (`do-effect`), made of its purple sparks (Lisp wiki jak3 4.35).
 (defconstant BF_FIZZ_MAX 16)
-(defconstant BF_FIZZ_SPARKS 6)             ;; sparks a frame from a dissolving red guard
-(defconstant BF_FIZZ_HIDE (seconds 1.25))  ;; its body hidden then: death-default's 75 frames
-(defconstant BF_FIZZ_TIME (seconds 1.75))  ;; and let go then
+(defconstant BF_FIZZ_SPARKS 20)            ;; sparks a frame from a dissolving red guard (6 until round 59)
+;; its body hidden then: death-default's timer, 75, counts frames of time-factor ticks (merc-death.gc,
+;; effect-control.gc: 75 / time-factor frames at 300 / time-factor a second), 0.25 s; rounds 28 to 59
+;; read it as 75 frames, 1.25 s, the red guards dissolving five times as slowly as the blue ones
+(defconstant BF_FIZZ_HIDE (seconds 0.25))
+(defconstant BF_FIZZ_TIME (seconds 0.75))  ;; and let go then
 
 (deftype bf-fizz (structure)
   "The red guards dissolving (`bf-fizz-start!`, `bf-fizz-tick`)."
@@ -1810,7 +1842,8 @@
   "Called by guard.gc crimson-guard-method-267 (every weapon change of a guard) and -270 (its
    off-screen change): the guard-type a guard of a battle gets for WANT. No unit of the battle has
    the tazer: a red guard carries its model's weapon (the rifle, or the launcher of
-   bf-red-guard-gl), a blue guard the rifle or, one in four by a hash of its pid (for good), the launcher, in
+   bf-red-guard-gl), a blue guard the rifle or, one in two by a hash of its pid (for good; one in
+   four until round 57: mostly riflemen, the author's report), the launcher, in
    place of the tazer, the rifle or the launcher the squads give it (mostly the tazer; the launcher
    alone left no rifle among them, seen in game; one in two by pid gave launchers to most of them,
    the author's report, round 46), and the rifle in place of a vehicle gunner's type (Lisp wiki jak3
@@ -1824,9 +1857,9 @@
            (= want (the-as int (guard-type rifle)))
            (= want (the-as int (guard-type grenade)))
            )
-       ;; one in four by a hash of its pid (its two low bits gave a third, scenario 130: the pids of
-       ;; a pool's guards do not run one by one)
-       (the-as int (if (zero? (shr (logand (* (-> proc pid) #x9e3779b1) #xffffffff) 30)) (guard-type grenade) (guard-type rifle)))
+       ;; one in two by a hash of its pid, its top bit (its two low bits gave a third, scenario 130:
+       ;; the pids of a pool's guards do not run one by one)
+       (the-as int (if (zero? (shr (logand (* (-> proc pid) #x9e3779b1) #xffffffff) 31)) (guard-type grenade) (guard-type rifle)))
        )
       (else (the-as int (guard-type rifle)))
       )
@@ -1839,12 +1872,20 @@
   (zero? (-> *bf* reserve-max))
   )
 
+(defun bf-no-tickets? ((team int))
+  "#t when side TEAM's units run out never: unlimited units (`bf-unlimited?`), or the Freedom League
+   in Spargus, the defense, which loses only with its artifact (round 60, the author's wish: no
+   tickets for the blue side there, the Krimzon Guard's from the setup)."
+  (or (bf-unlimited?) (and (= team BF_TEAM_FF) (= (-> *bf* zone) BF_ZONE_SPARGUS)))
+  )
+
 (defun bf-count-loss ((team int))
   "One unit of TEAM is lost: take it from the reserve, and end the battle when the reserve is empty
-   (with unlimited units, `bf-unlimited?`, only counted). No-op outside the fight phase."
+   (a side with no tickets, `bf-no-tickets?`: only counted; the Freedom League in Spargus since
+   round 60, which fought on out of units in round 59). No-op outside the fight phase."
   (when (and (bf-fighting?) (>= team 0) (< team BF_TEAM_COUNT))
     (+! (-> *bf* losses team) 1)
-    (when (and (not (bf-unlimited?)) (zero? (set! (-> *bf* reserve team) (max 0 (+ (-> *bf* reserve team) -1)))))
+    (when (and (not (bf-no-tickets? team)) (zero? (set! (-> *bf* reserve team) (max 0 (+ (-> *bf* reserve team) -1)))))
       (set! (-> *bf* winner) (bf-other-team team))
       (bf-set-phase! BF_PHASE_OVER)
       )
@@ -1867,7 +1908,7 @@
    are no longer a place to come down, its units and its player coming down only at the control
    points it holds (round 44, the author's wish)."
   (and (>= team 0) (< team BF_TEAM_COUNT)
-       (not (bf-unlimited?))
+       (not (bf-no-tickets? team))
        (>= (-> *bf* spawned team) (-> *bf* reserve-max))
        )
   )
@@ -1984,7 +2025,7 @@
 (defun bf-caps-set! ((n int))
   "Each side's army cap from N units at once (the battle setup's, BF_AT_ONCE_MIN to BF_AT_ONCE_MAX),
    the same for both sides since round 46 (the author's wish: blue robotguards and spiders for the
-   Freedom League): two fifths of guards (the Krimzon Guard's three riflemen for one grenadier), a
+   Freedom League): two fifths of guards (half riflemen, half grenadiers since round 58), a
    fifth each of jetpack guards and robotguards, the rest spider robots; into `*bf-team-caps*`,
    `*bf-look-share*` and the pools' `*bf-pool-caps*`. Until round 46 the Freedom League had 72 %
    blue guards and the rest blue jetpack guards."
@@ -1999,8 +2040,10 @@
       (set! (-> *bf-team-caps* (+ (* 4 team) 3)) spiders)
       )
     (set! (-> *bf-look-share* BF_LOOK_BLUE) (* 2 k))
-    (set! (-> *bf-look-share* BF_LOOK_RED) (- (* 2 k) (/ k 2)))
-    (set! (-> *bf-look-share* BF_LOOK_RED_GL) (/ k 2))
+    ;; as many grenadiers as riflemen (round 58: three riflemen for one until then, the author
+    ;; finding the infantry mostly riflemen)
+    (set! (-> *bf-look-share* BF_LOOK_RED) k)
+    (set! (-> *bf-look-share* BF_LOOK_RED_GL) k)
     (set! (-> *bf-look-share* BF_LOOK_JET_BLUE) k)
     (set! (-> *bf-look-share* BF_LOOK_JET_RED) k)
     (set! (-> *bf-look-share* BF_LOOK_ROBOT_BLUE) k)
@@ -2028,8 +2071,8 @@
 
 (defun bf-guard-skel-name ()
   "Skeleton for a new crimson-guard process (guard.gc init-enemy!). During a battle the guard-a
-   pool holds the blue guards (Freedom League) and the red Jak 2 Krimzon Guards, three riflemen for
-   one grenadier (`bf-caps-set!`): the new guard takes the look furthest below its share. An alternation was not
+   pool holds the blue guards (Freedom League) and the red Jak 2 Krimzon Guards, as many riflemen
+   as grenadiers (`bf-caps-set!`): the new guard takes the look furthest below its share. An alternation was not
    enough: the traffic kills and spawns guards all the time (trims, section changes), and in game
    the pool drifted to no blue guard at all."
   (if (not (bf-active?))
@@ -2364,10 +2407,13 @@
    author's 10 %, round 37), and a robotguard its grenades, one in 10 too (`*bf-grenade-bag*`,
    round 38): the stock dark ammo pickup, purple as their icons, which a jetpack player takes as
    rockets and a robotguard player as grenades (battlefront-player.gc BF_ROCKET_PICKUP).
-   A unit a spider killed (the last foe that hit it, `bf-hit-by`) also leaves Jak and Daxter's blue
-   eco, BF_BLUE_ECO_DROP of the time: the spider's sprint (round 44)."
+   A unit the player's spider killed (the last foe that hit it, `bf-hit-by`) also leaves Jak and
+   Daxter's blue eco, BF_BLUE_ECO_DROP of the time: the spider's sprint (round 44). Since round 58
+   the player's spider alone (the author's wish): an AI spider's kills left it for every class, of
+   no use to any but the spider."
   (let ((killer (bf-hit-by proc (seconds 5))))
     (when (and killer
+               (= killer *target*)
                (bf-spider? killer)
                (type? proc process-drawable)
                (< (-> *bf* drop-count) BF_DROP_MAX)

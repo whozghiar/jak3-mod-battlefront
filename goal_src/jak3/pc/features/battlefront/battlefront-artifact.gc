@@ -6,9 +6,11 @@
 ;; dgos: GAME
 
 ;; Spargus's battle (round 54, the author's wish): the destruction of an objective. A precursor
-;; artifact stands by Spargus's precursor game, in the west district: the Freedom League defends it,
-;; the Krimzon Guard comes to destroy it. No control point is taken: the Freedom League comes down in
-;; the west district, the Krimzon Guard in the east one (battlefront-city.gc `bf-city-spawn-tick`).
+;; artifact stands by the force field at the pass, on the east district's side (round 59; rounds 57 and 58 at
+;; the foot of the arena's stairs; rounds 54 to 56 by the precursor game, in the west one): the Freedom League
+;; defends it, the Krimzon Guard comes to destroy it. No control point is taken: the Freedom League
+;; comes down around it, the Krimzon Guard on the far side of the district (battlefront-city.gc
+;; `bf-city-spawn-tick`).
 ;; The artifact destroyed, the Krimzon Guard wins; the Krimzon Guard out of units, or the time up, the
 ;; Freedom League wins (battlefront.gc `bf-check-victory`).
 ;;
@@ -17,16 +19,20 @@
 ;; battlefront-spargus/port.jsonc "traffic" "art"), drawn at BF_ARTIFACT_SCALE of its size: a dark egg
 ;; of blue crystals. It is a unit of the Freedom League in the attack controller
 ;; (battlefront-city.gc `bf-city-artifact-attacker!`): the Krimzon Guard's units hate it, and those
-;; within 45 m go for it (`bf-city-artifact-pull!`). Destroyed, it bursts into its pieces (its own
+;; near it go for it (`bf-city-artifact-pull!`). Destroyed, it bursts into its pieces (its own
 ;; exploded model, thrown by a joint-exploder) in a blast.
 
 (defconstant BF_ARTIFACT_HP 800.0)        ;; on the 24 point scale of the units' hits
 (defconstant BF_ARTIFACT_SCALE 0.4)       ;; of the generator's size: its egg 4 m tall (0.2 in the first test looked Jak's size)
 (defconstant BF_ARTIFACT_LIFT (meters 5.8)) ;; its middle over its ground (its legs touch the ground)
 (defconstant BF_ARTIFACT_POINT 2)         ;; its battle point in Spargus's table (battlefront-h.gc)
-;; where it stands: by the precursor game's door (Jak 3's waspgame actor was-pre-game), on the nearest
-;; nav poly (battlefront-city.gc `bf-city-nearest-poly`)
-(define *bf-artifact-near* (new 'static 'vector :x (meters 1477.1) :y (meters 28.2) :z (meters -370.8) :w 1.0))
+(defconstant BF_ARTIFACT_END_WAIT (seconds 4)) ;; destroyed, its explosion plays this long before the result page (round 59)
+(defconstant BF_ARTIFACT_BLASTS 4)        ;; bursts of its explosion, one every 0.3 s
+;; where it stands: in place of Spargus's white eco fountain, in the middle of wascitya (round 61, the
+;; author's wish: the troops spread wider around it; Jak 3's light-eco-vent-27 of wascitya, which
+;; the level port leaves out with every actor); round 59 and 60 by the force field at the pass
+;; (1989, 37.3, -338 m), rounds 57 and 58 at the foot of the arena's stairs (2326, 9.2, -268 m)
+(define *bf-artifact-near* (new 'static 'vector :x (meters 2347.4) :y (meters 5.6) :z (meters -93.8) :w 1.0))
 
 (defskelgroup skel-bf-artifact precur-generator-c precur-generator-c-lod0-jg precur-generator-c-idle-ja
               ((precur-generator-c-lod0-mg (meters 999999)))
@@ -92,7 +98,6 @@
 (set! (-> *bf-artifact* proc) (the-as handle #f))
 
 (define-extern bf-city-artifact-attacker! (function process structure structure))
-(define-extern bf-city-nearest-poly (function vector vector symbol))
 
 (defun bf-objective? ()
   "#t for a battle of the destruction of an objective: Spargus's (round 54, the author's wish)."
@@ -165,19 +170,16 @@
 (defstate die (bf-artifact)
   :virtual #t
   :enter (behavior ()
-    "Destroyed: a foe no more (its place in the attack controller given back), the Krimzon Guard's
-     victory (`*bf*` winner, the battle over), a blast (the Krimzon Guard's explosions, the red gun
-     3's burst, the common bank's explosion, a shake), its model gone."
+    "Destroyed: a foe no more (its place in the attack controller given back), a blast (the Krimzon
+     Guard's explosions, the red gun 3's burst, the common bank's explosion, a shake), its model gone.
+     The Krimzon Guard's victory comes once its explosion has played (the code below; round 59, the
+     author's wish: the result page came the frame it fell, over its explosion)."
     (logior! (-> self focus-status) (focus-status dead))
     (when (-> self attacker)
       (bf-city-artifact-attacker! self (-> self attacker))
       (set! (-> self attacker) #f)
       )
     (set! (-> *bf-artifact* done) 1)
-    (when (bf-fighting?)
-      (set! (-> *bf* winner) BF_TEAM_KG)
-      (bf-set-phase! BF_PHASE_OVER)
-      )
     (vector-copy! (-> *launch-matrix* trans) (-> self root trans))
     (part-tracker-spawn part-tracker :to *entity-pool* :group group-kg-explosion)
     (vector-copy! (-> *launch-matrix* trans) (-> self root trans))
@@ -190,7 +192,10 @@
       )
     )
   :code (behavior ()
-    "Its pieces thrown (its exploded model, at its scale), then gone once they are."
+    "Its pieces thrown (its exploded model, at its scale), more bursts around where it stood
+     (BF_ARTIFACT_BLASTS, the Krimzon Guard's explosion), then, BF_ARTIFACT_END_WAIT after it fell,
+     the Krimzon Guard's victory (`*bf*` winner, the battle over) if the battle still runs; it goes
+     once its pieces have."
     (let ((tune (new 'stack 'joint-exploder-tuning (the-as uint 0))))
       (set-vector! (-> tune fountain-rand-transv-lo) (meters -16) (meters 10) (meters -16) 1.0)
       (set-vector! (-> tune fountain-rand-transv-hi) (meters 16) (meters 20) (meters 16) 1.0)
@@ -207,6 +212,26 @@
       )
     (suspend)
     (logior! (-> self draw status) (draw-control-status no-draw))
+    (let ((t0 (current-time))
+          (blasts 0)
+          )
+      (until (time-elapsed? t0 BF_ARTIFACT_END_WAIT)
+        (when (and (< blasts BF_ARTIFACT_BLASTS) (time-elapsed? t0 (* (+ blasts 1) (seconds 0.3))))
+          (+! blasts 1)
+          (vector-copy! (-> *launch-matrix* trans) (-> self root trans))
+          (+! (-> *launch-matrix* trans x) (* (meters 3) (rand-vu-float-range -1.0 1.0)))
+          (+! (-> *launch-matrix* trans y) (* (meters 2) (rand-vu-float-range -1.0 1.0)))
+          (+! (-> *launch-matrix* trans z) (* (meters 3) (rand-vu-float-range -1.0 1.0)))
+          (part-tracker-spawn part-tracker :to *entity-pool* :group group-kg-explosion)
+          (sound-play "explosion" :position (-> self root trans))
+          )
+        (suspend)
+        )
+      )
+    (when (bf-fighting?)
+      (set! (-> *bf* winner) BF_TEAM_KG)
+      (bf-set-phase! BF_PHASE_OVER)
+      )
     (while (-> self child)
       (suspend)
       )
@@ -269,9 +294,9 @@
 (defun bf-artifact-update ()
   "Every frame of a battle (battlefront.gc `bf-director-update`): in a battle of the destruction of an
    objective (`bf-objective?`), the artifact stands from the fight's start, once a battle
-   (`*bf-artifact*` done, cleared out of a fight), when its model is loaded with Spargus's level: on
-   the nav poly nearest `*bf-artifact-near*`, its battle point moved there (the Krimzon Guard's units
-   march to it). It goes with the battle."
+   (`*bf-artifact*` done, cleared out of a fight), when its model is loaded with Spargus's level: at
+   `*bf-artifact-near*`, its battle point moved there (the Krimzon Guard's units march to it). It
+   goes with the battle."
   (if (not (bf-active?))
       (set! (-> *bf-artifact* done) 0)
       )
@@ -279,11 +304,8 @@
              (not (handle->process (-> *bf-artifact* proc)))
              (art-group-get-by-name *level* "skel-bf-artifact" (the-as (pointer level) #f))
              )
-    (let ((at (new 'stack-no-clear 'vector))
+    (let ((at (vector-copy! (new 'stack-no-clear 'vector) *bf-artifact-near*))
           (sg (the-as skeleton-group (art-group-get-by-name *level* "skel-bf-artifact" (the-as (pointer level) #f))))
-          )
-      (if (not (bf-city-nearest-poly *bf-artifact-near* at))
-          (vector-copy! at *bf-artifact-near*)
           )
       (when (< BF_ARTIFACT_POINT (-> *bf* point-count))
         (vector-copy! (-> *bf* points BF_ARTIFACT_POINT pos) at)

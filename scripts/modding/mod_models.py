@@ -68,7 +68,9 @@ The manifest (comments allowed):
                                                // a copy of those primitives of the rip (a prop on
                                                // `joint`, held by `holder` in that clip of the rip)
                                                // in the other hand `to`, mirrored across x through
-                                               // the hold, bound to `to` alone (optional)
+                                               // the hold, bound to `to` alone (optional); with
+                                               // "rebind": true, the prop itself bound to `holder`
+                                               // alone the same way
         "attach": {"joint": "gun", "holder": "Rhand", "clip": "ashelin-standing-fire"},
                                                // every made clip keeps `joint` held by `holder` as
                                                // in that clip of the rip (optional)
@@ -891,15 +893,25 @@ def add_made_clips(out: Writer, src: Glb, node_map: dict[int, int], entry: dict,
 def add_mirror_prop(out: Writer, src: Glb, mesh_node: int, prop: dict):
     """A copy of the rip's primitives prop["prims"] (a prop on joint prop["joint"], held by
     prop["holder"] in the rip's clip prop["clip"]) in the other hand, prop["to"]: each vertex mirrored
-    across x through the hold (`grip_of`), bound to prop["to"] alone, its triangles turned back."""
+    across x through the hold (`grip_of`), bound to prop["to"] alone, its triangles turned back. With
+    prop["rebind"], the prop itself is bound to prop["holder"] alone the same way, unmirrored: it stays
+    in that hand whatever clips play on the body and the arms (a clip on the arms alone over another
+    on the legs, as the game's top-anim, moved the hand without the prop's joint)."""
     rig = Rig(src)
     grip = grip_of(rig, rip_clip(src, rig, prop["clip"]), prop["joint"], prop["holder"], prop.get("key", 0))
-    place = MIRROR @ grip
     joints = [out.json["nodes"][j].get("name") for j in out.json["skins"][0]["joints"]]
-    to = joints.index(prop["to"])
     mesh = out.json["meshes"][out.json["nodes"][mesh_node]["mesh"]]
+    if prop.get("rebind"):
+        bind_prop(out, src, mesh, prop["prims"], grip, joints.index(prop["holder"]), False)
+    bind_prop(out, src, mesh, prop["prims"], MIRROR @ grip, joints.index(prop["to"]), True)
+
+
+def bind_prop(out: Writer, src: Glb, mesh: dict, prims: list, place: np.ndarray, to: int, mirrored: bool):
+    """The rip's primitives PRIMS, each vertex moved by PLACE and bound to skin joint TO alone: appended
+    to MESH, mirrored (its triangles turned back), else written over the copy of each already there
+    (the model's primitive of the same index)."""
     names = [m.get("name") for m in out.json["materials"]]
-    for index in prop["prims"]:
+    for index in prims:
         prim = src.json["meshes"][0]["primitives"][index]
         idx = src.accessor(prim["indices"])[:, 0].astype(np.int64)
         used, inv = np.unique(idx, return_inverse=True)
@@ -918,10 +930,17 @@ def add_mirror_prop(out: Writer, src: Glb, mesh_node: int, prop: dict):
                 vals = np.tile([1.0, 0.0, 0.0, 0.0], (len(vals), 1))
             attrs[name] = out.accessor(vals.astype(COMPONENT[info["componentType"]]), info["type"],
                                        info["componentType"], 34962, name == "POSITION")
-        tris = inv.reshape(-1, 3)[:, [0, 2, 1]].reshape(-1, 1).astype(np.uint32)
         material = src.json["materials"][prim["material"]].get("name")
         if material not in names:
             sys.exit(f"mirror_props: no material {material} in the model")
+        if not mirrored:
+            own = mesh["primitives"][index]
+            if names[own["material"]] != material:
+                sys.exit(f"mirror_props rebind: the model's primitive {index} is not the rip's")
+            own["attributes"] = attrs
+            own["indices"] = out.accessor(inv.reshape(-1, 1).astype(np.uint32), "SCALAR", 5125, 34963)
+            continue
+        tris = inv.reshape(-1, 3)[:, [0, 2, 1]].reshape(-1, 1).astype(np.uint32)
         mesh["primitives"].append({"attributes": attrs, "indices": out.accessor(tris, "SCALAR", 5125, 34963),
                                    "mode": prim.get("mode", 4), "material": names.index(material)})
 
