@@ -86,8 +86,10 @@ share (`*bf-look-share*`, `bf-guard-skel-name`, `bf-turret-skel-name`, `bf-bot-s
 counts the director makes every frame; its side follows from its look (`bf-unit-team`). The setup's
 **units at once** count the whole city, both sides (60 to 200, 200 by default; round 45: a side
 until then), half a side, which sets the caps (`bf-caps-set!`), the same for both sides since round
-46: at 100 a side, 40 guards, 20 jetpacks, 20 robotguards and 20 spiders. The red guards carry three
-rifles for one grenade launcher, and so do the blue ones (one in four by its pid, `bf-guard-weapon`).
+46: at 100 a side, 40 guards, 20 jetpacks, 20 robotguards and 20 spiders. Since round 58 half the
+guards of each side carry a rifle and half a grenade launcher (the red ones by their look's share,
+the blue ones by a hash of their pid, `bf-guard-weapon`); until then three in four had a rifle, the
+author finding the infantry mostly riflemen.
 
 **The blue robots.** Jak 3's own robotguard and spider robot, their red texels turned blue
 (`bf-robot-blue` and `bf-spider-blue` in `models.jsonc`, the transport's rule; a turn of 210
@@ -174,7 +176,8 @@ and as each blue transport starts. The blue robotguard takes the stock robotguar
 (85, 85, 85, `*bf-robot-shine*`, read from `roboguard-city`'s art) instead: the blue tint made it
 about three times as bright as the red one (round 52).
 
-**The champions.** Once a side has lost 20 % of its units (100 with unlimited units), its champion
+**The champions.** Once a side has lost 10 % of its units (50 with unlimited units; 20 % and 100
+until round 58, the author asking for them sooner, round 59), its champion
 comes to fight for it, once a battle (`bf-boss-update`, `battlefront-baron.gc`), at its point nearest
 the player: Baron Praxis for the Krimzon Guard (round 49), Ashelin for the Freedom League (round 53).
 Each process knows its side (`bf-boss` and `bf-boss-body` `team`, `bf-boss-team`); the globals are
@@ -191,8 +194,17 @@ Baron, as the first champion:
 - **His thinking** (`bf-boss-think`) presses his pad: the nearest foe within 80 m, else the nearest
   Freedom League unit anywhere, else a point to take; a slash, a spin among two foes or more, a jump
   and plant every fourth blow, his eco ball at 8 to 40 m; a jump, then a way around, when stuck.
-- **His health** is 100 points on the 24 point scale, about four guards' (`BF_BOSS_HP`; 480 until
-  round 52). His health bar shows within
+- **His health** is 300 points on the 24 point scale (`BF_BOSS_BARON_HP`, `bf-boss-hp-max`, round
+  58: at 100 he fell to a few seconds of the player's fire, the author's "too vulnerable"; 480 until
+  round 52); Ashelin's stays 100 (`BF_BOSS_HP`). In scenario 145 the Freedom League's army took
+  about 110 of his points in 30 s.
+- **Hit reactions** (round 60, the author's wish). Ashelin and the Baron, the player's and the
+  champions', play their hit clip as a hit hurts them (hers, Jak 3's `ashelin-blue-hit-front0`,
+  0.45 s; his, the `r45 hit` capture, 0.83 s), their move broken off, and no attack hurts them
+  meanwhile (`bf-avatar-hurt!`, `hurt-until`: the player's through `target-attacked`, the champion's
+  through `bf-boss-body-hit`); a new reaction comes 1.5 s after the last at the soonest
+  (`BF_HURT_GAP`), the hits between hurting unplayed, so a crowd's fire cannot hold them in it. His
+  health bar shows within
   60 m of the player (`bf-draw-boss-bar`, Ashelin's blue bar above his red one). The other side's
   units within 40 m turn onto a champion (`bf-city-retarget`, `bf-city-boss-pull!`): the battle's
   hatred keeps a unit on its foe until it dies, so none picked him before.
@@ -215,40 +227,112 @@ class page's fifth row with the setup's special characters on (as the Baron on t
   (joint keys only, as the Baron's, the `jk-*` clips): the hips' travel goes on `main`, the loops are
   closed, the root's travel across dropped. Jak runs and crouches on bent legs his short body hides:
   on hers the feet floated 0.4 m over the ground, so her body is lowered until her lowest foot
-  touches it, and her run's bounce is halved. Her walk backward is his walk reversed, her standing up
-  his crouch reversed. At install `mod_models.py` makes her clips from that file and from her rip
+  touches it. Her run is her own (`ashelin-run0`, her two pistols in her hands: Jak's did not suit
+  her, round 56), 9.12 m a second at rate 1. Her walk backward is his walk with his gun aimed,
+  reversed, her standing up his crouch reversed. Round 56, the author's review of each clip: Jak
+  looks at the ground and his head turns aside, so on her jump, crouch, roll, walk backward, throw
+  and punch her head is held as in her idle, looking ahead the way she goes
+  (`level_head`; it first followed her hips, which swung it as she ran; less as her chest leans
+  over in a roll); her chest's two joints (`ltitA`, `rtitA`) stay at rest,
+  the studio pulling them up to a metre away; two chained animations fade into each other over
+  0.25 s (`fade_in`: his kick's two halves were 94 degrees apart). Jak's spinning kick stayed rigid
+  on her (her leg raised stiff, her body still): her kick is round 54's captured spinning kick
+  (`m kick`), her head left to it. Her walk aside to the right is her walk to the left played
+  backward, her arms as they are (the mirror put them otherwise). Her punch (round 60) is Jak's,
+  `attack-punch` then `attack-punch-end`. The studio's copy kept Jak's swing of his torso but not
+  where it starts (his shoulders turned back 90 degrees first), so she ended turned 90 degrees too
+  far, her fist out to her side: since round 61 `match_jak` puts her body on Jak's at each key, read
+  from the extraction's `jakb-lod0` (her hips, then her chest, turned about the up axis to the
+  headings of Jak's thighs and shoulders; each arm a two-joint arm reaching where his wrist is from
+  his shoulder, in the share of his arm's length, its elbow pointing as his). His fingers grow as on
+  him (`fist_scale`: his fingers' scale keys, up to 2.58 times; the game scales a joint alone, its
+  children keeping theirs). Her hand does not (round 61): her pistol is skinned to her hand, and in
+  round 60 it grew with it, the author seeing her arm swollen. Rounds 56 to 59 had a pistol whip (`make_butt`, removed): a
+  left hook then a right hook with her pistols' butts, from her firing pose (both pistols aimed) to
+  her firing pose, ready to shoot: her chest turning 45 degrees into each, her elbow high, her fist
+  swinging from her side across before her face, the other fist guarding by her chin, her legs held
+  in Jak's gun stance (`hold_stance`), landing 0.22 and 0.52 s in, 1.0 s in all (Jak's own blow of
+  his gun's butt, two-handed, lunging wide and ending turned aside, was not the author's). Her jump
+  kick is her spinning kick in the air: the captured kick's turn and kick (0.2 to 1.3 s), her
+  standing leg folded as in Jak's jump (`LEG_TUCK`), its kick 0.47 s in. Her reload is her own lowering and raising of her pistols with 1.1 s between them made by
+  `make_reload` (two-joint arms reaching set places): her right pistol before her chest while her
+  left hand takes a magazine at her left hip and pushes it into its grip, then the other way, the
+  magazine full 1.57 s in, 2.23 s in all. Her grenade throw is made by the script on Jak's gun stance
+  (`make_throw`, two-joint arms reaching set places): her left hand to the pocket on her hip, the
+  grenade brought before her chest where her right hand pulls the pin, her chest turned and her arm
+  back, then over her shoulder and down across her, 1.33 s, the grenade leaving at 0.93 s.
+  At install `mod_models.py` makes her clips from that file and from her rip
   (`made_from`, `made_clips`): her fingers closed on her grips as in her own firing clip
-  (`pose_from`, `mirror_limbs` for the left hand), her right pistol kept in her right hand (`attach`);
-  her own cartwheel to the left and its mirror to the right; her aside walk's mirror; an overhand
-  throw of her left hand; her holstering and drawing as her reload; her hit and her death; and her
+  (`pose_from`, `mirror_limbs` for the left hand), her right pistol kept in her right hand (`attach`,
+  and since round 56 bound to it, `mirror_props` `rebind`: her firing on her arms over her legs' clip
+  moved her hand without the gun joint, which hangs on the root, and her pistol left her hand);
+  her own cartwheel to the left and its mirror to the right; her
+  holstering and drawing as her reload; her hit and her death; and her
   firing (`fire`): her own shot and its recoil (`ashelin-standing-fire`, her pistol kicking up), her
   left arm its mirror half a loop later (`mirror_limbs` with a `shift`). The mirror takes each joint's
   skinning matrix from the other side's, mirrored across x (S K S), so it needs no knowledge of the
-  joints' axes. Their order is `battlefront-h.gc` `BF_ASHELIN_CLIP_*`. Round 54's Mixamo clips and
-  the Baron's kick stay in the studio creation, unused.
-- **Her firing on her arms alone.** A `top-anim-joint-control` (as the guard classes' weapon clips,
-  and Jak's gun clips on his arms) plays her firing clip over her legs' clip on her arms, pistol and
-  fingers (`BF_ASHELIN_UPPER`: a joint's bit is its node index minus 1). Her right pistol's shot
-  pushes it at 1.48 times its pace (two shots, 0.36 s, a loop), her left pistol's recoil coming with
-  her left pistol's shot; let go, her arms go back to her legs' clip. A move (kick, throw, reload,
-  roll, flip) takes it off.
-- **Her moves** (rounds 54 and 55, the author's buttons and Jak's) are the Baron's (his collision,
-  probes, stick, acceleration and lean): she runs at 9 m/s, Jak's run clip at 1.8 times its pace (Jak's
-  own: 10 m/s at 1.6), and every loop plays at the rate her feet cover the ground she covers
+  joints' axes. Their order is `battlefront-h.gc` `BF_ASHELIN_CLIP_*`. Round 54's other Mixamo
+  clips and the Baron's kick stay in the studio creation, unused.
+- **Her firing on her upper body.** A `top-anim-joint-control` (as the guard classes' weapon clips,
+  and Jak's gun clips on his arms) plays her firing clip over her legs' clip on her chest, neck, head,
+  arms, pistol and fingers (`BF_ASHELIN_UPPER`: a joint's bit is its node index minus 1; round 56
+  added her chest, neck and head: her firing clip's chest is turned 41 degrees to her left, Jak's
+  walk backward's 50 to her right, and her arms, on the legs' clip's chest, aimed aside; her firing
+  clip's head raised by the script, `jk-fire`). Her right pistol's shot
+  pushes it at 1.14 times its pace (two shots, 0.5 s, a loop) from 0.118 of it, where its right
+  recoil begins (`BF_ASH_FIRE_FROM`: from its start, each recoil came 0.09 s after its shot, round
+  57), her left pistol's recoil coming with her left pistol's shot; let go, her arms go back to her
+  legs' clip. Her reload plays there too (round 57): she runs, walks or jumps while she reloads, and
+  fires again once it ends. A move (kick, throw, roll, flip) takes either off, a reload not yet
+  done with it.
+- **Her moves** (rounds 54 to 56, the author's buttons and Jak's; since round 56 no clip of hers
+  plays faster than about 1.25 times its pace, the author finding them "ultra fast" in the game) are the Baron's (his collision,
+  probes, stick, acceleration and lean): she runs at 13.5 m/s (9 until round 57; 1.5 times, the
+  author's wish, round 58), her own run clip with its stride widened 1.3 times at install
+  (`make_ashelin_clips.py` STRIDE: 11.3 m a second at rate 1, so it plays 1.2 times its pace, where
+  the plain clip would have played 1.48 times), and every loop plays at the rate her feet cover the ground she covers
   (`BF_ASH_*_GROUND`, printed by the script: no sliding, the author's wish); X jumps 4.5 m, X again
   in the air 3.5 m more with her flip (0.2 s after the first at the soonest: a press was read on two
-  frames); Square held fires her two pistols in turn toward the crosshair (a shot every 0.18 s, 4
-  points each, blue: the guards' shot), facing it and walking at 3.5 m/s with her walk, her walk
-  aside or her walk backward by the way she goes; 10 rounds a magazine (`*bf*` mag
+  frames); R1 held (Square until round 56) fires her two pistols in turn toward the crosshair (a shot every 0.25 s, 4
+  points each, blue: the guards' shot), facing it and walking at 2.6 m/s with her walk, her walk
+  aside or her walk backward by the way she goes, or running at full speed with her run when the
+  stick is pushed far within 40 degrees of her aim (`BF_ASH_AIM_AHEAD`, round 56); 10 rounds a magazine (`*bf*` mag
   `BF_WEAPON_PISTOL`), 150 more carried (Jak's yellow ammo, the stock pickups refill it), an empty
-  magazine or Triangle reloading it (1.13 s); L1 held crouches (let go, she stands up); L1 with the
-  stick pushed rolls her that way as Jak rolls (11.5 m/s for 0.27 s, then slowing to a stop by 0.73
-  s), and X during the roll jumps far with her flip (3.5 m up, 15 m ahead; Jak's 3.52 and 17.3);
-  Circle kicks all around her (Jak's spinning kick, 14 points within 3.2 m, `bf-baron-strike`); R2
-  with the stick to a side flips her 9.8 m that way across the camera's heading; R1 throws a grenade
-  overhand (`bf-lob`, the robotguard's red gun 3 grenade falling in an arc, 10 a life). The gun HUD
-  shows her magazine (10 yellow shells), her grenades (10 dark shells beside them) and
-  "magazine/carried".
+  magazine or Triangle reloading it on her arms, one pistol then the other (2.23 s, the magazine
+  full 1.57 s in); L1 held crouches (let go, she stands up); L1 with the
+  stick pushed rolls her that way as Jak rolls (10 m/s for 0.32 s, then slowing to a stop by 0.9
+  s), and X during the roll jumps far with her flip (3.5 m up, 15 m ahead; Jak's 3.52 and 17.3),
+  its clip paced over her time in the air, and lands into the run her stick asks for (its 22 m/s
+  slid on before round 57);
+  Circle kicks all around her (a captured spinning kick from 0.12 s, its still start cut, played 1.6
+  times as fast since round 61: 14 points 0.34 s in, 0.83 s in all; 0.61 and 1.34 s before), and
+  in the air flies ahead at 7 m/s with her spinning jump kick (14 points 0.47 s in, ending where she
+  lands, into her run as her far flip); Square punches as Jak (16 points 0.2 s in, its clip 1.93 s;
+  round 60, the author's wish; a left then a right hook with her pistols' butts, 12 points each, in
+  rounds 56 to 59), lunging ahead as he does (round 61, measured on Jak in the game by scenario 149:
+  30 m/s at once, then slowing to 1/e every 0.07 s, about 3 m in his punch's 0.35 s; the player
+  free to move then, his punch's end being his stance's). Her blows strike with Jak's own hitboxes
+  (round 61, `bf-jak-strike`): her kicks with his spin kick's, her punch with his punch's (below,
+  "Jak's hitboxes"); R2
+  with the stick to a side cartwheels her 9.2 m that way across the camera's heading, moving only
+  while the cartwheel is in the air (0.107 to 0.853 s, as Jak 3's Ashelin moves through its loop
+  alone, `ash-states.gc`), standing still for its landing (round 57: she slid on), the clip's own
+  rise her jump; L2 (R1 until round 56) throws a grenade overhand (`bf-lob`, the robotguard's red gun
+  3 grenade falling in an arc, 10 a life: its velocity is its fall alone, `bf-lob-fall`, the guard
+  shot's own steering having kept it straight until round 57). A move's parts follow its clip, which
+  can start up to 0.3 s late while the avatar waits for a free blend channel, and the same move twice
+  plays its clip again. Since round 58 (the author's report: her moves held her still to their
+  clips' end, breaking the rhythm) the stick or a move's button ends a move once its part that counts
+  is done (`bf-ashelin-free-at`: her kick 0.2 s after its blow, her punch at 0.35 s as Jak's,
+  her throw 0.1 s after the grenade, her cartwheel at its landing, her roll 0.15 s into
+  its slowing, standing up at once): she runs, jumps, fires or starts the next move at once. L2 with
+  the stick pushed throws her grenade on her arms over her run (`lob-at`, the throw clip on the
+  upper body as her reload), her legs running on; standing, her whole body throws as before. Back on
+  the ground after 0.3 s in the air she plays Jak's landing (`jk-land`, Jak's jump-land, 1.07 s; out
+  of her far flip `jk-flip-land`, his roll-flip-land, 0.2 s, chosen as she goes up), while she
+  stands: her run takes over at the stick as Jak's does. The gun HUD shows the author's red pistol (round 57, `bf-pixel-icon-of`, the
+  yellow rifle's icon hidden under it), her magazine (10 yellow shells), her grenades (10 dark
+  shells beside them) and "magazine/carried".
 - **As the champion** (`bf-ashelin-think`) she keeps 10 to 24 m from her foe, kicks one within 3 m,
   fires bursts within 36 m (her magazine reloading itself, without end), throws a grenade at a foe
   beyond 12 m every 4 s, flips aside every 2.5 to 4.5 s, and jumps twice, then goes around, when
@@ -282,6 +366,10 @@ jetpack guards 18, spiders 12) and every attack its damage in points (rifle 8, g
 - For the player, the `target-attacked` wrapper refuses his own side's attacks and scales the
   others to Jak's health.
 
+**Blue eco** (the spider's sprint gauge, round 44) drops only from the units the player's spider
+kills (`bf-queue-drop`, since round 58, the author's wish): an AI spider's kills left it for every
+class, though only the spider takes anything from it.
+
 The player's shots and blows deal twice a unit's (`BF_PLAYER_DAMAGE`).
 
 ### 2.4 The player is Jak in disguise
@@ -314,7 +402,8 @@ moves back when it goes.
 
 **Baron Praxis is not Jak in disguise.** The Krimzon Guard's fifth class (`BF_CLASS_BARON`,
 `battlefront-baron.gc`), a special character: on the class page only when the battle setup's
-**Special characters** is Yes (`*bf-config*` special, `bf-class-count`; No by default). He moves on
+**Special characters** is Yes (`*bf-config*` special, `bf-class-count`; Yes by default since round
+60, No before). He moves on
 his own: `bf-pad-lock!` copies pad 0 into `*bf-baron-pad*` and
 clears it for Jak (START, SELECT, L3 and the right stick stay, for the menus and the camera), and
 `bf-baron-update` runs him from it every frame: his run on the left stick, his jump, gravity and
@@ -326,12 +415,22 @@ stands each frame, so the camera, the units' aim and the hits taken are still Ja
 | Left stick | Run (16 m/s, the player's guard's pace) toward the stick, against the camera; a light push walks (under 4 m/s) | `BF_BARON_RUN`, `bf-baron-stick` |
 | Left stick back at a run | He turns about on the spot (his 180 degree turn's clip), then runs off the other way | `BF_BARON_TURN_TIME` |
 | X | Jump, the height of Jak's double jump (6 m) | `BF_BARON_JUMP` |
-| Square | Overhead sword chop ahead, Jak's punch reach (3.2 m), 16 damage | `bf-baron-strike` |
-| Circle | Spinning slash all around, Jak's spin-kick reach (3.4 m), 14 damage, twice | `bf-baron-strike` |
+| Square | Overhead sword chop, Jak's spin kick's hitbox (round 61), 16 damage | `bf-jak-spin-strike` |
+| Circle | Spinning slash, Jak's spin kick's hitbox, 14 damage, twice | `bf-jak-spin-strike` |
 | R2 | Jak 1's yellow eco ball straight ahead (`bf-eco-ball`, 24 damage) at the blow of a diagonal cut, a quarter of his yellow gauge, which fills in 20 s | `bf-baron-cast` |
 | X then Square (in the air, or both at once) | He dives (14 m/s), his sword raised, and plants it on landing: 20 damage within 5 m, the red gun 3's blast on the ground | `bf-baron-plant-blow` |
-| X then Circle (in the air, or both at once) | A full spin of his sword, his fall slowed to 30 %: 14 damage within 3.4 m and 6 m under him, twice | `BF_BARON_AIRSPIN_*` |
+| X then Circle (in the air, or both at once) | A full spin of his sword, his fall slowed to 30 %: Jak's spin kick's hitbox (6 m under him too until round 60), 14 damage, twice | `BF_BARON_AIRSPIN_*` |
 | L2 held | A white barrier for Light Jak's: the robotguard's shield sphere (`bf-shield-raise!`), white; no damage taken, foes within 4 m thrown out, a slow walk | `bf-baron-shield` |
+
+**Jak's hitboxes** (round 61, the author's wish: Ashelin's punch and kicks and the Baron's sword
+"the same as Jak's"; `bf-jak-strike` in `battlefront-baron.gc`). Jak's blows are spheres set by
+`target-danger-set!` (`target-util.gc`) with `*TARGET-bank*`'s sizes: his spin kick, on the ground
+and in the air, one of 2.2 m around a point 1.6 m above his feet; his punch one of 1.3 m around a
+point 1.3 m above his feet and one of 1.3 m on his forearm (node 27, `Rforarm`; her `Relbow`, node
+11). The game strikes a foe when one of the foe's collision spheres overlaps one of them, which
+`bf-shape-touches?` tests on the foe's own spheres (a crimson guard has two body spheres of 1.5 m,
+1.5 and 2.4 m up, and two on its joint 14). A blow is tested once, when it lands. Jak's punch lasts
+0.35 s and his spin kick 0.38 s, both striking all along (measured in the game, scenario 149).
 
 He moves as Jak does (round 45): he speeds up and slows down over a few frames (`BF_BARON_ACCEL`,
 `BF_BARON_DECEL`), turns toward the stick at up to 720 degrees a second and leans into the turn by
@@ -495,12 +594,27 @@ stand on none. Two stock paths read the lane all the same and crashed the game: 
 (`bf-city-choose-branch`) and a guard's flight (flee-info method 13). Both give up on a unit on no
 lane, and `bf-city-give-lane!` puts a battle unit on no lane onto the lane nearest it within 150 m.
 
-**Two districts, one link.** Spargus's nav meshes of `wascitya` and `wascityb` stop 17 to 19 m apart
-at the pass between them, with no link: its people never cross it. The port's nav `links` adds a strip
-of polys across the gap to both meshes and a nav-mesh-link between them, laid out as Jak 3 links its
-own (`level_port/steps/nav.py`, `link_meshes`): the units walk across and change mesh on the way, as
-between Haven City's districts. Wascitya's main nav mesh (the strip hangs off its second) still
-reaches the strip's far end with a 5 m bridge, which its units hop.
+**Two districts, a force field between them** (round 57, the author's wish: the pass was too narrow
+a choke). Spargus's nav meshes of `wascitya` and `wascityb` stop 17 to 19 m apart at the pass
+between them, with no link: its people never cross it. Rounds 51 to 56 linked them (the port's nav
+`links`, `level_port/steps/nav.py` `link_meshes`, a strip of polys across the gap); since round 57
+the port links nothing, and a force field walls the pass: Jak 3's security wall, the blue one
+between the slums and the ruins, across x 1976 to 2003 m at z -316 m, 40 m tall
+(`*bf-field-ends*`, `bf-city-fields-up`, `bf-spargus-field` in `bf-spargus-obs.gc`). The port
+carries its code (`ctywide-obs.o`, no longer skipped), its art group (`security-wall-ag` in
+`traffic.art`, its textures baked with it) and its textures' shimmer (ctywide's level callback 6,
+`*security-texture-anim-array*`); its texture showed white there whatever color the wall gave it,
+so its model's emissive color makes it light blue (0.3, 0.6, 1). It is a wall, nothing more (round
+61, the author's wish: it killed). The stock wall shocks Jak (2 points as a grenade's blast,
+`attack-invinc`) once his place crosses its plane (`ctywide-obs.gc` `security-wall-method-24`), and
+the probes of the classes that move themselves (Ashelin, the Baron) go through its mesh: until round
+60 that shock was what threw them back, and on the battle's scale it killed. Now `target-attacked`
+takes the shock without harm (it answers #t, or the wall sends it again every frame) and puts Jak
+back on his side (`bf-field-keep-out!`, from where he stood the frame before), and `bf-baron-step`
+holds those classes 0.5 m off each field's plane along its stretch as they move (the director's
+`security-wall-child` children: the plane is the wall's forward axis through its middle, its
+length its scale across). The units never reach it. `wascityb`, with the anti-aircraft turret, stays loaded
+and empty.
 
 **More than 16 guards on one foe.** `ff-squad-control` method 16 lists the Freedom League guards
 aiming at one foe in two 16-entry stack arrays; in a battle more than 16 did, and the 17th wrote
@@ -508,54 +622,85 @@ past them (a crash as Spargus's fight began). It lists 16 at most (a MOD line in
 `city/common/ff-squad-control.gc`).
 
 **The destruction of an objective** (round 54, the author's wish; `battlefront-artifact.gc`,
-`bf-objective?`). A precursor artifact stands by the precursor game's door (Jak 3's `waspgame`
-actor `was-pre-game`, 1477, 28, -371 m), on the nav poly nearest it, in `wascityb`. The Freedom
-League defends it, the Krimzon Guard comes to destroy it:
+`bf-objective?`). A precursor artifact stands in place of Spargus's white eco fountain in the middle
+of `wascitya` (2347.4, 5.6, -93.8 m, round 61, the author's wish: the troops spread wider around
+it; Jak 3's `light-eco-vent-27`, an actor the port leaves out). Rounds 59 and 60 had it by the force
+field at the pass (1989, 37.3, -338 m), rounds 57 and 58 at the foot of the arena's stairs (2326,
+9.2, -268 m), rounds 54 to 56 by the precursor game's door in `wascityb`. Its point is not moved
+onto open ground as the camps' are (`bf-city-transports`: it went 20 m off there). The Freedom
+League defends it, the Krimzon Guard comes to destroy it. Each side has 30 units at once (round 61:
+always, the setup's units at once row hidden; at most 30 in rounds 59 and 60) and 500 in all,
+whatever the setup asks (`BF_SPARGUS_AT_ONCE`, `BF_SPARGUS_UNITS`, `bf-start-battle!`), and its
+camps have no troop transport (`bf-city-transports`: its units all come down from the sky, and its
+ships brought none):
 
 - **The artifact** is Jak 3's precursor generator C (`precur-generator-c-ag`, the precursor core's),
   which the port's `traffic.art` puts into `BFS` with its textures, drawn at 0.4 of its size on its
   legs (`bf-artifact`, a process-focusable: a solid sphere the shots meet, 800 points of health on
   the units' 24 point scale, the player's hits twice as hard). It is a Freedom League rifle guard in
-  the attack controller (`bf-city-artifact-attacker!`): the Krimzon Guard's units hate it. Its bar
-  shows under the reserves (`bf-draw-artifact-bar`). Destroyed, it bursts into the pieces of its
-  exploded model (a `joint-exploder`) in the Krimzon Guard's explosions.
+  the attack controller (`bf-city-artifact-attacker!`): the Krimzon Guard's units hate it. Its
+  small bar shows top left under the units alive (`bf-draw-artifact-bar`, 90 units wide; 220 at
+  the top middle until round 56). Destroyed, it bursts into the pieces of its
+  exploded model (a `joint-exploder`) in the Krimzon Guard's explosions, four more bursts around
+  it over 1.2 s (`BF_ARTIFACT_BLASTS`), and the result page comes 4 s later
+  (`BF_ARTIFACT_END_WAIT`, round 59: it came the frame it fell, over its explosion).
 - **No point is taken.** Spargus's points are the two camps and the artifact's, the Freedom
   League's from the start; `bf-update-points` counts the units at it but never captures it, and the
   victory by holding every point is off. The artifact destroyed, the Krimzon Guard wins; the time
-  up, or the Krimzon Guard out of units, the Freedom League.
-- **Each side in its district.** The Freedom League comes down from the sky west of the pass (x
-  under 1990 m, `wascityb`, the precursor game's side), the Krimzon Guard east of it (x over 2110 m,
-  `wascitya`): `bf-city-spawn-tick` sets `*bf-spawn-x*`, which `bf-city-spawn-spot` keeps to when it
-  draws a poly anywhere. The camps swapped with it: the Freedom League's is the port's `bfs-kg-camp`
-  (west), the Krimzon Guard's `bfs-ff-camp` (east), the names of rounds 50 to 53.
-- **The attackers go for it.** The Krimzon Guard's units march to its point; once over the pass,
-  each turns onto the artifact unless its foe stands within 10 m (`bf-city-artifact-pull!`). Turned
-  onto it from farther, they stood at the pass's east end: a unit with a foe chases it with its stock
-  moves, which stop at the end of its nav mesh, and only the march crosses the pass. Turned onto it
-  within 45 or 150 m only, the defenders massed around it held them 130 m off and none fired at it;
-  a Freedom League sent to meet them held them at the pass (round 54's tests).
+  up, or the Krimzon Guard out of units, the Freedom League. The Freedom League has no tickets
+  (`bf-no-tickets?`, round 60, the author's wish: the defense; the top meter keeps its bar full, no
+  count): it loses only with its artifact. The setup's units per side are the Krimzon Guard's
+  tickets, 500 at most, and its victory and units at once rows are hidden (`bf-config-hidden?`: the
+  cursor passes over them).
+- **Each side on its side of `wascitya`.** Every unit comes down from the sky east of the pass (x
+  over 2000 m, or in the pass's lane north of the field: x over 1970 m and z under -316 m, round
+  59): the Freedom League's 40 to 150 m from the artifact (`BF_SPARGUS_FF_MIN`, round 60, the
+  author's wish: not on it, the fight over the whole district; within 90 m until round 59), the
+  Krimzon Guard's everywhere else, farther than 150 m from it (round 61; 170 m before).
+  `bf-city-spawn-tick` sets `*bf-spawn-area*`, which `bf-city-spawn-spot` keeps to when it draws a
+  poly anywhere. Since round 61 the Freedom League's camp is the port's `bfs-ff-camp` on the east
+  terrace above the artifact (128 m away; its name of rounds 50 to 53) and the Krimzon Guard's
+  `bfs-stairs-camp` where the pass's lane meets the district (433 m away); rounds 57 to 60 had them
+  the other way, the artifact by the Freedom League's camp. Rounds 54 to 56 put the Freedom
+  League in `wascityb` and the Krimzon Guard in `wascitya`. A jetpack guard comes down anywhere
+  there, an upper deck too (round 59): the lane by the artifact stands above its mesh's deck height,
+  and the Freedom League, wanting a jetpack guard first, brought almost no unit (25 in 2 minutes,
+  5 to 7 awake of 30).
+- **The attackers go for it.** Every Krimzon Guard unit has the artifact as its foe, wherever it
+  stands (`bf-city-artifact-pull!`, after the other hatreds), unless the foe it sees best stands
+  within 25 m (`BF_ARTIFACT_KEEP`): it fights that one first (round 59, the author's wish: the blue
+  units fought too; round 58 left them alone, the author having found them fighting on their way).
+  In scenario 146, 9 to 27 of 23 to 30 had the artifact as their foe. Until round 57 they turned onto
+  it within 80 m of it (over the pass until round 56) unless their foe stood within 10 m.
+- **A unit's place waits.** A side's fallen unit is replaced 5 s after its death counts
+  (`BF_UNIT_RESPAWN`, `*bf-fallen*`), which is once its death clip has played (the traffic's
+  `set-process-to-killed`): scenario 146 killed 3 guards at their cap, counted fallen within 5.5 s,
+  and no guard of their side came down within 5 s. Since round 59 a side's 30 units make that wait
+  show; at 100 a side the caps were rarely reached.
 - **The defenders hunt** (round 55, the author's wish: they stood around the artifact). Each
   Freedom League unit marches at the Krimzon Guard unit nearest it, wherever it stands
-  (`bf-city-hunt`, in place of the points' goals): the march routes by the artifact's point when that
-  foe is west of the pass (x under 1968 m), by the Krimzon Guard's camp when east of it, so the
-  defenders cross the pass after it.
-- In scenario 140, 197 Freedom League units came down west and 259 Krimzon Guard units east in 3
-  minutes, none in the other's district; up to 80 attackers aimed at the artifact, which lost 284 of
-  its 800 points. With the hunt (round 55), 1 % of the Freedom League's units stood within 60 m of the
-  artifact and up to 51 were east of the pass; the fight stayed at the pass, and no Krimzon Guard
-  unit came within 500 m of the artifact in 3 minutes.
+  (`bf-city-hunt`, in place of the points' goals): the march routes by the point nearer that foe,
+  the artifact's or the Krimzon Guard's camp.
+- In scenario 146 (round 59), 125 Freedom League units came down within 90 m of the artifact and
+  121 Krimzon Guard units farther than 170 m from it in 120 s, none west of the field, each side 30
+  awake at most; 17 to 26 Freedom League units hunted over 60 m from the artifact, and the Krimzon
+  Guard never reached it (its 800 points kept). Scenario 143's numbers (round 57) are the stairs
+  layout's, scenario 140's (rounds 54 and 55) the pass layout's.
 
 Until round 53 Spargus had four control points (Market and Western Heights in `wascityb`, the Pass
 and the Square in `wascitya`), and round 52 dropped every unit anywhere on the map (scenario 138). The
 menus' map is the START menu's map of Spargus (`make_minimaps.py`, bigmap id 23). The HUD's corner
-minimap shows nothing in Spargus.
+minimap shows nothing in Spargus. Since round 58 the maps of Spargus (menus and L3) and the minimap
+mark the artifact alone, no camp (`bf-draw-map-marks`, `bf-point-icons`), a camp only while the
+class page picks it as the respawn point.
 
 ### 2.9 Menus are pages of the START menu
 
 Every battle page (title menu, war zone, setup, class, respawn, pause, result) is a page of the
 game's START menu, the progress state `'battlefront`. Its one option (`menu-bf-page-option`) hands
 the pad to the director (`bf-menu-input`), which draws the page inside the menu's ring
-(`bf-menu-draw`). The title menu's options are replaced (`set-menu-options` wrapper), and START in
+(`bf-menu-draw`). The war zone page shows each zone's game mode in a sentence over its
+description (round 58, `bf-zone` mode). The title menu's options are replaced (`set-menu-options` wrapper), and START in
 a battle opens the battle's pause page (an `activate-progress` wrapper).
 
 **START pauses the battle.** The START menu (the pause page and its Controls page of every class's
@@ -574,7 +719,8 @@ game ends the battle first (`game-info` `initialize!` wrapper, `bf-stop-now!`).
 1. **Title.** START on the title screen opens the battle's title menu: Start a battle, Options,
    Quit.
 2. **Setup.** The war zone, then the battle setup (`*bf-config*`): time limit, units per side,
-   units at once, victory condition, special characters (Yes or No), side. Next starts a new game
+   units at once and victory condition (neither in Spargus), special characters (Yes or No, Yes by
+   default), side. Next starts a new game
    at the zone's continue point.
 3. **Class and deployment.** The class page opens while the zone loads under it (phase `deploy`).
    `bf-caps-set!` sets the caps, the stock faction settings bring both armies, and Jak is respawned
@@ -584,7 +730,9 @@ game ends the battle first (`game-info` `initialize!` wrapper, `bf-stop-now!`).
    the HUD.
 5. **Death.** During a fight the code of Jak's `target-death` state is `bf-target-death`: his class
    dies its own way, the camera follows a living ally, then X respawns him at his respawn point and
-   Triangle opens the Respawn page. He comes down from the sky (`bf-sky-drop!`), his controls back
+   Triangle opens the Respawn page. The Baron's and Ashelin's pad (`bf-pad-lock!`, which takes pad
+   0's buttons from Jak for them) lets Jak have it back once he is dead: until round 58 X and
+   Triangle never reached the death screen as either. He comes down from the sky (`bf-sky-drop!`), his controls back
    once he lands.
 6. **Redeploy.** START > Redeploy opens the same page: free after 30 s out of combat
    (`BF_REDEPLOY_CALM`), one unit of his side otherwise.
@@ -729,7 +877,11 @@ The smoke tests drive the real menus with the pad in a retail boot:
 - **The START menu's still picture** shows Jak in place of the class model.
 - **Sounds:** the red guards shout no lines (Jak 2's are streamed audio, which Jak 3 cannot add yet),
   the transports are silent, and the robotguard's shield may be.
-- **The red guards' death** is a burst of sparks: their models cannot take the stock dissolve.
+- **The red guards' death** is a burst of sparks: their models cannot take the stock dissolve. Since
+  round 60 it lasts the stock dissolve's 0.25 s (1.25 s before), and a red guard killed on the
+  ground dies there (`'death-start`, battlefront-h.gc `do-effect`): before, it got up into its
+  standing death clip. Its timing against the blue guards' was read in the stock code, not measured
+  in game.
 - **Jetpack guards are flying turrets:** they explode into robot debris.
 - **A guard drawn with its legs only** was seen once; its cause is not found.
 - **Quit the battle froze the game once** while the title loaded, after a long battle in Jak 2's

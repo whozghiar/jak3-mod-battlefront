@@ -26,16 +26,19 @@ Haven City or Spargus, up to 200 units at once, and you play a soldier of either
   Jak 3 discs. Its doors stay closed: the war is in the streets.
 - **Spargus as the battlefield:** the desert city, built at install from your Jak 3, without its
   people, its doors to the garage, the arena and the palace closed. A battle of its own there: the
-  destruction of an objective. The Freedom League defends a precursor artifact standing by the
-  precursor game, in the west district, and comes down from the sky there; its units hunt the
-  Krimzon Guard's all over the city. The Krimzon Guard comes down in the east district and crosses
-  the pass to destroy it. No point is taken: the artifact
-  destroyed, the Krimzon Guard wins; the time up, or the Krimzon Guard out of units, the Freedom
-  League. The artifact's health shows under the reserves.
+  destruction of an objective. The Freedom League defends a precursor artifact standing in place of
+  the white eco fountain, in the middle of the east district, and comes down from the sky around it;
+  its units hunt the Krimzon Guard's all over the district. The Krimzon Guard comes down everywhere
+  else to destroy it, fighting the blue units that come near. A blue force field walls off the west
+  district at the pass: a wall, it harms nobody. Always 30 units a side at
+  once; the Freedom League has no tickets, the Krimzon Guard the setup's (500 at most); a fallen
+  unit's place waits 5 s. No point is taken: the artifact destroyed
+  (its explosion, then the result), the Krimzon Guard wins; the time up, or the Krimzon Guard out of
+  units, the Freedom League. The artifact's health shows in a small bar top left.
 - **Two armies:** the Freedom League (blue guards, jetpack guards, blue robotguards and spider
   robots, and Ashelin herself when the battle setup lets special characters in) against the Krimzon
   Guard (Jak 2's red guards, jetpack guards, robotguards, spider robots, and Baron Praxis himself
-  with special characters). Once a side has lost a fifth of its units, its champion comes to fight
+  with special characters). Once a side has lost a tenth of its units, its champion comes to fight
   for it, once a battle: Baron Praxis for the Krimzon Guard, Ashelin for the Freedom League, a health
   bar shown when you are near them. Up to 200 units fight
   at once across the city, half a side, drawn from reserves of 50 to 1000, or unlimited. A unit on
@@ -66,9 +69,9 @@ Haven City or Spargus, up to 200 units at once, and you play a soldier of either
 | Guard | Both (blue or red) | 24 | R1 fire, D-pad weapon (rifle 20/100, grenade launcher 5, tazer), Triangle reload, Square rifle butt, X jump, L1 crouch, L2 or R2 + left stick strafe or roll |
 | Jetpack guard | Both | 18 | X climb, Circle descend, neither to hover; R1 twin shots, L1 rocket (10), R2 boost on dark eco |
 | Robotguard | Both (blue or red) | 24 | R1 twin shots, L1 grenade (10), Square punch, Circle red shield for 5 s, R2 roll as a ball |
-| Spider robot | Both (blue or red) | 12 | X 11 m leap, Square shock headbutt on up to 3 foes, R2 blue eco sprint (the blue eco its kills drop refills it), L1 self-destruct blast once charged |
+| Spider robot | Both (blue or red) | 12 | X 11 m leap, Square shock headbutt on up to 3 foes, R2 blue eco sprint (the blue eco the player's spider kills drop refills it), L1 self-destruct blast once charged |
 | Baron Praxis (special character) | Krimzon Guard | 36 | Left stick run (pushed a little: walk; pushed back at a run: he turns about), X jump, Square overhead sword chop, Circle spinning slash, R2 yellow eco ball thrown with a diagonal cut (his yellow gauge), L2 a white barrier: foes thrown out, no damage, a slow walk. In the air: X then Square, he dives and plants his sword in the ground, a blow all around; X then Circle, a full spin of his sword |
-| Ashelin (special character) | Freedom League | 36 | Jak's moves. Left stick run, X jump and X again in the air (a flip), Square both pistols in turn with their recoil, while walking (10 rounds a magazine, 150 carried), Triangle reload, L1 crouch, L1 + left stick roll and X during the roll a long flip, Circle spinning kick, R2 + left stick left or right side flip, R1 grenade thrown overhand, flying in an arc (10) |
+| Ashelin (special character) | Freedom League | 36 | Jak's moves. Left stick run, X jump and X again in the air (a flip), R1 both pistols in turn with their recoil, while walking, or running with the stick pushed toward the aim (10 rounds a magazine, 150 carried), Square Jak's punch, lunging ahead, her fingers growing, Triangle reload (one pistol then the other, while she keeps moving), L1 crouch, L1 + left stick roll and X during the roll a long flip, Circle spinning kick, Circle in the air spinning jump kick, R2 + left stick left or right side flip, L2 grenade thrown overhand, flying in an arc, on the run too (10); the stick or a button cuts the end of a move short |
 
 | Blue guard | Blue jetpack guard |
 |---|---|
